@@ -301,7 +301,7 @@ function ChatPopover({
             if (entry.role === "user") {
               return (
                 <div key={i} className="flex justify-end">
-                  <div className="max-w-[80%] bg-blue-600/80 text-white rounded-lg px-2.5 py-1.5 text-[11px]">
+                  <div className="max-w-[80%] bg-blue-600/80 text-white rounded-lg px-3 py-2 text-[16px]">
                     <pre className="whitespace-pre-wrap break-words font-sans">{entry.text}</pre>
                   </div>
                 </div>
@@ -318,7 +318,7 @@ function ChatPopover({
             }
             return (
               <div key={i} className="flex justify-start group/msg">
-                <div className="relative max-w-[80%] bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-[11px]">
+                <div className="relative max-w-[80%] bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-3 py-2 text-[16px]">
                   <button
                     type="button"
                     onClick={() => {
@@ -338,7 +338,7 @@ function ChatPopover({
           {/* Show stuck prompt at bottom of chat so user sees what's being asked */}
           {stuck && (worker.stuckMessage || worker.currentAction) && (
             <div className="flex justify-start">
-              <div className="max-w-[90%] bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded-lg px-3 py-2 text-[11px]">
+              <div className="max-w-[90%] bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded-lg px-3 py-2 text-[16px]">
                 <pre className="whitespace-pre-wrap break-words font-sans text-[#fbbf24]">{worker.stuckMessage || worker.currentAction}</pre>
               </div>
             </div>
