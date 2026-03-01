@@ -367,27 +367,6 @@ function ChatPopover({
           )}
         </div>
 
-        {/* Scroll navigation */}
-        {showUpArrow && (
-          <div className="absolute top-3 right-4 z-10">
-            <button
-              type="button"
-              onClick={() => { if (scrollRef.current) scrollRef.current.scrollTo({ top: 0, behavior: "smooth" }); }}
-              className="w-8 h-8 flex items-center justify-center rounded-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-muted)] transition-colors shadow-lg"
-              title="Scroll to top"
-            >↑</button>
-          </div>
-        )}
-        {showDownArrow && (
-          <div className="absolute bottom-3 right-4 z-10">
-            <button
-              type="button"
-              onClick={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
-              className="w-8 h-8 flex items-center justify-center rounded-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-muted)] transition-colors shadow-lg"
-              title="Scroll to bottom"
-            >↓</button>
-          </div>
-        )}
         </div>
 
         {/* Input area */}
