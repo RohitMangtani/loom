@@ -67,7 +67,7 @@ export function ChatPanel({
       {/* Messages */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-xs leading-relaxed"
+        className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-[18px] leading-relaxed"
       >
         {messages.length === 0 ? (
           <p className="text-[var(--text-muted)]">No messages yet.</p>
