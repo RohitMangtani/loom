@@ -170,11 +170,15 @@ export class WsServer {
           this.send(ws, { type: "error", error: "Missing project path" });
           return;
         }
-        // Path traversal guard: real path (symlinks resolved) must be under home dir
+        // Resolve ~ to home directory
         const home = homedir();
+        const projectPath = msg.project.startsWith("~/")
+          ? msg.project.replace("~", home)
+          : msg.project;
+        // Path traversal guard: real path (symlinks resolved) must be under home dir
         let real: string;
         try {
-          real = realpathSync(msg.project);
+          real = realpathSync(projectPath);
         } catch {
           this.send(ws, { type: "error", error: "Invalid project path" });
           return;
@@ -183,7 +187,7 @@ export class WsServer {
           this.send(ws, { type: "error", error: "Invalid project path" });
           return;
         }
-        const workerId = this.procMgr.spawn(msg.project, msg.task || null);
+        const workerId = this.procMgr.spawn(real, msg.task || null);
         this.send(ws, {
           type: "workers",
           workers: this.telemetry.getAll(),
@@ -230,16 +234,23 @@ export class WsServer {
         // For discovered workers: type into Terminal.app via AppleScript
         const worker = this.telemetry.get(msg.workerId);
         if (worker?.tty) {
+          // Queue if worker is busy — don't inject into active conversation
+          if (worker.status === "working" || worker.status === "stuck") {
+            this.telemetry.enqueueMessage(msg.workerId, msg.content, "dashboard");
+            const queue = (this.telemetry as any).messageQueue?.get(msg.workerId) || [];
+            this.send(ws, { type: "queued", workerId: msg.workerId, position: queue.length });
+            console.log(`[queue] ${worker.tty}: queued dashboard message (worker ${worker.status})`);
+            break;
+          }
           const result = sendInputToTty(worker.tty, msg.content);
           if (result.ok) {
-            // Instant green: mark worker as working the moment input is sent.
-            // Without this, the dashboard stays red until the next discovery
-            // scan detects JSONL activity (up to 10s delay).
             worker.status = "working";
             worker.currentAction = "Thinking...";
             worker.lastAction = "Received message";
             worker.lastActionAt = Date.now();
             worker.stuckMessage = undefined;
+            this.telemetry.markDashboardInput(msg.workerId);
+            this.telemetry.markInputSent(msg.workerId, "dashboard");
             this.telemetry.notifyExternal(worker);
             console.log(`Typed into ${worker.tty}: ${msg.content.slice(0, 50)}`);
           } else {

@@ -45,11 +45,12 @@ export interface ChatEntry {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "chat" | "chat_history" | "orchestrator" | "error";
+  type: "workers" | "worker_update" | "chat" | "chat_history" | "orchestrator" | "error" | "queued";
   workers?: WorkerState[];
   worker?: WorkerState;
   workerId?: string;
   content?: string;
   messages?: ChatEntry[];
   error?: string;
+  position?: number;
 }

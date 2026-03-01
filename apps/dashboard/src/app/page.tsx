@@ -212,8 +212,8 @@ function ChatPopover({
   onSend: (msg: string) => boolean; onDismiss: () => void; onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const lastAgentRef = useRef<HTMLDivElement>(null);
-  const [showScrollNav, setShowScrollNav] = useState(false);
+  const [showUpArrow, setShowUpArrow] = useState(false);
+  const [showDownArrow, setShowDownArrow] = useState(false);
   const [kbOffset, setKbOffset] = useState(0);
   const color = dotColor(worker);
   const canSend = worker.managed || !!worker.tty;
@@ -224,13 +224,15 @@ function ChatPopover({
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [entries.length]);
 
-  // Show scroll nav buttons when user scrolls away from bottom
+  // Show scroll nav arrows based on position
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
+      const distFromTop = el.scrollTop;
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowScrollNav(distFromBottom > 100);
+      setShowUpArrow(distFromTop > 100);
+      setShowDownArrow(distFromBottom > 100);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
@@ -314,11 +316,6 @@ function ChatPopover({
           )}
           {(() => {
             const rendered: React.ReactNode[] = [];
-            // Find the index of the last agent message for ref attachment
-            let lastAgentIdx = -1;
-            for (let j = entries.length - 1; j >= 0; j--) {
-              if (entries[j].role === "agent") { lastAgentIdx = j; break; }
-            }
             let i = 0;
             while (i < entries.length) {
               const entry = entries[i];
@@ -352,9 +349,8 @@ function ChatPopover({
                   </details>
                 );
               } else {
-                const isLastAgent = i === lastAgentIdx;
                 rendered.push(
-                  <div key={i} className="group/msg" ref={isLastAgent ? lastAgentRef : undefined}>
+                  <div key={i} className="group/msg">
                     <div className="relative bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-4 py-3 text-[16px] leading-relaxed">
                       <button
                         type="button"
@@ -386,19 +382,19 @@ function ChatPopover({
           )}
         </div>
 
-        {/* Scroll navigation — jump to latest message or back to bottom */}
-        {showScrollNav && (
-          <div className="absolute bottom-3 right-4 flex flex-col gap-1.5 z-10">
+        {/* Scroll navigation */}
+        {showUpArrow && (
+          <div className="absolute top-3 right-4 z-10">
             <button
               type="button"
-              onClick={() => {
-                if (lastAgentRef.current && scrollRef.current) {
-                  scrollRef.current.scrollTo({ top: lastAgentRef.current.offsetTop, behavior: "smooth" });
-                }
-              }}
+              onClick={() => { if (scrollRef.current) scrollRef.current.scrollTo({ top: 0, behavior: "smooth" }); }}
               className="w-8 h-8 flex items-center justify-center rounded-full bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-muted)] transition-colors shadow-lg"
-              title="Jump to latest message"
+              title="Scroll to top"
             >↑</button>
+          </div>
+        )}
+        {showDownArrow && (
+          <div className="absolute bottom-3 right-4 z-10">
             <button
               type="button"
               onClick={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
