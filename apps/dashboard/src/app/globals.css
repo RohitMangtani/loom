@@ -2,13 +2,14 @@
 
 @layer base {
   :root {
-    --bg: #fafafa;
-    --bg-card: #ffffff;
-    --bg-panel: #f5f5f4;
-    --border: #e5e5e5;
-    --text: #1a1a1a;
-    --text-muted: #737373;
-    --text-light: #a3a3a3;
+    --bg: #0a0a0b;
+    --bg-card: #141416;
+    --bg-panel: #1a1a1e;
+    --border: #27272a;
+    --border-light: #2e2e33;
+    --text: #f0f0f0;
+    --text-muted: #9ca3af;
+    --text-light: #71717a;
     --dot-active: #22c55e;
     --dot-needs: #eab308;
     --dot-offline: #dc2626;
@@ -19,94 +20,66 @@
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
+    overflow: hidden;
   }
 }
 
 @layer components {
-  /* Compact sidebar card (desktop only) */
-  .agent-card {
-    border: 1.5px solid transparent;
-    border-radius: 10px;
-    padding: 8px 10px;
-    transition: all 0.15s ease;
-    cursor: pointer;
+  /* Agent card */
+  .card {
     background: var(--bg-card);
-  }
-
-  .agent-card:hover {
-    border-color: var(--border);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  }
-
-  .agent-card.needs-direction {
-    border-color: var(--dot-needs);
-    background: #fefce8;
-  }
-
-  .agent-card.selected {
-    border-color: var(--text);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-  }
-
-  /* Status tile (main grid + mobile) */
-  .status-tile {
-    display: block;
-    width: 100%;
     border: 1.5px solid var(--border);
-    border-radius: 14px;
-    padding: 14px 16px;
-    transition: all 0.15s ease;
+    border-left-width: 3px;
+    border-radius: 10px;
+    padding: 12px 14px;
     cursor: pointer;
-    background: var(--bg-card);
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
 
-  .status-tile:hover {
-    border-color: var(--text-light);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  .card:hover {
+    border-color: var(--border-light);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   }
 
-  .status-tile.needs-direction {
-    border-color: var(--dot-needs);
-    background: #fefce8;
+  .card-stuck {
+    border-color: rgba(234, 179, 8, 0.4);
+    background: rgba(234, 179, 8, 0.04);
   }
 
-  .status-tile.selected {
-    border-color: var(--text);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  .card-selected {
+    border-color: var(--text-muted);
+    box-shadow: 0 0 0 1px var(--text-light);
   }
 
-  /* Chat drawer — full-screen on mobile, side panel on desktop */
-  .chat-drawer {
-    position: fixed;
-    inset: 0;
-    background: var(--bg-card);
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-  }
-
-  @media (min-width: 768px) {
-    .chat-drawer {
-      inset: 0 0 0 auto;
-      width: 420px;
-      border-left: 1px solid var(--border);
-    }
-  }
-
-  .needs-badge {
-    background: #fefce8;
-    color: #a16207;
+  /* Quick reply buttons */
+  .quick-reply-btn {
     font-size: 11px;
-    font-weight: 500;
-    padding: 2px 8px;
-    border-radius: 6px;
-    border: 1px solid #fde68a;
-    white-space: nowrap;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 5px;
+    background: rgba(234, 179, 8, 0.1);
+    border: 1.5px solid rgba(234, 179, 8, 0.35);
+    color: #fbbf24;
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+
+  .quick-reply-btn:hover {
+    background: var(--dot-needs);
+    color: #0a0a0b;
+  }
+
+  .quick-reply-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* Chat popover */
+  .chat-popover {
+    animation: slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 }
 
-@keyframes pulse-yellow {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.2); }
-  50% { box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.1); }
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
 }

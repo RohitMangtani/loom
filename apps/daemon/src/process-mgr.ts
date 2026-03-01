@@ -54,6 +54,8 @@ export class ProcessManager {
           ...process.env,
           HIVE_WORKER_ID: id,
           HIVE_DAEMON_URL: `http://localhost:${3001}`,
+          // Token NOT passed via env (visible in ps eww).
+          // Hook script reads ~/.hive/token directly.
         },
         stdio: ["pipe", "pipe", "pipe"],
       }

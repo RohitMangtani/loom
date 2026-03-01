@@ -1,23 +1,41 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { URL } from "url";
+import { homedir } from "os";
+import { realpathSync } from "fs";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { ProcessManager } from "./process-mgr.js";
+import type { SessionStreamer } from "./session-stream.js";
+import { sendInputToTty } from "./tty-input.js";
+import { validateToken } from "./auth.js";
 import type { DaemonMessage, DaemonResponse } from "./types.js";
 
 export class WsServer {
   private wss: WebSocketServer | null = null;
   private telemetry: TelemetryReceiver;
   private procMgr: ProcessManager;
+  private streamer: SessionStreamer;
   private port: number;
+  private token: string;
+  private viewerToken: string;
   private clients = new Set<WebSocket>();
+  private readOnlyClients = new Set<WebSocket>();
+  // Track which worker each client is subscribed to
+  private clientSubs = new Map<WebSocket, string>();
 
   constructor(
     telemetry: TelemetryReceiver,
     procMgr: ProcessManager,
-    port: number
+    streamer: SessionStreamer,
+    port: number,
+    token: string,
+    viewerToken: string
   ) {
     this.telemetry = telemetry;
     this.procMgr = procMgr;
+    this.streamer = streamer;
     this.port = port;
+    this.token = token;
+    this.viewerToken = viewerToken;
 
     this.telemetry.onUpdate((workerId, worker) => {
       this.broadcast({
@@ -37,13 +55,19 @@ export class WsServer {
   }
 
   start(): void {
-    this.wss = new WebSocketServer({ port: this.port });
+    this.wss = new WebSocketServer({ port: this.port, host: "127.0.0.1" });
 
-    console.log(`  WebSocket server listening on port ${this.port}`);
+    console.log(`  WebSocket server listening on 127.0.0.1:${this.port}`);
 
-    this.wss.on("connection", (ws) => {
+    this.wss.on("connection", (ws, req) => {
+      // Auth: admin token = full access, no token / wrong token = view-only
+      const reqUrl = new URL(req.url || "/", "http://localhost");
+      const candidate = reqUrl.searchParams.get("token") || "";
+      const isAdmin = candidate ? validateToken(candidate, this.token) : false;
+
       this.clients.add(ws);
-      // Send workers list immediately on connect — no auth needed
+      if (!isAdmin) this.readOnlyClients.add(ws);
+      // Send current workers list — viewers get this too (the whole point)
       this.send(ws, { type: "workers", workers: this.telemetry.getAll() });
 
       ws.on("message", (raw) => {
@@ -58,20 +82,105 @@ export class WsServer {
       });
 
       ws.on("close", () => {
-        this.clients.delete(ws);
+        this.cleanupClient(ws);
       });
 
       ws.on("error", () => {
-        this.clients.delete(ws);
+        this.cleanupClient(ws);
       });
     });
   }
 
+  private cleanupClient(ws: WebSocket): void {
+    const subId = this.clientSubs.get(ws);
+    if (subId) {
+      this.streamer.unsubscribe(subId + "_" + this.clientId(ws));
+      this.clientSubs.delete(ws);
+    }
+    this.clients.delete(ws);
+    this.readOnlyClients.delete(ws);
+  }
+
+  private clientId(ws: WebSocket): string {
+    // Use object identity as a simple unique key
+    return String((ws as unknown as { _socket?: { remotePort?: number } })._socket?.remotePort || Math.random());
+  }
+
   private handleMessage(ws: WebSocket, msg: DaemonMessage): void {
+    // Read-only viewers can only request the worker list
+    if (this.readOnlyClients.has(ws) && msg.type !== "list") {
+      this.send(ws, { type: "error", error: "Read-only access" });
+      return;
+    }
+
+    // Reject oversized identifier fields (not content — messages must always send)
+    if ((msg.project && msg.project.length > 1024) ||
+        (msg.workerId && msg.workerId.length > 128) ||
+        (msg.task && msg.task.length > 4096)) {
+      this.send(ws, { type: "error", error: "Field too large" });
+      return;
+    }
+
     switch (msg.type) {
+      case "subscribe": {
+        if (!msg.workerId) {
+          this.send(ws, { type: "error", error: "Missing workerId" });
+          return;
+        }
+
+        // Unsubscribe from previous
+        const prevSub = this.clientSubs.get(ws);
+        if (prevSub) {
+          this.streamer.unsubscribe(prevSub + "_" + this.clientId(ws));
+        }
+
+        const workerId = msg.workerId;
+        this.clientSubs.set(ws, workerId);
+
+        // Send chat history
+        const history = this.streamer.readHistory(workerId);
+        if (history.length > 0) {
+          this.send(ws, { type: "chat_history", workerId, messages: history });
+        }
+
+        // Start streaming new messages
+        const subKey = workerId + "_" + this.clientId(ws);
+        this.streamer.subscribe(subKey, workerId, (entries) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            this.send(ws, { type: "chat_history", workerId, messages: entries });
+          }
+        });
+
+        // Also register the session file mapping in the streamer
+        // (discovery already does this, but just in case)
+        break;
+      }
+
+      case "unsubscribe": {
+        const subId = this.clientSubs.get(ws);
+        if (subId) {
+          this.streamer.unsubscribe(subId + "_" + this.clientId(ws));
+          this.clientSubs.delete(ws);
+        }
+        break;
+      }
+
       case "spawn": {
         if (!msg.project) {
           this.send(ws, { type: "error", error: "Missing project path" });
+          return;
+        }
+        // Path traversal guard: real path (symlinks resolved) must be under home dir
+        const home = homedir();
+        let real: string;
+        try {
+          real = realpathSync(msg.project);
+        } catch {
+          this.send(ws, { type: "error", error: "Invalid project path" });
+          return;
+        }
+        if (!real.startsWith(home + "/")) {
+          this.send(ws, { type: "error", error: "Invalid project path" });
           return;
         }
         const workerId = this.procMgr.spawn(msg.project, msg.task || null);
@@ -101,11 +210,48 @@ export class WsServer {
           });
           return;
         }
+
+        // For managed workers: send via process stdin
         const sent = this.procMgr.sendMessage(msg.workerId, msg.content);
-        if (!sent) {
+        if (sent) {
+          // Instant green for managed workers too
+          const managed = this.telemetry.get(msg.workerId);
+          if (managed) {
+            managed.status = "working";
+            managed.currentAction = "Thinking...";
+            managed.lastAction = "Received message";
+            managed.lastActionAt = Date.now();
+            managed.stuckMessage = undefined;
+            this.telemetry.notifyExternal(managed);
+          }
+          break;
+        }
+
+        // For discovered workers: type into Terminal.app via AppleScript
+        const worker = this.telemetry.get(msg.workerId);
+        if (worker?.tty) {
+          const result = sendInputToTty(worker.tty, msg.content);
+          if (result.ok) {
+            // Instant green: mark worker as working the moment input is sent.
+            // Without this, the dashboard stays red until the next discovery
+            // scan detects JSONL activity (up to 10s delay).
+            worker.status = "working";
+            worker.currentAction = "Thinking...";
+            worker.lastAction = "Received message";
+            worker.lastActionAt = Date.now();
+            worker.stuckMessage = undefined;
+            this.telemetry.notifyExternal(worker);
+            console.log(`Typed into ${worker.tty}: ${msg.content.slice(0, 50)}`);
+          } else {
+            this.send(ws, {
+              type: "error",
+              error: result.error || `Failed to send to ${worker.tty}`,
+            });
+          }
+        } else {
           this.send(ws, {
             type: "error",
-            error: `Worker ${msg.workerId} not found or stdin not writable`,
+            error: `Worker ${msg.workerId} not found or no TTY`,
           });
         }
         break;

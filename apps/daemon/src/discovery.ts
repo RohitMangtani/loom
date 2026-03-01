@@ -2,6 +2,7 @@ import { execFileSync } from "child_process";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { basename, join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
+import type { SessionStreamer } from "./session-stream.js";
 import type { WorkerState } from "./types.js";
 
 interface ProcessInfo {
@@ -18,16 +19,19 @@ interface ProcessInfo {
 interface SessionContext {
   projectName: string | null;
   latestAction: string | null;
-  pendingPrompt: string | null;
+  status: "working" | "idle";
+  fileAgeMs: number;
 }
 
 export class ProcessDiscovery {
   private telemetry: TelemetryReceiver;
+  private streamer: SessionStreamer;
   private discoveredPids = new Set<number>();
   private daemonPid = process.pid;
 
-  constructor(telemetry: TelemetryReceiver) {
+  constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
     this.telemetry = telemetry;
+    this.streamer = streamer;
   }
 
   scan(): void {
@@ -43,6 +47,20 @@ export class ProcessDiscovery {
         this.telemetry.registerSession(sid, id);
       }
 
+      // Register session file with streamer for chat history
+      let sessionFile: string | null = null;
+      if (proc.sessionIds.length > 0) {
+        sessionFile = this.streamer.findSessionFile(proc.sessionIds);
+      }
+      // Fallback: find via cwd-based project directory (lsof can miss task files)
+      if (!sessionFile) {
+        const jsonl = this.findBestJsonlFile(proc.sessionIds, proc.project);
+        if (jsonl) sessionFile = jsonl.path;
+      }
+      if (sessionFile) {
+        this.streamer.setSessionFile(id, sessionFile);
+      }
+
       if (this.discoveredPids.has(proc.pid)) {
         const existing = this.telemetry.get(id);
         if (existing) {
@@ -52,37 +70,53 @@ export class ProcessDiscovery {
             existing.projectName = proc.projectName;
           }
 
-          // Only update from CPU/JSONL if no recent hook event
+          // LAYER 1: JSONL mtime heartbeat (cheap stat, every scan)
+          // Fresh file = actively writing = definitely working
+          const jsonl = this.findBestJsonlFile(proc.sessionIds, proc.project);
+          if (jsonl && Date.now() - jsonl.mtimeMs < 30_000 && existing.status !== "stuck") {
+            existing.lastActionAt = Date.now();
+            if (existing.status === "idle") {
+              existing.status = "working";
+              existing.currentAction = "Working...";
+            }
+          }
+
+          // LAYER 2: Deep JSONL analysis when hooks are stale
+          // Hooks are ground truth when fresh. When stale, JSONL tells us
+          // if Claude is thinking (green) or truly idle (red).
           const hookAge = Date.now() - (this.telemetry.getLastHookTime(id) || 0);
           if (hookAge > 15_000) {
-            // Read JSONL context on every scan for live action info
-            const ctx = this.readSessionContext(proc.sessionIds);
+            // Don't touch stuck (yellow) — hooks own that state
+            if (existing.status === "stuck") {
+              this.telemetry.notifyExternal(existing);
+              continue;
+            }
+
+            // Hook says tool is mid-execution — green
+            if (this.telemetry.isToolInFlight(id)) {
+              this.telemetry.notifyExternal(existing);
+              continue;
+            }
+
+            const ctx = this.readSessionContext(proc.sessionIds, proc.project);
 
             if (ctx.projectName) {
               existing.projectName = ctx.projectName;
             }
 
-            if (proc.cpuPercent > 5) {
-              // Working — show what it's doing
+            if (ctx.status === "working") {
+              // JSONL confirms working (fresh mtime, tool in flight, or thinking)
               existing.status = "working";
-              existing.currentAction = ctx.latestAction || `CPU ${proc.cpuPercent.toFixed(0)}%`;
-              existing.lastAction = existing.currentAction;
+              existing.currentAction = ctx.latestAction || "Thinking...";
+              existing.lastAction = ctx.latestAction || existing.lastAction;
               existing.lastActionAt = Date.now();
-            } else if (ctx.pendingPrompt) {
-              // Idle CPU but JSONL shows a pending prompt — needs direction
-              existing.status = "stuck";
-              existing.currentAction = ctx.pendingPrompt;
-              existing.lastAction = ctx.pendingPrompt;
-            } else if (existing.status === "working") {
-              // Just stopped working
-              existing.status = "waiting";
-              existing.currentAction = null;
-              existing.lastAction = ctx.latestAction || "Paused";
-            } else if (existing.status === "waiting" || existing.status === "idle") {
-              // Still idle — keep showing last known action
+            } else {
+              // JSONL says conversation turn is complete — truly idle
               if (ctx.latestAction) {
                 existing.lastAction = ctx.latestAction;
               }
+              existing.status = "idle";
+              existing.currentAction = null;
             }
           }
 
@@ -91,16 +125,16 @@ export class ProcessDiscovery {
         continue;
       }
 
-      // New process — read context immediately
-      const ctx = this.readSessionContext(proc.sessionIds);
+      // New process — read JSONL for initial status
+      const ctx = this.readSessionContext(proc.sessionIds, proc.project);
 
       const worker: WorkerState = {
         id,
         pid: proc.pid,
         project: proc.project,
         projectName: ctx.projectName || proc.projectName,
-        status: ctx.pendingPrompt ? "stuck" : proc.cpuPercent > 5 ? "working" : "waiting",
-        currentAction: ctx.pendingPrompt || ctx.latestAction || (proc.cpuPercent > 5 ? `CPU ${proc.cpuPercent.toFixed(0)}%` : null),
+        status: ctx.status,
+        currentAction: ctx.status === "working" ? (ctx.latestAction || "Working...") : null,
         lastAction: ctx.latestAction || "Discovered on machine",
         lastActionAt: Date.now(),
         errorCount: 0,
@@ -208,89 +242,155 @@ export class ProcessDiscovery {
   }
 
   /**
-   * Single JSONL read that extracts project name, latest action, and pending prompts.
-   * Reads the tail of the most recently modified session file.
+   * Find the most recently modified JSONL session file.
+   * Tries session IDs first (exact match), falls back to cwd-based
+   * project directory search (finds agents even when lsof misses task files).
    */
-  private readSessionContext(sessionIds: string[]): SessionContext {
-    const result: SessionContext = { projectName: null, latestAction: null, pendingPrompt: null };
-    if (sessionIds.length === 0) return result;
-
+  private findBestJsonlFile(sessionIds: string[], cwd?: string): { path: string; mtimeMs: number } | null {
     const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
     const projectsDir = join(homeDir, ".claude", "projects");
+    let bestFile: string | null = null;
+    let bestMtime = 0;
 
     try {
-      let bestFile: string | null = null;
-      let bestMtime = 0;
-
-      for (const projectDir of readdirSync(projectsDir)) {
-        const fullDir = join(projectsDir, projectDir);
-        for (const sessionId of sessionIds) {
-          const jsonlPath = join(fullDir, `${sessionId}.jsonl`);
-          try {
-            const stat = statSync(jsonlPath);
-            if (stat.mtimeMs > bestMtime) {
-              bestMtime = stat.mtimeMs;
-              bestFile = jsonlPath;
-            }
-          } catch {
-            // File doesn't exist
+      // Primary: search by session ID across all project dirs
+      if (sessionIds.length > 0) {
+        for (const projectDir of readdirSync(projectsDir)) {
+          const fullDir = join(projectsDir, projectDir);
+          for (const sessionId of sessionIds) {
+            try {
+              const stat = statSync(join(fullDir, `${sessionId}.jsonl`));
+              if (stat.mtimeMs > bestMtime) {
+                bestMtime = stat.mtimeMs;
+                bestFile = join(fullDir, `${sessionId}.jsonl`);
+              }
+            } catch { /* doesn't exist */ }
           }
         }
       }
 
-      if (!bestFile) return result;
-
-      const tail = this.readTail(bestFile, 5_000);
-
-      // --- Extract project name ---
-      const projectCounts = new Map<string, number>();
-      for (const match of tail.matchAll(/\/factory\/projects\/([^/\\"]+)/g)) {
-        projectCounts.set(match[1], (projectCounts.get(match[1]) || 0) + 1);
+      // Fallback: search by cwd → Claude project directory
+      // Claude Code encodes /Users/foo/bar as -Users-foo-bar
+      if (!bestFile && cwd) {
+        const encoded = cwd.replace(/\//g, "-");
+        const candidateDir = join(projectsDir, encoded);
+        try {
+          for (const file of readdirSync(candidateDir)) {
+            if (!file.endsWith(".jsonl")) continue;
+            try {
+              const stat = statSync(join(candidateDir, file));
+              if (stat.mtimeMs > bestMtime) {
+                bestMtime = stat.mtimeMs;
+                bestFile = join(candidateDir, file);
+              }
+            } catch { /* skip */ }
+          }
+        } catch { /* dir doesn't exist */ }
       }
-      for (const match of tail.matchAll(/\/Users\/[^/]+\/([^/\\"]+)\/(?:src|app|lib|components)\//g)) {
-        const name = match[1];
-        if (name !== "factory" && name !== ".claude" && name !== ".local") {
-          projectCounts.set(name, (projectCounts.get(name) || 0) + 1);
+    } catch { /* projectsDir doesn't exist */ }
+
+    return bestFile ? { path: bestFile, mtimeMs: bestMtime } : null;
+  }
+
+  /**
+   * Simple, reliable status detection via JSONL file mtime.
+   *
+   * GREEN: File modified in the last 30 seconds → Claude is active
+   * RED:   Everything else → idle
+   *
+   * File mtime is ground truth. Claude writes to JSONL constantly when
+   * working. When it stops writing, it's idle. That's it.
+   */
+  private readSessionContext(sessionIds: string[], cwd?: string): SessionContext {
+    const result: SessionContext = {
+      projectName: null, latestAction: null,
+      status: "idle", fileAgeMs: Infinity,
+    };
+
+    const best = this.findBestJsonlFile(sessionIds, cwd);
+    if (!best) return result;
+
+    try {
+      result.fileAgeMs = Date.now() - best.mtimeMs;
+
+      const tail = this.readTail(best.path, 10_000);
+
+      // Extract project name from cwd field
+      const cwdMatch = tail.match(/"cwd"\s*:\s*"([^"]+)"/);
+      if (cwdMatch) {
+        const cwd = cwdMatch[1];
+        const factoryMatch = cwd.match(/\/factory\/projects\/([^/]+)/);
+        if (factoryMatch) {
+          result.projectName = factoryMatch[1];
+        } else {
+          const segments = cwd.split("/").filter(Boolean);
+          const last = segments[segments.length - 1];
+          if (last && last !== "rmgtni" && last !== "Users") {
+            result.projectName = last;
+          }
         }
       }
-      if (projectCounts.size > 0) {
-        const sorted = [...projectCounts.entries()].sort((a, b) => b[1] - a[1]);
-        result.projectName = sorted[0][0];
+
+      // Extract latest action for display
+      const lines = tail.split("\n").filter(Boolean);
+      for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
+        const action = this.parseActionFromLine(lines[i]);
+        if (action) { result.latestAction = action; break; }
       }
 
-      // --- Extract latest action from the last few lines ---
-      const lines = tail.split("\n").filter(Boolean);
-      // Walk backwards through lines to find the most recent tool use
-      for (let i = lines.length - 1; i >= 0 && i >= lines.length - 20; i--) {
+      // Status: mtime < 30s = working, else check for in-flight tool
+      if (result.fileAgeMs < 30_000) {
+        result.status = "working";
+        return result;
+      }
+
+      // Mtime is stale, but check JSONL tail for two "still working" patterns:
+      //
+      // 1. TOOL IN FLIGHT: last assistant message has tool_use with no
+      //    tool_result after it → long-running command (Bash, build, etc.)
+      //
+      // 2. THINKING: last meaningful entry is a "user" message (or
+      //    tool_result) with no subsequent "assistant" message → Claude
+      //    received input and is processing tokens on the API server.
+      //    No hooks fire and nothing gets written to JSONL during this gap.
+
+      let lastUser = false;    // saw "user" or tool_result more recently than "assistant"
+      let lastAssistant = false;
+
+      for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
         const line = lines[i];
 
-        // Check for pending prompts first (takes priority)
-        if (!result.pendingPrompt) {
-          if (line.includes("AskUserQuestion")) {
-            result.pendingPrompt = "Waiting for your answer";
-          } else if (line.includes("permission_prompt") || line.includes('"type":"permission"')) {
-            result.pendingPrompt = "Waiting for permission";
-          } else if (line.includes("EnterPlanMode") || line.includes("ExitPlanMode")) {
-            result.pendingPrompt = "Waiting for plan approval";
-          }
+        // Pattern 1: tool in flight (tool_use without tool_result after it)
+        if (line.includes('"tool_result"')) {
+          // Tool finished — not in-flight. But Claude might be thinking
+          // about the result (no assistant response yet), so mark and keep scanning.
+          if (!lastAssistant) lastUser = true;
+          break;
+        }
+        if (line.includes('"tool_use"') && line.includes('"assistant"')) {
+          result.status = "working";
+          return result;
         }
 
-        // Extract tool actions
-        if (!result.latestAction) {
-          const action = this.parseActionFromLine(line);
-          if (action) {
-            result.latestAction = action;
+        // Pattern 2: thinking — track last message type
+        if (!lastUser && !lastAssistant) {
+          if (line.includes('"type":"user"') || line.includes('"type": "user"')) {
+            lastUser = true;
+          } else if (line.includes('"type":"assistant"') || line.includes('"type": "assistant"')) {
+            lastAssistant = true;
           }
         }
-
-        if (result.latestAction && result.pendingPrompt) break;
       }
 
-      // Only report pending prompt if file was modified recently
-      if (result.pendingPrompt && Date.now() - bestMtime > 60_000) {
-        result.pendingPrompt = null;
+      // If the last meaningful entry was user input (or tool_result) and
+      // Claude hasn't responded yet, it's thinking — show green.
+      if (lastUser && !lastAssistant) {
+        result.status = "working";
+        result.latestAction = "Thinking...";
+        return result;
       }
 
+      result.status = "idle";
       return result;
     } catch {
       return result;
@@ -301,10 +401,11 @@ export class ProcessDiscovery {
   private parseActionFromLine(line: string): string | null {
     try {
       // Quick checks to avoid parsing irrelevant lines
-      if (!line.includes("tool")) return null;
+      if (!line.includes("tool_use")) return null;
 
-      // Look for tool_name and file_path patterns without full JSON parse (faster)
-      const toolMatch = line.match(/"tool_name"\s*:\s*"([^"]+)"/);
+      // JSONL tool_use format: {"type":"tool_use","name":"Bash","input":{...}}
+      // Match "name" that appears after "tool_use" context
+      const toolMatch = line.match(/"tool_use"[^}]*?"name"\s*:\s*"([^"]+)"/);
       if (!toolMatch) return null;
 
       const toolName = toolMatch[1];
@@ -332,6 +433,8 @@ export class ProcessDiscovery {
           return "Searching web";
         case "Task":
           return "Running subagent";
+        case "AskUserQuestion":
+          return "Asking you a question";
         default:
           return toolName.replace(/^mcp__\w+__/, "");
       }

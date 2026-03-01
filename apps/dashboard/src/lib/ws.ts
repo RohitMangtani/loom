@@ -1,19 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DaemonMessage, DaemonResponse, WorkerState } from "@/lib/types";
+import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState } from "@/lib/types";
 
-const MAX_CHAT_MESSAGES = 500;
+const MAX_CHAT_ENTRIES = 200;
 
 export function useHive(daemonUrl: string) {
   const [connected, setConnected] = useState(false);
   const [workers, setWorkers] = useState<Map<string, WorkerState>>(new Map());
-  const [chatMessages, setChatMessages] = useState<Map<string, string[]>>(
-    new Map()
-  );
+  const [chatEntries, setChatEntries] = useState<Map<string, ChatEntry[]>>(new Map());
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const subscribedRef = useRef<string | null>(null);
 
   const send = useCallback(
     (msg: DaemonMessage) => {
@@ -24,15 +23,40 @@ export function useHive(daemonUrl: string) {
     []
   );
 
+  /** Subscribe to a worker's chat stream */
+  const subscribeTo = useCallback(
+    (workerId: string | null) => {
+      // Unsubscribe from previous
+      if (subscribedRef.current) {
+        send({ type: "unsubscribe", workerId: subscribedRef.current });
+      }
+      subscribedRef.current = workerId;
+      if (workerId) {
+        send({ type: "subscribe", workerId });
+      }
+    },
+    [send]
+  );
+
   useEffect(() => {
     if (!daemonUrl) return;
 
     function connect() {
-      const ws = new WebSocket(daemonUrl);
+      // Append auth token as query param for server-side validation
+      const token = localStorage.getItem("hive_token") || "";
+      const sep = daemonUrl.includes("?") ? "&" : "?";
+      const authedUrl = token ? `${daemonUrl}${sep}token=${encodeURIComponent(token)}` : daemonUrl;
+
+      const ws = new WebSocket(authedUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setConnected(true);
+        setAuthFailed(false);
+        // Re-subscribe if we had a subscription before reconnect
+        if (subscribedRef.current) {
+          ws.send(JSON.stringify({ type: "subscribe", workerId: subscribedRef.current }));
+        }
       };
 
       ws.onmessage = (event) => {
@@ -67,16 +91,36 @@ export function useHive(daemonUrl: string) {
             break;
           }
 
-          case "chat": {
-            if (data.workerId && data.content) {
+          case "chat_history": {
+            if (data.workerId && data.messages) {
               const wid = data.workerId;
-              const content = data.content;
-              setChatMessages((prev) => {
+              const newEntries = data.messages;
+              setChatEntries((prev) => {
                 const next = new Map(prev);
                 const existing = next.get(wid) ?? [];
-                const updated = [...existing, content];
-                if (updated.length > MAX_CHAT_MESSAGES) {
-                  updated.splice(0, updated.length - MAX_CHAT_MESSAGES);
+                const updated = [...existing, ...newEntries];
+                // Keep within limit
+                if (updated.length > MAX_CHAT_ENTRIES) {
+                  updated.splice(0, updated.length - MAX_CHAT_ENTRIES);
+                }
+                next.set(wid, updated);
+                return next;
+              });
+            }
+            break;
+          }
+
+          case "chat": {
+            // Legacy: raw stdout from managed workers
+            if (data.workerId && data.content) {
+              const wid = data.workerId;
+              const entry: ChatEntry = { role: "agent", text: data.content };
+              setChatEntries((prev) => {
+                const next = new Map(prev);
+                const existing = next.get(wid) ?? [];
+                const updated = [...existing, entry];
+                if (updated.length > MAX_CHAT_ENTRIES) {
+                  updated.splice(0, updated.length - MAX_CHAT_ENTRIES);
                 }
                 next.set(wid, updated);
                 return next;
@@ -118,5 +162,5 @@ export function useHive(daemonUrl: string) {
     };
   }, [daemonUrl]);
 
-  return { connected, workers, chatMessages, send };
+  return { connected, workers, chatEntries, send, subscribeTo };
 }
