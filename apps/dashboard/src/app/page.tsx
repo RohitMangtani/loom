@@ -288,7 +288,7 @@ function ChatPopover({
         {/* Messages — scrolling dismisses iOS keyboard (like iMessage) */}
         <div
           ref={scrollRef}
-          className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0 overscroll-contain"
+          className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0 overscroll-contain"
           onTouchMove={() => {
             const el = document.activeElement as HTMLElement | null;
             if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT")) el.blur();
@@ -297,48 +297,68 @@ function ChatPopover({
           {entries.length === 0 && (
             <p className="text-center text-[var(--text-light)] text-xs mt-6">No messages yet</p>
           )}
-          {entries.map((entry, i) => {
-            if (entry.role === "user") {
-              return (
-                <div key={i} className="flex justify-end">
-                  <div className="max-w-[80%] bg-blue-600/80 text-white rounded-lg px-3 py-2 text-[16px]">
-                    <pre className="whitespace-pre-wrap break-words font-sans">{entry.text}</pre>
+          {(() => {
+            const rendered: React.ReactNode[] = [];
+            let i = 0;
+            while (i < entries.length) {
+              const entry = entries[i];
+              if (entry.role === "user") {
+                rendered.push(
+                  <div key={i} className="flex justify-end">
+                    <div className="max-w-[85%] bg-blue-600/80 text-white rounded-lg px-4 py-2.5 text-[16px] leading-relaxed">
+                      <pre className="whitespace-pre-wrap break-words font-sans">{entry.text}</pre>
+                    </div>
                   </div>
-                </div>
-              );
-            }
-            if (entry.role === "tool") {
-              return (
-                <div key={i} className="flex justify-start">
-                  <div className="max-w-[80%] bg-[var(--bg-panel)] rounded px-2.5 py-1 text-[10px] text-[var(--text-light)] font-mono truncate">
-                    {entry.text}
+                );
+                i++;
+              } else if (entry.role === "tool") {
+                // Collect consecutive tool entries into one collapsed group
+                const toolStart = i;
+                while (i < entries.length && entries[i].role === "tool") i++;
+                const toolCount = i - toolStart;
+                rendered.push(
+                  <details key={`tools-${toolStart}`} className="group/tools">
+                    <summary className="cursor-pointer text-[11px] text-[var(--text-light)] font-mono px-1 py-0.5 hover:text-[var(--text-muted)] select-none list-none flex items-center gap-1">
+                      <span className="text-[10px] opacity-60 group-open/tools:rotate-90 transition-transform">▶</span>
+                      {toolCount} tool {toolCount === 1 ? "call" : "calls"}
+                    </summary>
+                    <div className="space-y-0.5 mt-1 ml-3 border-l border-[var(--border)] pl-2">
+                      {entries.slice(toolStart, i).map((t, ti) => (
+                        <div key={toolStart + ti} className="text-[10px] text-[var(--text-light)] font-mono truncate">
+                          {t.text}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              } else {
+                rendered.push(
+                  <div key={i} className="group/msg">
+                    <div className="relative bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-4 py-3 text-[16px] leading-relaxed">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(entry.text);
+                          const btn = document.getElementById(`copy-${i}`);
+                          if (btn) { btn.textContent = "✓"; setTimeout(() => { btn.textContent = "⎘"; }, 1200); }
+                        }}
+                        id={`copy-${i}`}
+                        className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-[11px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded sm:opacity-0 sm:group-hover/msg:opacity-100 transition-opacity"
+                        title="Copy"
+                      >⎘</button>
+                      <pre className="whitespace-pre-wrap break-words font-sans text-[var(--text)] pr-8">{entry.text}</pre>
+                    </div>
                   </div>
-                </div>
-              );
+                );
+                i++;
+              }
             }
-            return (
-              <div key={i} className="flex justify-start group/msg">
-                <div className="relative max-w-[80%] bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-3 py-2 text-[16px]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(entry.text);
-                      const btn = document.getElementById(`copy-${i}`);
-                      if (btn) { btn.textContent = "✓"; setTimeout(() => { btn.textContent = "⎘"; }, 1200); }
-                    }}
-                    id={`copy-${i}`}
-                    className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-[10px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded sm:opacity-0 sm:group-hover/msg:opacity-100 transition-opacity"
-                    title="Copy"
-                  >⎘</button>
-                  <pre className="whitespace-pre-wrap break-words font-sans text-[var(--text)] pr-6">{entry.text}</pre>
-                </div>
-              </div>
-            );
-          })}
+            return rendered;
+          })()}
           {/* Show stuck prompt at bottom of chat so user sees what's being asked */}
           {stuck && (worker.stuckMessage || worker.currentAction) && (
             <div className="flex justify-start">
-              <div className="max-w-[90%] bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded-lg px-3 py-2 text-[16px]">
+              <div className="bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded-lg px-4 py-3 text-[16px] leading-relaxed">
                 <pre className="whitespace-pre-wrap break-words font-sans text-[#fbbf24]">{worker.stuckMessage || worker.currentAction}</pre>
               </div>
             </div>
