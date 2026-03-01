@@ -1,6 +1,6 @@
 import { execFileSync } from "child_process";
 import { readFileSync, readdirSync, statSync } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { WorkerState } from "./types.js";
 
@@ -12,6 +12,13 @@ interface ProcessInfo {
   project: string;
   projectName: string;
   sessionIds: string[];
+}
+
+/** Parsed context from a session JSONL tail */
+interface SessionContext {
+  projectName: string | null;
+  latestAction: string | null;
+  pendingPrompt: string | null;
 }
 
 export class ProcessDiscovery {
@@ -37,7 +44,6 @@ export class ProcessDiscovery {
       }
 
       if (this.discoveredPids.has(proc.pid)) {
-        // Existing process — update project context + CPU status
         const existing = this.telemetry.get(id);
         if (existing) {
           // Re-identify project on every scan
@@ -46,29 +52,36 @@ export class ProcessDiscovery {
             existing.projectName = proc.projectName;
           }
 
-          // Only update status from CPU if no recent hook event (hooks are more accurate)
+          // Only update from CPU/JSONL if no recent hook event
           const hookAge = Date.now() - (this.telemetry.getLastHookTime(id) || 0);
           if (hookAge > 15_000) {
+            // Read JSONL context on every scan for live action info
+            const ctx = this.readSessionContext(proc.sessionIds);
+
+            if (ctx.projectName) {
+              existing.projectName = ctx.projectName;
+            }
+
             if (proc.cpuPercent > 5) {
-              // Actually working — update timestamp and status
+              // Working — show what it's doing
               existing.status = "working";
-              existing.currentAction = `CPU ${proc.cpuPercent.toFixed(0)}%`;
+              existing.currentAction = ctx.latestAction || `CPU ${proc.cpuPercent.toFixed(0)}%`;
+              existing.lastAction = existing.currentAction;
               existing.lastActionAt = Date.now();
+            } else if (ctx.pendingPrompt) {
+              // Idle CPU but JSONL shows a pending prompt — needs direction
+              existing.status = "stuck";
+              existing.currentAction = ctx.pendingPrompt;
+              existing.lastAction = ctx.pendingPrompt;
             } else if (existing.status === "working") {
-              // Just stopped working — transition to waiting
+              // Just stopped working
               existing.status = "waiting";
               existing.currentAction = null;
-              existing.lastAction = "Paused";
-            }
-            // If already waiting/idle, don't touch lastActionAt — let idle timeout handle it
-
-            // Fallback: check JSONL for permission prompts (works without hooks)
-            if (proc.cpuPercent < 5 && existing.status !== "stuck" && proc.sessionIds.length > 0) {
-              const prompt = this.checkForPendingPrompt(proc.sessionIds);
-              if (prompt) {
-                existing.status = "stuck";
-                existing.currentAction = prompt;
-                existing.lastAction = prompt;
+              existing.lastAction = ctx.latestAction || "Paused";
+            } else if (existing.status === "waiting" || existing.status === "idle") {
+              // Still idle — keep showing last known action
+              if (ctx.latestAction) {
+                existing.lastAction = ctx.latestAction;
               }
             }
           }
@@ -78,15 +91,17 @@ export class ProcessDiscovery {
         continue;
       }
 
-      // New process
+      // New process — read context immediately
+      const ctx = this.readSessionContext(proc.sessionIds);
+
       const worker: WorkerState = {
         id,
         pid: proc.pid,
         project: proc.project,
-        projectName: proc.projectName,
-        status: proc.cpuPercent > 5 ? "working" : "waiting",
-        currentAction: proc.cpuPercent > 5 ? `CPU ${proc.cpuPercent.toFixed(0)}%` : null,
-        lastAction: "Discovered on machine",
+        projectName: ctx.projectName || proc.projectName,
+        status: ctx.pendingPrompt ? "stuck" : proc.cpuPercent > 5 ? "working" : "waiting",
+        currentAction: ctx.pendingPrompt || ctx.latestAction || (proc.cpuPercent > 5 ? `CPU ${proc.cpuPercent.toFixed(0)}%` : null),
+        lastAction: ctx.latestAction || "Discovered on machine",
         lastActionAt: Date.now(),
         errorCount: 0,
         startedAt: proc.startedAt,
@@ -180,7 +195,7 @@ export class ProcessDiscovery {
 
       if (!cwd) return null;
 
-      const projectName = this.inferProject(sessionIds) || this.projectNameFromCwd(cwd);
+      const projectName = this.projectNameFromCwd(cwd);
       const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
       const project = (cwd === homeDir || cwd === "/")
         ? `${homeDir}/factory/projects/${projectName}`
@@ -192,7 +207,14 @@ export class ProcessDiscovery {
     }
   }
 
-  private inferProject(sessionIds: string[]): string | null {
+  /**
+   * Single JSONL read that extracts project name, latest action, and pending prompts.
+   * Reads the tail of the most recently modified session file.
+   */
+  private readSessionContext(sessionIds: string[]): SessionContext {
+    const result: SessionContext = { projectName: null, latestAction: null, pendingPrompt: null };
+    if (sessionIds.length === 0) return result;
+
     const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
     const projectsDir = join(homeDir, ".claude", "projects");
 
@@ -216,74 +238,103 @@ export class ProcessDiscovery {
         }
       }
 
-      if (!bestFile) return null;
+      if (!bestFile) return result;
 
-      const content = this.readTail(bestFile, 5_000);
-      const counts = new Map<string, number>();
+      const tail = this.readTail(bestFile, 5_000);
 
-      for (const match of content.matchAll(/\/factory\/projects\/([^/\\"]+)/g)) {
-        const name = match[1];
-        counts.set(name, (counts.get(name) || 0) + 1);
+      // --- Extract project name ---
+      const projectCounts = new Map<string, number>();
+      for (const match of tail.matchAll(/\/factory\/projects\/([^/\\"]+)/g)) {
+        projectCounts.set(match[1], (projectCounts.get(match[1]) || 0) + 1);
       }
-
-      for (const match of content.matchAll(/\/Users\/[^/]+\/([^/\\"]+)\/(?:src|app|lib|components)\//g)) {
+      for (const match of tail.matchAll(/\/Users\/[^/]+\/([^/\\"]+)\/(?:src|app|lib|components)\//g)) {
         const name = match[1];
         if (name !== "factory" && name !== ".claude" && name !== ".local") {
-          counts.set(name, (counts.get(name) || 0) + 1);
+          projectCounts.set(name, (projectCounts.get(name) || 0) + 1);
         }
       }
+      if (projectCounts.size > 0) {
+        const sorted = [...projectCounts.entries()].sort((a, b) => b[1] - a[1]);
+        result.projectName = sorted[0][0];
+      }
 
-      if (counts.size === 0) return null;
+      // --- Extract latest action from the last few lines ---
+      const lines = tail.split("\n").filter(Boolean);
+      // Walk backwards through lines to find the most recent tool use
+      for (let i = lines.length - 1; i >= 0 && i >= lines.length - 20; i--) {
+        const line = lines[i];
 
-      const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-      return sorted[0][0];
+        // Check for pending prompts first (takes priority)
+        if (!result.pendingPrompt) {
+          if (line.includes("AskUserQuestion")) {
+            result.pendingPrompt = "Waiting for your answer";
+          } else if (line.includes("permission_prompt") || line.includes('"type":"permission"')) {
+            result.pendingPrompt = "Waiting for permission";
+          } else if (line.includes("EnterPlanMode") || line.includes("ExitPlanMode")) {
+            result.pendingPrompt = "Waiting for plan approval";
+          }
+        }
+
+        // Extract tool actions
+        if (!result.latestAction) {
+          const action = this.parseActionFromLine(line);
+          if (action) {
+            result.latestAction = action;
+          }
+        }
+
+        if (result.latestAction && result.pendingPrompt) break;
+      }
+
+      // Only report pending prompt if file was modified recently
+      if (result.pendingPrompt && Date.now() - bestMtime > 60_000) {
+        result.pendingPrompt = null;
+      }
+
+      return result;
     } catch {
-      return null;
+      return result;
     }
   }
 
-  /**
-   * Check if the most recent JSONL entry indicates Claude is waiting for user input.
-   * Looks for AskUserQuestion tool uses, permission prompts, etc.
-   */
-  private checkForPendingPrompt(sessionIds: string[]): string | null {
-    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
-    const projectsDir = join(homeDir, ".claude", "projects");
-
+  /** Try to extract a human-readable action from a JSONL line */
+  private parseActionFromLine(line: string): string | null {
     try {
-      let bestFile: string | null = null;
-      let bestMtime = 0;
+      // Quick checks to avoid parsing irrelevant lines
+      if (!line.includes("tool")) return null;
 
-      for (const projectDir of readdirSync(projectsDir)) {
-        const fullDir = join(projectsDir, projectDir);
-        for (const sessionId of sessionIds) {
-          const jsonlPath = join(fullDir, `${sessionId}.jsonl`);
-          try {
-            const stat = statSync(jsonlPath);
-            if (stat.mtimeMs > bestMtime) {
-              bestMtime = stat.mtimeMs;
-              bestFile = jsonlPath;
-            }
-          } catch {
-            // File doesn't exist
-          }
-        }
+      // Look for tool_name and file_path patterns without full JSON parse (faster)
+      const toolMatch = line.match(/"tool_name"\s*:\s*"([^"]+)"/);
+      if (!toolMatch) return null;
+
+      const toolName = toolMatch[1];
+      const fileMatch = line.match(/"file_path"\s*:\s*"([^"]+)"/);
+      const descMatch = line.match(/"description"\s*:\s*"([^"]{1,60})"/);
+      const cmdMatch = line.match(/"command"\s*:\s*"([^"]{1,60})"/);
+      const patternMatch = line.match(/"pattern"\s*:\s*"([^"]{1,30})"/);
+
+      switch (toolName) {
+        case "Bash":
+          return descMatch ? descMatch[1] : cmdMatch ? cmdMatch[1] : "Running command";
+        case "Edit":
+          return fileMatch ? `Editing ${basename(fileMatch[1])}` : "Editing file";
+        case "Write":
+          return fileMatch ? `Writing ${basename(fileMatch[1])}` : "Writing file";
+        case "Read":
+          return fileMatch ? `Reading ${basename(fileMatch[1])}` : "Reading file";
+        case "Grep":
+          return patternMatch ? `Searching "${patternMatch[1]}"` : "Searching code";
+        case "Glob":
+          return patternMatch ? `Finding ${patternMatch[1]}` : "Finding files";
+        case "WebFetch":
+          return "Fetching web page";
+        case "WebSearch":
+          return "Searching web";
+        case "Task":
+          return "Running subagent";
+        default:
+          return toolName.replace(/^mcp__\w+__/, "");
       }
-
-      if (!bestFile) return null;
-
-      // Only check if the file was modified recently (last 60 seconds)
-      if (Date.now() - bestMtime > 60_000) return null;
-
-      const tail = this.readTail(bestFile, 2_000);
-
-      // Check for permission prompts / user questions in the tail
-      if (tail.includes("AskUserQuestion")) return "Waiting for your answer";
-      if (tail.includes("permission_prompt")) return "Waiting for permission";
-      if (tail.includes("EnterPlanMode")) return "Waiting for plan approval";
-      if (tail.includes("ExitPlanMode")) return "Waiting for plan approval";
-
-      return null;
     } catch {
       return null;
     }
