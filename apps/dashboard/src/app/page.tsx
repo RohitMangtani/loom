@@ -2,39 +2,50 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHive } from "@/lib/ws";
-import { getAuthMode, getStoredToken, unlockAdmin, lockAdmin } from "@/components/SitePasswordGate";
+import { getAuthMode, unlockAdmin, lockAdmin } from "@/components/SitePasswordGate";
+import { SpawnDialog } from "@/components/SpawnDialog";
 import type { ChatEntry, WorkerState } from "@/lib/types";
 
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
+const MAX_SLOTS = 4;
 
 /**
- * Stable sequential numbering: once an agent gets a number, it keeps it.
- * Numbers are assigned in order of first appearance (startedAt).
- * Ordering never changes even if statuses change.
+ * Fixed 4-slot numbering with slot recycling.
+ * Workers get assigned to slots 1-4. When a worker dies, its slot
+ * frees up for the next new worker. Workers beyond 4 are ignored.
  */
 function useStableNumbering(workers: Map<string, WorkerState>) {
   const assignmentRef = useRef<Map<string, number>>(new Map());
-  const nextNumRef = useRef(1);
 
   return useMemo(() => {
     const assignments = assignmentRef.current;
 
-    // Sort new workers by startedAt so numbering is deterministic
-    const sorted = Array.from(workers.values()).sort((a, b) => a.startedAt - b.startedAt);
-
-    // Assign numbers to any new workers
-    for (const w of sorted) {
-      if (!assignments.has(w.id)) {
-        assignments.set(w.id, nextNumRef.current++);
-      }
-    }
-
-    // Remove workers that no longer exist
+    // Remove workers that no longer exist — frees their slot
     for (const id of assignments.keys()) {
       if (!workers.has(id)) assignments.delete(id);
     }
 
-    // Return workers in stable number order
+    // Find which slots (1-4) are currently taken
+    const usedSlots = new Set(assignments.values());
+
+    // Sort unassigned workers by startedAt for deterministic ordering
+    const sorted = Array.from(workers.values()).sort((a, b) => a.startedAt - b.startedAt);
+
+    for (const w of sorted) {
+      if (assignments.has(w.id)) continue; // already has a slot
+
+      // Find the lowest free slot (1-4)
+      for (let slot = 1; slot <= MAX_SLOTS; slot++) {
+        if (!usedSlots.has(slot)) {
+          assignments.set(w.id, slot);
+          usedSlots.add(slot);
+          break;
+        }
+      }
+      // If all 4 slots taken, this worker is ignored
+    }
+
+    // Return assigned workers in slot order
     return sorted
       .filter((w) => assignments.has(w.id))
       .sort((a, b) => assignments.get(a.id)! - assignments.get(b.id)!)
@@ -133,10 +144,12 @@ function AgentCard({
   const stuck = color === "yellow";
   const buttons = stuck ? quickButtons(worker) : [];
 
+  const idle = color === "red";
+
   return (
     <div
       onClick={onClick}
-      className={`card ${stuck ? "card-stuck" : ""} ${selected ? "card-selected" : ""}`}
+      className={`card relative ${stuck ? "card-stuck" : ""} ${selected ? "card-selected" : ""}`}
       style={{ borderLeftColor: DOT_BG[color] }}
     >
       {/* Row 1: number + status */}
@@ -151,7 +164,10 @@ function AgentCard({
         </span>
       </div>
 
-      {/* Row 2: current action or stuck prompt */}
+      {/* Row 2: project name */}
+      <p className="text-[10px] text-[var(--text-light)] truncate mb-0.5">{worker.projectName}</p>
+
+      {/* Row 3: current action or stuck prompt */}
       <p className={`text-[11px] leading-tight ${stuck ? "text-[#fbbf24] font-medium" : "text-[var(--text-muted)] truncate"}`}>
         {stuck && worker.stuckMessage
           ? <span className="line-clamp-2">{worker.stuckMessage.split("\n")[0].slice(0, 80)}</span>
@@ -173,6 +189,15 @@ function AgentCard({
           ))}
         </div>
       )}
+
+      {/* Idle overlay — "READY" watermark */}
+      {idle && (
+        <div className="ready-overlay absolute inset-0 flex items-center justify-center pointer-events-none rounded-[10px]">
+          <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16]">
+            READY
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -184,7 +209,7 @@ function ChatPopover({
 }: {
   worker: WorkerState; num: number; entries: ChatEntry[];
   draft: string; onDraftChange: (v: string) => void;
-  onSend: (msg: string) => void; onDismiss: () => void; onClose: () => void;
+  onSend: (msg: string) => boolean; onDismiss: () => void; onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [kbOffset, setKbOffset] = useState(0);
@@ -197,7 +222,9 @@ function ChatPopover({
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [entries.length]);
 
-  // Push popover above iOS virtual keyboard
+  // Push popover above iOS virtual keyboard.
+  // Init immediately (catches keyboard-already-open), listen to resize+scroll,
+  // re-sync on page visibility change (returning from tab/app switch).
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -210,19 +237,39 @@ function ChatPopover({
         });
       }
     };
+    // Read immediately — don't wait for first resize event
+    update();
     vv.addEventListener("resize", update);
-    return () => vv.removeEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") requestAnimationFrame(update);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    // BFCache restore (iOS Safari keeps pages in memory on tab switch)
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) requestAnimationFrame(update);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, []);
 
   return (
     <>
       {/* Mobile backdrop — soft dismiss (keeps draft) */}
-      <div className="fixed inset-0 bg-black/40 z-40 sm:hidden" onClick={onDismiss} />
+      <div className="fixed inset-0 bg-black/40 z-40 sm:hidden" onClick={onDismiss} onTouchMove={(e) => e.preventDefault()} />
 
       {/* Popover card */}
       <div
-        className="chat-popover fixed z-50 flex flex-col bg-[var(--bg-card)] border border-[var(--border)] shadow-2xl bottom-0 left-0 right-0 h-[60vh] rounded-t-2xl sm:bottom-4 sm:right-4 sm:left-auto sm:w-[360px] sm:h-[480px] sm:rounded-2xl"
-        style={kbOffset > 0 ? { bottom: `${kbOffset}px`, height: `calc(100dvh - ${kbOffset}px - 40px)` } : undefined}
+        className="chat-popover fixed z-50 flex flex-col bg-[var(--bg-card)] border border-[var(--border)] shadow-2xl bottom-0 left-0 right-0 h-[60dvh] rounded-t-2xl sm:bottom-4 sm:right-4 sm:left-auto sm:w-[360px] sm:h-[480px] sm:rounded-2xl"
+        style={{
+          transition: "bottom 0.15s ease-out, height 0.15s ease-out",
+          ...(kbOffset > 0 ? { bottom: `${kbOffset}px`, height: `calc(100dvh - ${kbOffset}px - 40px)` } : {}),
+        }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
@@ -238,8 +285,15 @@ function ChatPopover({
           <button onClick={onClose} className="text-[var(--text-light)] hover:text-[var(--text)] text-lg p-1 leading-none">&times;</button>
         </div>
 
-        {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0">
+        {/* Messages — scrolling dismisses iOS keyboard (like iMessage) */}
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto p-3 space-y-1.5 min-h-0 overscroll-contain"
+          onTouchMove={() => {
+            const el = document.activeElement as HTMLElement | null;
+            if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT")) el.blur();
+          }}
+        >
           {entries.length === 0 && (
             <p className="text-center text-[var(--text-light)] text-xs mt-6">No messages yet</p>
           )}
@@ -263,9 +317,20 @@ function ChatPopover({
               );
             }
             return (
-              <div key={i} className="flex justify-start">
-                <div className="max-w-[80%] bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-[11px]">
-                  <pre className="whitespace-pre-wrap break-words font-sans text-[var(--text)]">{entry.text}</pre>
+              <div key={i} className="flex justify-start group/msg">
+                <div className="relative max-w-[80%] bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(entry.text);
+                      const btn = document.getElementById(`copy-${i}`);
+                      if (btn) { btn.textContent = "✓"; setTimeout(() => { btn.textContent = "⎘"; }, 1200); }
+                    }}
+                    id={`copy-${i}`}
+                    className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-[10px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded sm:opacity-0 sm:group-hover/msg:opacity-100 transition-opacity"
+                    title="Copy"
+                  >⎘</button>
+                  <pre className="whitespace-pre-wrap break-words font-sans text-[var(--text)] pr-6">{entry.text}</pre>
                 </div>
               </div>
             );
@@ -293,15 +358,12 @@ function ChatPopover({
                 ))}
               </div>
             )}
-            <div className="flex gap-2 items-end">
+            <div className="flex gap-2 items-stretch">
               <textarea
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    if (draft.trim()) { onSend(draft.trim()); onDraftChange(""); }
-                  }
+                onKeyDown={() => {
+                  // Enter creates a new line. Only the Send button sends.
                 }}
                 onFocus={() => setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, 350)}
                 placeholder="Type a response..."
@@ -310,8 +372,8 @@ function ChatPopover({
               />
               <button
                 type="button"
-                onClick={() => { if (draft.trim()) { onSend(draft.trim()); onDraftChange(""); } }}
-                className="px-3 py-2 rounded-lg bg-[var(--text-light)] text-[var(--bg)] text-xs font-medium hover:bg-[var(--text-muted)] transition-colors shrink-0"
+                onClick={() => { if (draft.trim()) { const sent = onSend(draft.trim()); if (sent) onDraftChange(""); } }}
+                className="px-4 rounded-lg bg-[var(--text-light)] text-[var(--bg)] text-xs font-medium hover:bg-[var(--text-muted)] transition-colors shrink-0"
               >
                 Send
               </button>
@@ -331,9 +393,25 @@ export default function Home() {
   const [mode, setMode] = useState<"admin" | "viewer">("viewer");
   const [showUnlock, setShowUnlock] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
-  // Per-agent draft text — persists when collapsing the popover, cleared on X
+  const [showSpawn, setShowSpawn] = useState(false);
+  // Per-agent draft text — persists in localStorage (survives browser close/refresh).
+  // Only cleared when user presses X to close the chat popover.
   const draftsRef = useRef<Map<string, string>>(new Map());
   const [draftKey, setDraftKey] = useState(0); // force re-render on draft changes
+
+  // Load drafts from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("hive_drafts");
+      if (saved) {
+        const parsed = JSON.parse(saved) as Record<string, string>;
+        for (const [k, v] of Object.entries(parsed)) {
+          if (v) draftsRef.current.set(k, v);
+        }
+        setDraftKey((k) => k + 1);
+      }
+    } catch { /* corrupted storage, start fresh */ }
+  }, []);
   const isViewer = mode === "viewer";
 
   useEffect(() => {
@@ -341,14 +419,33 @@ export default function Home() {
     const url = stored || DEFAULT_URL;
     setDaemonUrl(url);
     setMode(getAuthMode());
+    // Restore selected agent from session storage (survives tab close/reopen)
+    const savedAgent = sessionStorage.getItem("hive_selected_agent");
+    if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
   const { connected, workers, chatEntries, send, subscribeTo } = useHive(daemonUrl);
 
+  // Re-subscribe to restored agent once WebSocket connects
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (connected && selectedId && !restoredRef.current) {
+      restoredRef.current = true;
+      subscribeTo(selectedId);
+    }
+  }, [connected, selectedId, subscribeTo]);
+
+  // Persist selected agent across page reloads
+  useEffect(() => {
+    if (selectedId) sessionStorage.setItem("hive_selected_agent", selectedId);
+    else sessionStorage.removeItem("hive_selected_agent");
+  }, [selectedId]);
+
   const numbered = useStableNumbering(workers);
   const activeCount = numbered.filter(({ worker: w }) => w.status === "working").length;
   const stuckCount = numbered.filter(({ worker: w }) => w.status === "stuck").length;
-  const idleCount = numbered.length - activeCount - stuckCount;
+  const idleCount = numbered.filter(({ worker: w }) => w.status === "idle").length;
+  const emptyCount = MAX_SLOTS - numbered.length;
   const selectedEntry = selectedId ? numbered.find(({ worker: w }) => w.id === selectedId) : null;
 
   const toggleSelect = useCallback((id: string) => {
@@ -362,7 +459,7 @@ export default function Home() {
       {/* Header — fixed height */}
       <header className="shrink-0 px-4 sm:px-6 pt-4 pb-3">
         <div className="text-center relative">
-          <h1 className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)]">Find My Agents</h1>
+          <h1 className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)]">Hive</h1>
           <div className="flex items-center justify-center gap-1.5 mt-1">
             <span className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-[var(--dot-active)]" : "bg-[var(--dot-offline)]"}`} />
             <span className="text-[10px] text-[var(--text-light)]">
@@ -436,26 +533,33 @@ export default function Home() {
 
         {/* Summary counts */}
         <div className="flex items-center justify-center gap-3 mt-2 text-[10px] text-[var(--text-light)]">
-          {numbered.length === 0 ? (
-            <span>No agents</span>
-          ) : (
-            <>
-              {activeCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-active)]" />{activeCount} active</span>}
-              {stuckCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-needs)]" />{stuckCount} waiting</span>}
-              {idleCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-offline)]" />{idleCount} idle</span>}
-            </>
-          )}
+          {activeCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-active)]" />{activeCount} active</span>}
+          {stuckCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-needs)]" />{stuckCount} waiting</span>}
+          {idleCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-offline)]" />{idleCount} idle</span>}
+          {emptyCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--border)]" />{emptyCount} empty</span>}
         </div>
       </header>
 
       {/* Body — fixed 2×2 quadrant grid filling available space */}
       <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-3 p-4 sm:p-6">
-        {[1, 2, 3, 4].map((slot) => {
+        {Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).map((slot) => {
           const entry = numbered.find(({ num }) => num === slot);
           if (!entry) {
             return (
-              <div key={slot} className="card flex items-center justify-center opacity-30" style={{ borderLeftColor: "var(--border)" }}>
-                <span className="text-2xl font-bold tabular-nums text-[var(--text-light)]">{slot}</span>
+              <div
+                key={slot}
+                className={`card flex items-center justify-center ${isViewer ? "opacity-30" : "opacity-30 hover:opacity-60 cursor-pointer transition-opacity"}`}
+                style={{ borderLeftColor: "var(--border)" }}
+                onClick={isViewer ? undefined : () => setShowSpawn(true)}
+              >
+                {isViewer ? (
+                  <span className="text-2xl font-bold tabular-nums text-[var(--text-light)]">{slot}</span>
+                ) : (
+                  <div className="flex flex-col items-center gap-1">
+                    <span className="text-2xl font-bold text-[var(--text-light)]">+</span>
+                    <span className="text-[10px] text-[var(--text-muted)]">Spawn</span>
+                  </div>
+                )}
               </div>
             );
           }
@@ -480,19 +584,43 @@ export default function Home() {
           num={selectedEntry.num}
           entries={chatEntries.get(selectedEntry.worker.id) ?? []}
           draft={draftsRef.current.get(selectedEntry.worker.id) || ""}
-          onDraftChange={(v) => { draftsRef.current.set(selectedEntry.worker.id, v); setDraftKey((k) => k + 1); }}
-          onSend={(msg) => send({ type: "message", workerId: selectedEntry.worker.id, content: msg })}
+          onDraftChange={(v) => {
+            draftsRef.current.set(selectedEntry.worker.id, v);
+            setDraftKey((k) => k + 1);
+            try {
+              const obj = Object.fromEntries(draftsRef.current);
+              localStorage.setItem("hive_drafts", JSON.stringify(obj));
+            } catch { /* quota exceeded, non-critical */ }
+          }}
+          onSend={(msg) => {
+            return send({ type: "message", workerId: selectedEntry.worker.id, content: msg });
+          }}
           onDismiss={() => {
             // Tap away: keep draft, just collapse
             setSelectedId(null);
             subscribeTo(null);
           }}
           onClose={() => {
-            // X button: clear draft and close
+            // X button: clear draft and close — only action that removes draft
             draftsRef.current.delete(selectedEntry.worker.id);
+            try {
+              const obj = Object.fromEntries(draftsRef.current);
+              localStorage.setItem("hive_drafts", JSON.stringify(obj));
+            } catch { /* non-critical */ }
             setSelectedId(null);
             subscribeTo(null);
           }}
+        />
+      )}
+
+      {/* Spawn dialog — admin only */}
+      {showSpawn && (
+        <SpawnDialog
+          onSpawn={(project, task) => {
+            send({ type: "spawn", project, task });
+            setShowSpawn(false);
+          }}
+          onClose={() => setShowSpawn(false)}
         />
       )}
     </div>
