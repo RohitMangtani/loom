@@ -212,8 +212,6 @@ function ChatPopover({
   onSend: (msg: string) => boolean; onDismiss: () => void; onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [showUpArrow, setShowUpArrow] = useState(false);
-  const [showDownArrow, setShowDownArrow] = useState(false);
   const [kbOffset, setKbOffset] = useState(0);
   const color = dotColor(worker);
   const canSend = worker.managed || !!worker.tty;
@@ -224,19 +222,6 @@ function ChatPopover({
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [entries.length]);
 
-  // Show scroll nav arrows based on position
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      const distFromTop = el.scrollTop;
-      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowUpArrow(distFromTop > 100);
-      setShowDownArrow(distFromBottom > 100);
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, []);
 
   // Push popover above iOS virtual keyboard.
   // Init immediately (catches keyboard-already-open), listen to resize+scroll,
