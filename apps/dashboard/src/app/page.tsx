@@ -214,6 +214,7 @@ function ChatPanel({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const touchStartY = useRef<number | null>(null);
   const color = dotColor(worker);
   const canSend = worker.managed || !!worker.tty;
@@ -231,7 +232,51 @@ function ChatPanel({
     }
   }, [entries]);
 
-  // No auto-resize — fixed height input bar like iMessage
+  // Native touch handlers on the pill header — { passive: false } ensures
+  // preventDefault() works on iOS Safari, preventing gesture interception
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+
+    const onStart = (e: TouchEvent) => {
+      touchStartY.current = e.touches[0].clientY;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (touchStartY.current === null) return;
+      e.preventDefault(); // prevent iOS from intercepting the gesture
+      const dy = e.touches[0].clientY - touchStartY.current;
+      if (dy > 20) {
+        touchStartY.current = null;
+        if (expanded) { onExpand(false); textareaRef.current?.blur(); }
+        else if (document.activeElement === textareaRef.current) textareaRef.current?.blur();
+        else onDismiss();
+      } else if (dy < -12) {
+        touchStartY.current = null;
+        if (!expanded) { onExpand(true); setTimeout(() => textareaRef.current?.focus(), 350); }
+      }
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (touchStartY.current === null) return;
+      const dy = e.changedTouches[0].clientY - touchStartY.current;
+      touchStartY.current = null;
+      if (dy > 20) {
+        if (expanded) { onExpand(false); textareaRef.current?.blur(); }
+        else if (document.activeElement === textareaRef.current) textareaRef.current?.blur();
+        else onDismiss();
+      } else if (dy < -12) {
+        if (!expanded) { onExpand(true); setTimeout(() => textareaRef.current?.focus(), 350); }
+      }
+    };
+
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+    };
+  }, [expanded, onExpand, onDismiss]);
 
   // Refocus textarea when returning to the app (visibility change)
   useEffect(() => {
@@ -249,46 +294,8 @@ function ChatPanel({
       <div className="chat-panel flex-1 min-h-0 flex flex-col border-t border-[var(--border)] bg-[var(--bg-card)]">
         {/* Header — swipe up = expand (top lock), swipe down = collapse/dismiss */}
         <div
+          ref={headerRef}
           className="relative flex items-center justify-between px-4 pt-5 pb-4 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing touch-none"
-          onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY; }}
-          onTouchMove={(e) => {
-            if (touchStartY.current === null) return;
-            const dy = e.touches[0].clientY - touchStartY.current;
-            if (dy > 20) {
-              touchStartY.current = null;
-              if (expanded) { onExpand(false); textareaRef.current?.blur(); }
-              else if (document.activeElement === textareaRef.current) textareaRef.current?.blur();
-              else onDismiss();
-            } else if (dy < -12) {
-              touchStartY.current = null;
-              if (!expanded) { onExpand(true); setTimeout(() => textareaRef.current?.focus(), 350); }
-            }
-          }}
-          onTouchEnd={(e) => {
-            if (touchStartY.current === null) return;
-            const dy = e.changedTouches[0].clientY - touchStartY.current;
-            touchStartY.current = null;
-            if (dy > 20) {
-              if (expanded) { onExpand(false); textareaRef.current?.blur(); }
-              else if (document.activeElement === textareaRef.current) textareaRef.current?.blur();
-              else onDismiss();
-            } else if (dy < -12) {
-              if (!expanded) { onExpand(true); setTimeout(() => textareaRef.current?.focus(), 350); }
-            }
-          }}
-          onMouseDown={(e) => { touchStartY.current = e.clientY; }}
-          onMouseUp={(e) => {
-            if (touchStartY.current === null) return;
-            const dy = e.clientY - touchStartY.current;
-            touchStartY.current = null;
-            if (dy > 20) {
-              if (expanded) { onExpand(false); textareaRef.current?.blur(); }
-              else if (document.activeElement === textareaRef.current) textareaRef.current?.blur();
-              else onDismiss();
-            } else if (dy < -12) {
-              if (!expanded) { onExpand(true); setTimeout(() => textareaRef.current?.focus(), 350); }
-            }
-          }}
         >
           {/* Swipe handle */}
           <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-[var(--border-light)]" />
