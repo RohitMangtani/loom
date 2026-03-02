@@ -20,6 +20,7 @@ export interface TelemetryEvent {
   session_id: string;
   event:
     | "SessionStart"
+    | "UserPromptSubmit"
     | "PreToolUse"
     | "PostToolUse"
     | "Stop"
