@@ -266,13 +266,21 @@ function ChatPanel({
           onTouchMove={(e) => {
             if (touchStartY.current === null) return;
             const dy = e.touches[0].clientY - touchStartY.current;
-            if (dy > 20) { touchStartY.current = null; textareaRef.current?.blur(); }
+            if (dy > 20) {
+              touchStartY.current = null;
+              if (document.activeElement === textareaRef.current) textareaRef.current.blur();
+              else onDismiss();
+            }
           }}
           onMouseDown={(e) => { touchStartY.current = e.clientY; }}
           onMouseMove={(e) => {
             if (touchStartY.current === null || !(e.buttons & 1)) return;
             const dy = e.clientY - touchStartY.current;
-            if (dy > 20) { touchStartY.current = null; textareaRef.current?.blur(); }
+            if (dy > 20) {
+              touchStartY.current = null;
+              if (document.activeElement === textareaRef.current) textareaRef.current.blur();
+              else onDismiss();
+            }
           }}
         >
           {/* Swipe handle */}
