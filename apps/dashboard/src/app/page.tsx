@@ -227,10 +227,8 @@ function ChatPanel({
     }
   }, [entries.length]);
 
-  // Auto-focus textarea on mount and scroll it into view so user sees the chat.
-  // Delay scroll until after the grid shrink transition (300ms) settles.
+  // Scroll chat into view after the grid shrink transition (300ms) settles.
   useEffect(() => {
-    requestAnimationFrame(() => textareaRef.current?.focus());
     const t = setTimeout(() => {
       textareaRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
     }, 320);
@@ -479,14 +477,8 @@ export default function Home() {
   const emptyCount = MAX_SLOTS - numbered.length;
   const selectedEntry = selectedId ? numbered.find(({ worker: w }) => w.id === selectedId) : null;
 
-  // Hidden proxy input — focused synchronously on tap to open iOS keyboard.
-  // ChatPanel transfers focus to the real textarea on mount.
-  const proxyRef = useRef<HTMLInputElement>(null);
-
   const toggleSelect = useCallback((id: string) => {
     const nextId = selectedId === id ? null : id;
-    // Focus proxy synchronously inside the tap event to trigger iOS keyboard
-    if (nextId && proxyRef.current) proxyRef.current.focus();
     setSelectedId(nextId);
     subscribeTo(nextId);
   }, [selectedId, subscribeTo]);
@@ -668,8 +660,6 @@ export default function Home() {
         />
       )}
 
-      {/* Hidden proxy input — captures iOS keyboard on tap before ChatPanel mounts */}
-      <input ref={proxyRef} aria-hidden="true" className="fixed -left-[9999px] opacity-0 w-0 h-0" tabIndex={-1} />
     </div>
   );
 }
