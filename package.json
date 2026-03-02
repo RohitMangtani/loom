@@ -1,6 +1,7 @@
 {
   "name": "hive",
   "private": true,
+  "packageManager": "npm@11.7.0",
   "workspaces": [
     "apps/*"
   ],
