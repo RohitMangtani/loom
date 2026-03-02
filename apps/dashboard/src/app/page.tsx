@@ -660,7 +660,7 @@ export default function Home() {
       {/* Body — 2×2 grid, shrinks when chat is open */}
       <div
         className={`min-h-0 grid grid-cols-2 grid-rows-2 gap-3 p-4 sm:p-6 transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0" : "flex-1"}`}
-        style={{ animation: "grid-enter 0.3s cubic-bezier(0.25,0.46,0.45,0.94)", ...(!isViewer && selectedEntry ? { flexBasis: chatExpanded ? "0px" : "40%", maxHeight: chatExpanded ? "0px" : "none", overflow: chatExpanded ? "hidden" : "visible", padding: chatExpanded ? "0px" : undefined, gap: chatExpanded ? "0px" : undefined } : {}) }}
+        style={!isViewer && selectedEntry ? { flexBasis: chatExpanded ? "0px" : "40%", maxHeight: chatExpanded ? "0px" : "none", overflow: chatExpanded ? "hidden" : "visible", padding: chatExpanded ? "0px" : undefined, gap: chatExpanded ? "0px" : undefined } : undefined}
       >
         {Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).map((slot) => {
           const entry = numbered.find(({ num }) => num === slot);

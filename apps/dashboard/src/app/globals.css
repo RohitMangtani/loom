@@ -20,18 +20,6 @@
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* Text selection — inverted for dark theme */
-  ::selection {
-    background: var(--text);
-    color: var(--bg);
-  }
-
-  /* Keyboard focus — visible only on tab, not click */
-  a:focus-visible, button:focus-visible, textarea:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
   body {
     background: var(--bg);
     color: var(--text);
@@ -119,15 +107,9 @@
     animation: bubble-in 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
 
-  /* Momentum scroll for chat — hidden scrollbar for native feel */
+  /* Momentum scroll for chat */
   .chat-scroll {
     -webkit-overflow-scrolling: touch;
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .chat-scroll::-webkit-scrollbar {
-    display: none;
   }
 
   /* Chat scroll nav buttons */
@@ -211,19 +193,6 @@
   .chat-input::placeholder {
     color: var(--text-light);
   }
-}
-
-/* Respect reduced motion preference */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-@keyframes grid-enter {
-  from { opacity: 0; }
-  to { opacity: 1; }
 }
 
 @keyframes ready-fade {
