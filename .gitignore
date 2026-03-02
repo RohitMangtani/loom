@@ -12,3 +12,4 @@ dist/
 HANDOFF-*.md
 docs/plans/
 .env*.local
+firebase-debug.log
