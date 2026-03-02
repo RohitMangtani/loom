@@ -1,10 +1,21 @@
 # Hive
 
-Run 4 Claude Code agents at once. Coordinate them from your phone.
+See all your AI agents on one screen. Green means working. Red means done. Yellow means stuck. Type into any tile to talk to it.
 
-Hive is a local daemon that auto-discovers running Claude Code instances, tracks whether each one is working or idle, and gives you a live dashboard to monitor and message all of them. You open 4 terminals, run `claude` in each, and the daemon handles the rest: auto-approving prompts, preventing file conflicts, and compounding learnings across agents and sessions.
+**[See the live dashboard](https://dashboard-flame-two-83.vercel.app?viewer=d6c8f4964e4fb13247a08bb616da88d557b4f34b503f1b9fe96e824822bd2bf0)** (view-only, connects to a real running instance)
+
+Think about Find My iPhone. You open one app and see every Apple device you own. Green dot, online. Grey dot, offline. You do not open a separate app for each device. One visual layer shows you everything. Hive does the same thing for AI agents. Open four terminals, run `claude` in each, and the dashboard shows you what all of them are doing. No alt-tabbing. No guessing which one finished. No lost output from an agent stuck on a permission prompt you did not notice.
 
 One person. Four agents. The output of a small team.
+
+## What You Get
+
+- **Stoplight dashboard** — 2x2 grid matching your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor.
+- **Auto-discovery** — start `claude` in any terminal and the daemon finds it within 3 seconds. No registration, no config.
+- **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Agents never sit idle waiting for a click.
+- **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Direct agents from your phone.
+- **Coordination** — file locks prevent two agents from editing the same file. Task queue auto-dispatches work to idle agents. Scratchpad lets agents leave notes for each other.
+- **Compound learning** — every solved problem gets written to a per-project knowledge file. The next agent reads it before starting. Your fleet gets smarter over time.
 
 ## Prerequisites
 
@@ -63,7 +74,7 @@ The daemon auto-discovers agents within 3 seconds. The dashboard shows their sta
 
 ## The Quadrant Setup
 
-Arrange your 4 terminal tabs in a 2×2 grid:
+Arrange your 4 terminal tabs in a 2x2 grid:
 
 ```
 ┌───────────┬───────────┐
@@ -84,7 +95,7 @@ Each agent gets a quadrant number based on when it started (earliest = Q1). The 
 
 Tap any tile to open its chat. Type a message and it goes straight to that agent's terminal.
 
-## What It Does
+## How It Works
 
 ### Auto-Discovery
 Detects Claude processes within 3 seconds via `ps` + `lsof`. No configuration needed. Start `claude` in any terminal and the daemon finds it.
@@ -317,9 +328,9 @@ The project uses npm workspaces with Turbo for build orchestration. The daemon a
 
 This was built using the agents it manages. Four Claude Code instances iterated on the daemon and dashboard simultaneously while a human directed architecture and resolved conflicts. The compound learning system was tested in production from day one, with each session's lessons feeding the next.
 
-- [Game Plan](https://rmgtni.xyz/lab/hive-game-plan) — What the product is, where the edge is, and what comes next
+- [What Hive Is](https://www.rohitmangtani.com/lab/hive) — What it does, how it works, and where it fits
+- [Game Plan](https://rmgtni.xyz/lab/hive-game-plan) — The product edge and what comes next
 - [System Audit](https://rmgtni.xyz/lab/hive-system-audit) — Full technical deep dive, competitor analysis, and strategy
-- [Project Page](https://www.rohitmangtani.com/lab/hive) — Public writeup on why this matters
 
 ## License
 
