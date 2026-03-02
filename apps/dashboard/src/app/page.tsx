@@ -441,7 +441,7 @@ function ChatPanel({
                 onFocus={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
                 placeholder="Message agent..."
                 rows={1}
-                className="chat-input flex-1 min-w-0 !h-[56px] !max-h-[56px] !overflow-y-auto"
+                className="chat-input flex-1 min-w-0 !h-[112px] !max-h-[112px] !overflow-y-auto"
               />
               <button
                 type="button"
@@ -545,7 +545,10 @@ export default function Home() {
   return (
     <div className="h-dvh flex flex-col overflow-hidden bg-[var(--bg)]">
       {/* Header — fixed height */}
-      <header className="shrink-0 px-4 sm:px-6 pt-4 pb-3">
+      <header
+        className="shrink-0 px-4 sm:px-6 pt-4 pb-3"
+        onClick={() => { if (chatExpanded) { setChatExpanded(false); } }}
+      >
         <div className="text-center relative">
           <h1 className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)]">Hive</h1>
           <div className="flex items-center justify-center gap-1.5 mt-1">

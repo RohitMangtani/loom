@@ -144,8 +144,8 @@
     border-radius: 10px;
     font-size: 14px;
     font-weight: 600;
-    height: 56px;
-    max-height: 56px;
+    height: 112px;
+    max-height: 112px;
     padding: 0 20px;
     background: var(--accent);
     color: white;
