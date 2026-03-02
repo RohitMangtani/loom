@@ -117,15 +117,7 @@ export function ChatPanel({
         </div>
 
         <div className="relative flex-1 min-h-0">
-        <div className="absolute left-2 bottom-2 z-10">
-          <button
-            type="button"
-            onClick={() => { if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }}
-            className="chat-nav-btn"
-            aria-label="Scroll to bottom"
-          >&#9660;</button>
-        </div>
-        <div className="absolute right-2 bottom-2 z-10">
+        <div className="absolute left-2 bottom-2 z-10 flex flex-col gap-1.5">
           <button
             type="button"
             onClick={() => {
@@ -146,6 +138,12 @@ export function ChatPanel({
             className="chat-nav-btn"
             aria-label="Scroll to previous message"
           >&#9650;</button>
+          <button
+            type="button"
+            onClick={() => { if (scrollRef.current) scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }}
+            className="chat-nav-btn"
+            aria-label="Scroll to bottom"
+          >&#9660;</button>
         </div>
         <div
           ref={scrollRef}
