@@ -393,25 +393,12 @@ function ChatPanel({
                           void btn.offsetHeight;
                           btn.style.animation = "btn-flash 0.4s ease-out";
                           setTimeout(() => { btn.textContent = "\u2398"; btn.style.animation = ""; }, 1200);
-                        }}
-                        className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center text-[12px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded-md sm:opacity-0 sm:group-hover/msg:opacity-100 transition-all duration-150 active:scale-90"
-                        title="Copy"
-                      >&#9112;</button>
-                      <pre className="whitespace-pre-wrap break-words font-sans text-[var(--text)] pr-8">{entry.text}</pre>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          const btn = e.currentTarget;
-                          btn.style.animation = "none";
-                          void btn.offsetHeight;
-                          btn.style.animation = "btn-flash 0.4s ease-out";
-                          setTimeout(() => { btn.style.animation = ""; }, 400);
                           const msgEl = btn.closest(".chat-bubble");
                           if (msgEl) msgEl.scrollIntoView({ behavior: "smooth", block: "start" });
                         }}
-                        className="absolute bottom-2 right-2 w-7 h-7 flex items-center justify-center text-[12px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded-md sm:opacity-0 sm:group-hover/msg:opacity-100 transition-all duration-150 active:scale-90"
-                        title="Scroll to top of message"
-                      >&#9650;</button>
+                        className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center text-[12px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded-md sm:opacity-0 sm:group-hover/msg:opacity-100 transition-all duration-150 active:scale-90"
+                        title="Copy & scroll to top"
+                      >&#9112;</button>
                     </div>
                   </div>
                 );
