@@ -261,7 +261,7 @@ function ChatPanel({
       <div className="chat-panel flex-1 min-h-0 flex flex-col border-t border-[var(--border)] bg-[var(--bg-card)]">
         {/* Header — swipe down to dismiss (keeps draft), X to close (clears draft) */}
         <div
-          className="relative flex items-center justify-between px-4 pt-5 pb-4 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing"
+          className="relative flex items-center justify-between px-4 pt-5 pb-4 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing touch-none"
           onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY; }}
           onTouchMove={(e) => {
             if (touchStartY.current === null) return;
@@ -272,12 +272,21 @@ function ChatPanel({
               else onDismiss();
             }
           }}
-          onMouseDown={(e) => { touchStartY.current = e.clientY; }}
-          onMouseMove={(e) => {
-            if (touchStartY.current === null || !(e.buttons & 1)) return;
-            const dy = e.clientY - touchStartY.current;
+          onTouchEnd={(e) => {
+            if (touchStartY.current === null) return;
+            const dy = e.changedTouches[0].clientY - touchStartY.current;
+            touchStartY.current = null;
             if (dy > 20) {
-              touchStartY.current = null;
+              if (document.activeElement === textareaRef.current) textareaRef.current.blur();
+              else onDismiss();
+            }
+          }}
+          onMouseDown={(e) => { touchStartY.current = e.clientY; }}
+          onMouseUp={(e) => {
+            if (touchStartY.current === null) return;
+            const dy = e.clientY - touchStartY.current;
+            touchStartY.current = null;
+            if (dy > 20) {
               if (document.activeElement === textareaRef.current) textareaRef.current.blur();
               else onDismiss();
             }
