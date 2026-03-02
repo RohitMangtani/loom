@@ -36,6 +36,7 @@ interface ProcessInfo {
 interface SessionContext {
   projectName: string | null;
   latestAction: string | null;
+  lastDirection: string | null;
   status: "working" | "idle";
   fileAgeMs: number;
   /** true when status="working" comes from a definitive signal (tool_use at tail,
@@ -282,6 +283,7 @@ export class ProcessDiscovery {
         task: null,
         managed: false,
         tty: proc.tty,
+        lastDirection: ctx.lastDirection || undefined,
       };
 
       this.telemetry.registerDiscovered(id, worker);
@@ -337,6 +339,9 @@ export class ProcessDiscovery {
 
     if (ctx.projectName) {
       existing.projectName = ctx.projectName;
+    }
+    if (ctx.lastDirection) {
+      existing.lastDirection = ctx.lastDirection;
     }
 
     // idleConfirmed = idle_prompt hook fired OR hysteresis confirmed idle.
@@ -790,7 +795,7 @@ export class ProcessDiscovery {
    */
   private readSessionContextFromFile(filePath: string): SessionContext {
     const result: SessionContext = {
-      projectName: null, latestAction: null,
+      projectName: null, latestAction: null, lastDirection: null,
       status: "idle", fileAgeMs: Infinity, highConfidence: false,
     };
 
@@ -809,7 +814,7 @@ export class ProcessDiscovery {
    */
   private readSessionContext(sessionIds: string[], cwd?: string): SessionContext {
     const result: SessionContext = {
-      projectName: null, latestAction: null,
+      projectName: null, latestAction: null, lastDirection: null,
       status: "idle", fileAgeMs: Infinity, highConfidence: false,
     };
 
@@ -883,6 +888,31 @@ export class ProcessDiscovery {
       for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
         const action = this.parseActionFromLine(lines[i]);
         if (action) { result.latestAction = action; break; }
+      }
+
+      // Extract last human direction — the most recent user-typed message.
+      // Human messages have "type":"user" with content as a plain string.
+      // Tool results also have "type":"user" but content is an array.
+      // Scan backward through lines (not just filtered 20) to find the last one.
+      for (let i = lines.length - 1; i >= Math.max(0, lines.length - 80); i--) {
+        const line = lines[i];
+        if (!line.includes('"type":"user"') && !line.includes('"type": "user"')) continue;
+        // Skip tool_result entries (content is an array with tool_result blocks)
+        if (line.includes('"tool_result"')) continue;
+        // Extract the content string — human messages have "content":"some text"
+        const contentMatch = line.match(/"content"\s*:\s*"([^"]{3,})"/);
+        if (contentMatch) {
+          let direction = contentMatch[1]
+            .replace(/\\n/g, " ")
+            .replace(/\\"/g, '"')
+            .trim();
+          // Skip session continuation boilerplate
+          if (direction.startsWith("This session is being continued")) continue;
+          // Truncate to ~80 chars for display
+          if (direction.length > 80) direction = direction.slice(0, 77) + "...";
+          result.lastDirection = direction;
+          break;
+        }
       }
 
       // Tail analysis is the sole status engine. No mtime shortcut —

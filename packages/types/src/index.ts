@@ -13,6 +13,7 @@ export interface WorkerState {
   managed: boolean;
   tty?: string;
   stuckMessage?: string;
+  lastDirection?: string;
 }
 
 export interface TelemetryEvent {

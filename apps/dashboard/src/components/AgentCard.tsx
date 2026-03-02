@@ -105,6 +105,12 @@ export function AgentCard({
           : statusLabel(worker)}
       </p>
 
+      {!stuck && worker.lastDirection && (
+        <p className="text-[10px] text-[var(--text-muted)] truncate opacity-50 mt-0.5">
+          {worker.lastDirection}
+        </p>
+      )}
+
       {stuck && (worker.managed || !!worker.tty) && buttons.length > 0 && (
         <div className="flex items-center gap-1 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
           {buttons.map((b) => (
