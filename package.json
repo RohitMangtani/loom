@@ -12,6 +12,9 @@
     "dev:dashboard": "npm -w apps/dashboard run dev",
     "build": "turbo build"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "devDependencies": {
     "turbo": "^2.8.12"
   }

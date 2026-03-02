@@ -86,6 +86,33 @@ apps/
       lib/               # WebSocket client, types
 ```
 
+## Getting Started
+
+**Prerequisites:** Node.js 20+, macOS (daemon uses AppleScript + CGEvent for TTY interaction)
+
+```bash
+# Clone and install
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
+npm install
+
+# Copy environment template (all vars have sensible defaults)
+cp .env.example .env
+
+# Start the daemon (runs on ports 3001 + 3002)
+npm run dev:daemon
+
+# In another terminal, start the dashboard
+npm run dev:dashboard
+
+# Set up Claude Code hooks (connects agents to the daemon)
+bash setup-hooks.sh
+```
+
+The daemon auto-discovers any running Claude Code instance within 3 seconds. Open the dashboard at `http://localhost:3000` to see agent status.
+
+See `.env.example` for all available configuration options.
+
 ## How It Was Built
 
 Hive was built using the agents it manages. Four Claude Code instances iterated on the daemon and dashboard simultaneously while a human directed architecture and resolved conflicts. The coordination primitives exist because the development process demanded them.
