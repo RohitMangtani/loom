@@ -205,14 +205,15 @@ function AgentCard({
 // --- Chat Panel ---
 
 function ChatPanel({
-  worker, num, entries, draft, onDraftChange, onSend, onClose,
+  worker, num, entries, draft, onDraftChange, onSend, onClose, onDismiss,
 }: {
   worker: WorkerState; num: number; entries: ChatEntry[];
   draft: string; onDraftChange: (v: string) => void;
-  onSend: (msg: string) => boolean; onClose: () => void;
+  onSend: (msg: string) => boolean; onClose: () => void; onDismiss: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const touchStartY = useRef<number | null>(null);
   const color = dotColor(worker);
   const canSend = worker.managed || !!worker.tty;
   const stuck = worker.status === "stuck";
@@ -253,8 +254,26 @@ function ChatPanel({
 
   return (
       <div className="chat-panel flex-1 min-h-0 flex flex-col border-t border-[var(--border)] bg-[var(--bg-card)]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
+        {/* Header — swipe down to dismiss (keeps draft), X to close (clears draft) */}
+        <div
+          className="relative flex items-center justify-between px-4 pt-4 pb-3 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing"
+          onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY; }}
+          onTouchEnd={(e) => {
+            if (touchStartY.current === null) return;
+            const dy = e.changedTouches[0].clientY - touchStartY.current;
+            touchStartY.current = null;
+            if (dy > 40) onDismiss();
+          }}
+          onMouseDown={(e) => { touchStartY.current = e.clientY; }}
+          onMouseUp={(e) => {
+            if (touchStartY.current === null) return;
+            const dy = e.clientY - touchStartY.current;
+            touchStartY.current = null;
+            if (dy > 40) onDismiss();
+          }}
+        >
+          {/* Swipe handle */}
+          <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-[var(--border-light)]" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: DOT_BG[color] }} />
@@ -604,6 +623,11 @@ export default function Home() {
               addOptimisticEntry(selectedEntry.worker.id, msg);
             }
             return ok;
+          }}
+          onDismiss={() => {
+            // Swipe down: close panel but keep draft for next time
+            setSelectedId(null);
+            subscribeTo(null);
           }}
           onClose={() => {
             // X button: clear draft and close — only action that removes draft
