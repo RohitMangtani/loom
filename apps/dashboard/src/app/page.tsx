@@ -223,10 +223,14 @@ function ChatPanel({
   useEffect(() => {
     const el = scrollRef.current;
     if (el) {
-      // requestAnimationFrame ensures DOM has painted (especially on first mount)
       requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
     }
   }, [entries.length]);
+
+  // Auto-focus textarea on mount so you're ready to type
+  useEffect(() => {
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
 
   // Auto-resize textarea to fit content
   const autoResize = useCallback(() => {
