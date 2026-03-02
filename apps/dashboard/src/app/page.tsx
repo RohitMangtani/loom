@@ -202,76 +202,53 @@ function AgentCard({
   );
 }
 
-// --- Chat Popover ---
+// --- Chat Panel ---
 
-function ChatPopover({
-  worker, num, entries, draft, onDraftChange, onSend, onDismiss, onClose,
+function ChatPanel({
+  worker, num, entries, draft, onDraftChange, onSend, onClose,
 }: {
   worker: WorkerState; num: number; entries: ChatEntry[];
   draft: string; onDraftChange: (v: string) => void;
-  onSend: (msg: string) => boolean; onDismiss: () => void; onClose: () => void;
+  onSend: (msg: string) => boolean; onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [kbOffset, setKbOffset] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const color = dotColor(worker);
   const canSend = worker.managed || !!worker.tty;
   const stuck = worker.status === "stuck";
   const buttons = stuck ? quickButtons(worker) : [];
 
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [entries.length]);
 
+  // Auto-resize textarea to fit content
+  const autoResize = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    const maxH = window.innerHeight * 0.3; // 30vh max
+    ta.style.height = `${Math.min(ta.scrollHeight, maxH)}px`;
+    ta.style.overflowY = ta.scrollHeight > maxH ? "auto" : "hidden";
+  }, []);
 
-  // Push popover above iOS virtual keyboard.
-  // Init immediately (catches keyboard-already-open), listen to resize+scroll,
-  // re-sync on page visibility change (returning from tab/app switch).
+  useEffect(() => { autoResize(); }, [draft, autoResize]);
+
+  // Refocus textarea when returning to the app (visibility change)
   useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const update = () => {
-      const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      setKbOffset(offset);
-      if (offset > 0 && scrollRef.current) {
-        requestAnimationFrame(() => {
-          if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        });
+    const handler = () => {
+      if (document.visibilityState === "visible" && textareaRef.current) {
+        // Small delay lets the browser settle after app switch
+        setTimeout(() => textareaRef.current?.focus(), 100);
       }
     };
-    // Read immediately — don't wait for first resize event
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") requestAnimationFrame(update);
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    // BFCache restore (iOS Safari keeps pages in memory on tab switch)
-    const onPageShow = (e: PageTransitionEvent) => {
-      if (e.persisted) requestAnimationFrame(update);
-    };
-    window.addEventListener("pageshow", onPageShow);
-    return () => {
-      vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("pageshow", onPageShow);
-    };
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
   }, []);
 
   return (
-    <>
-      {/* Mobile backdrop — soft dismiss (keeps draft) */}
-      <div className="fixed inset-0 bg-black/40 z-40 sm:hidden" onClick={onDismiss} onTouchMove={(e) => e.preventDefault()} />
-
-      {/* Popover card */}
-      <div
-        className="chat-popover fixed z-50 flex flex-col bg-[var(--bg-card)] border border-[var(--border)] shadow-2xl bottom-0 left-0 right-0 h-[60dvh] rounded-t-2xl sm:bottom-4 sm:right-4 sm:left-auto sm:w-[360px] sm:h-[480px] sm:rounded-2xl"
-        style={{
-          transition: "bottom 0.15s ease-out, height 0.15s ease-out",
-          ...(kbOffset > 0 ? { bottom: `${kbOffset}px`, height: `calc(100dvh - ${kbOffset}px - 40px)` } : {}),
-        }}
-      >
+      <div className="flex-1 min-h-0 flex flex-col border-t border-[var(--border)] bg-[var(--bg-card)]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
           <div className="min-w-0">
@@ -382,22 +359,27 @@ function ChatPopover({
                 ))}
               </div>
             )}
-            <div className="flex gap-2 items-stretch">
+            <div className="flex gap-2 items-end">
               <textarea
+                ref={textareaRef}
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={() => {
-                  // Enter creates a new line. Only the Send button sends.
+                onKeyDown={(e) => {
+                  // Cmd/Ctrl+Enter sends the message
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    if (draft.trim()) { const sent = onSend(draft.trim()); if (sent) onDraftChange(""); }
+                  }
                 }}
-                onFocus={() => setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, 350)}
-                placeholder="Type a response..."
-                rows={2}
-                className="flex-1 min-w-0 bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-3 py-2 text-base sm:text-xs outline-none focus:border-[var(--text-light)] resize-none leading-relaxed"
+                onFocus={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
+                placeholder="Type a response... (⌘+Enter to send)"
+                rows={4}
+                className="flex-1 min-w-0 bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[var(--text-light)] focus:ring-1 focus:ring-[var(--text-light)]/20 resize-none leading-relaxed overflow-hidden"
               />
               <button
                 type="button"
                 onClick={() => { if (draft.trim()) { const sent = onSend(draft.trim()); if (sent) onDraftChange(""); } }}
-                className="px-4 rounded-lg bg-[var(--text-light)] text-[var(--bg)] text-xs font-medium hover:bg-[var(--text-muted)] transition-colors shrink-0"
+                className="px-4 py-2.5 rounded-lg bg-[var(--text-light)] text-[var(--bg)] text-xs font-medium hover:bg-[var(--text-muted)] transition-colors shrink-0 self-end"
               >
                 Send
               </button>
@@ -405,7 +387,6 @@ function ChatPopover({
           </div>
         )}
       </div>
-    </>
   );
 }
 
@@ -448,7 +429,7 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, send, subscribeTo } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry } = useHive(daemonUrl);
 
   // Re-subscribe to restored agent once WebSocket connects
   const restoredRef = useRef(false);
@@ -560,29 +541,31 @@ export default function Home() {
           {activeCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-active)]" />{activeCount} active</span>}
           {stuckCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-needs)]" />{stuckCount} waiting</span>}
           {idleCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-offline)]" />{idleCount} idle</span>}
-          {emptyCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--border)]" />{emptyCount} empty</span>}
+          {emptyCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--border)]" />{emptyCount} offline</span>}
         </div>
       </header>
 
-      {/* Body — fixed 2×2 quadrant grid filling available space */}
-      <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-3 p-4 sm:p-6">
+      {/* Body — 2×2 grid, shrinks when chat is open */}
+      <div className={`min-h-0 grid grid-cols-2 grid-rows-2 gap-3 p-4 sm:p-6 transition-all duration-200 ${!isViewer && selectedEntry ? "shrink-0 basis-[40%]" : "flex-1"}`}>
         {Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).map((slot) => {
           const entry = numbered.find(({ num }) => num === slot);
           if (!entry) {
             return (
               <div
                 key={slot}
-                className={`card flex items-center justify-center ${isViewer ? "opacity-30" : "opacity-30 hover:opacity-60 cursor-pointer transition-opacity"}`}
+                className={`card relative flex items-center justify-center ${isViewer ? "opacity-40" : "opacity-40 hover:opacity-60 cursor-pointer transition-opacity"}`}
                 style={{ borderLeftColor: "var(--border)" }}
                 onClick={isViewer ? undefined : () => setShowSpawn(true)}
               >
-                {isViewer ? (
-                  <span className="text-2xl font-bold tabular-nums text-[var(--text-light)]">{slot}</span>
-                ) : (
-                  <div className="flex flex-col items-center gap-1">
-                    <span className="text-2xl font-bold text-[var(--text-light)]">+</span>
-                    <span className="text-[10px] text-[var(--text-muted)]">Spawn</span>
-                  </div>
+                <div className="flex items-center gap-2.5 absolute top-3 left-3">
+                  <span className="text-lg font-bold tabular-nums text-[var(--text-light)]">{slot}</span>
+                  <span className="w-2 h-2 rounded-full shrink-0 bg-[var(--border)]" />
+                </div>
+                <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16]">
+                  OFFLINE
+                </span>
+                {!isViewer && (
+                  <span className="absolute bottom-3 text-[10px] text-[var(--text-muted)]">Click to spawn</span>
                 )}
               </div>
             );
@@ -601,9 +584,9 @@ export default function Home() {
         })}
       </div>
 
-      {/* Floating chat popover — admin only */}
+      {/* Inline chat panel — admin only */}
       {!isViewer && selectedEntry && (
-        <ChatPopover
+        <ChatPanel
           key={selectedEntry.worker.id}
           worker={selectedEntry.worker}
           num={selectedEntry.num}
@@ -618,12 +601,11 @@ export default function Home() {
             } catch { /* quota exceeded, non-critical */ }
           }}
           onSend={(msg) => {
-            return send({ type: "message", workerId: selectedEntry.worker.id, content: msg });
-          }}
-          onDismiss={() => {
-            // Tap away: keep draft, just collapse
-            setSelectedId(null);
-            subscribeTo(null);
+            const ok = send({ type: "message", workerId: selectedEntry.worker.id, content: msg });
+            if (ok) {
+              addOptimisticEntry(selectedEntry.worker.id, msg);
+            }
+            return ok;
           }}
           onClose={() => {
             // X button: clear draft and close — only action that removes draft
