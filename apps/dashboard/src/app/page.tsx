@@ -219,7 +219,7 @@ function ChatPanel({
   const stuck = worker.status === "stuck";
   const buttons = stuck ? quickButtons(worker) : [];
 
-  // Auto-scroll to bottom on mount and on new messages
+  // Scroll chat messages to bottom on new messages
   useEffect(() => {
     const el = scrollRef.current;
     if (el) {
@@ -227,8 +227,10 @@ function ChatPanel({
     }
   }, [entries.length]);
 
-  // Scroll chat into view after the grid shrink transition (300ms) settles.
+  // On mount: snap chat to bottom + scroll the page down to show chat area
   useEffect(() => {
+    const el = scrollRef.current;
+    if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
     const t = setTimeout(() => {
       textareaRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
     }, 320);
