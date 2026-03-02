@@ -54,7 +54,7 @@ Arrange your 4 terminal tabs in a 2x2 grid:
 
 Each agent gets a quadrant number based on when it started (earliest = Q1). The dashboard mirrors this layout.
 
-**Second screen as a stoplight:** Put the dashboard on a phone, tablet, or second monitor. Each agent card is a stoplight — green means working, red means idle, yellow means stuck waiting for input. You manage a fleet of AI workers by glancing at colors and tapping messages.
+**Second screen as a stoplight:** Put the dashboard on a phone, tablet, or second monitor. Each agent card is a stoplight — green means working, red means idle, yellow means stuck waiting for input. Tap any tile to open its chat, type a message, and it goes straight to that agent's terminal. You manage a fleet of AI workers by glancing at colors and typing into tiles.
 
 ## What It Does
 
