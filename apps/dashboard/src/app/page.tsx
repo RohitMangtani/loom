@@ -252,26 +252,26 @@ function ChatPanel({
   }, []);
 
   return (
-      <div className="flex-1 min-h-0 flex flex-col border-t border-[var(--border)] bg-[var(--bg-card)]">
+      <div className="chat-panel flex-1 min-h-0 flex flex-col border-t border-[var(--border)] bg-[var(--bg-card)]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: DOT_BG[color] }} />
-              <span className="font-semibold text-sm">Agent {num}</span>
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: DOT_BG[color] }} />
+              <span className="font-semibold text-[15px]">Agent {num}</span>
             </div>
-            <p className="text-[10px] text-[var(--text-light)] mt-0.5">
+            <p className="text-[11px] text-[var(--text-light)] mt-0.5 ml-[18px]">
               {statusLabel(worker)}
             </p>
           </div>
-          <button onClick={onClose} className="text-[var(--text-light)] hover:text-[var(--text)] text-lg p-1 leading-none">&times;</button>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full text-[var(--text-light)] hover:text-[var(--text)] hover:bg-[var(--bg-panel)] text-lg leading-none transition-colors">&times;</button>
         </div>
 
-        {/* Messages — scrolling dismisses iOS keyboard (like iMessage) */}
+        {/* Messages */}
         <div className="relative flex-1 min-h-0">
         <div
           ref={scrollRef}
-          className="absolute inset-0 overflow-y-auto p-4 space-y-3 overscroll-contain"
+          className="chat-scroll absolute inset-0 overflow-y-auto p-4 space-y-3 overscroll-contain"
           onTouchMove={() => {
             const el = document.activeElement as HTMLElement | null;
             if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT")) el.blur();
@@ -287,22 +287,21 @@ function ChatPanel({
               const entry = entries[i];
               if (entry.role === "user") {
                 rendered.push(
-                  <div key={i} className="flex justify-end">
-                    <div className="max-w-[85%] bg-blue-600/80 text-white rounded-lg px-4 py-2.5 text-[16px] leading-relaxed">
+                  <div key={i} className="chat-bubble flex justify-end">
+                    <div className="max-w-[85%] bg-[var(--accent)] text-white rounded-2xl rounded-br-md px-4 py-2.5 text-[15px] leading-relaxed">
                       <pre className="whitespace-pre-wrap break-words font-sans">{entry.text}</pre>
                     </div>
                   </div>
                 );
                 i++;
               } else if (entry.role === "tool") {
-                // Collect consecutive tool entries into one collapsed group
                 const toolStart = i;
                 while (i < entries.length && entries[i].role === "tool") i++;
                 const toolCount = i - toolStart;
                 rendered.push(
-                  <details key={`tools-${toolStart}`} className="group/tools">
+                  <details key={`tools-${toolStart}`} className="chat-bubble group/tools">
                     <summary className="cursor-pointer text-[11px] text-[var(--text-light)] font-mono px-1 py-0.5 hover:text-[var(--text-muted)] select-none list-none flex items-center gap-1">
-                      <span className="text-[10px] opacity-60 group-open/tools:rotate-90 transition-transform">▶</span>
+                      <span className="text-[10px] opacity-60 group-open/tools:rotate-90 transition-transform duration-150">&#9654;</span>
                       {toolCount} tool {toolCount === 1 ? "call" : "calls"}
                     </summary>
                     <div className="space-y-0.5 mt-1 ml-3 border-l border-[var(--border)] pl-2">
@@ -316,19 +315,19 @@ function ChatPanel({
                 );
               } else {
                 rendered.push(
-                  <div key={i} className="group/msg">
-                    <div className="relative bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-4 py-3 text-[16px] leading-relaxed">
+                  <div key={i} className="chat-bubble group/msg">
+                    <div className="relative bg-[var(--bg-panel)] border border-[var(--border)] rounded-2xl rounded-bl-md px-4 py-3 text-[15px] leading-relaxed">
                       <button
                         type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(entry.text);
                           const btn = document.getElementById(`copy-${i}`);
-                          if (btn) { btn.textContent = "✓"; setTimeout(() => { btn.textContent = "⎘"; }, 1200); }
+                          if (btn) { btn.textContent = "\u2713"; setTimeout(() => { btn.textContent = "\u2398"; }, 1200); }
                         }}
                         id={`copy-${i}`}
-                        className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-[11px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded sm:opacity-0 sm:group-hover/msg:opacity-100 transition-opacity"
+                        className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center text-[12px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded-md sm:opacity-0 sm:group-hover/msg:opacity-100 transition-all duration-150 active:scale-90"
                         title="Copy"
-                      >⎘</button>
+                      >&#9112;</button>
                       <pre className="whitespace-pre-wrap break-words font-sans text-[var(--text)] pr-8">{entry.text}</pre>
                     </div>
                   </div>
@@ -338,10 +337,9 @@ function ChatPanel({
             }
             return rendered;
           })()}
-          {/* Show stuck prompt at bottom of chat so user sees what's being asked */}
           {stuck && (worker.stuckMessage || worker.currentAction) && (
-            <div className="flex justify-start">
-              <div className="bg-[rgba(234,179,8,0.1)] border border-[rgba(234,179,8,0.3)] rounded-lg px-4 py-3 text-[16px] leading-relaxed">
+            <div className="chat-bubble flex justify-start">
+              <div className="bg-[rgba(234,179,8,0.08)] border border-[rgba(234,179,8,0.25)] rounded-2xl rounded-bl-md px-4 py-3 text-[15px] leading-relaxed">
                 <pre className="whitespace-pre-wrap break-words font-sans text-[#fbbf24]">{worker.stuckMessage || worker.currentAction}</pre>
               </div>
             </div>
@@ -354,7 +352,7 @@ function ChatPanel({
         {canSend && (
           <div className="border-t border-[var(--border)] p-3 shrink-0">
             {stuck && buttons.length > 0 && (
-              <div className="flex items-center gap-1.5 mb-2">
+              <div className="flex items-center gap-1.5 mb-2 flex-wrap">
                 <span className="text-[10px] text-[#fbbf24] shrink-0">{worker.currentAction}:</span>
                 {buttons.map((b) => (
                   <button key={b.value} type="button" onClick={() => onSend(b.value)} className="quick-reply-btn text-[10px] px-2 py-0.5">
@@ -369,21 +367,21 @@ function ChatPanel({
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => {
-                  // Cmd/Ctrl+Enter sends the message
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
                     if (draft.trim()) { const sent = onSend(draft.trim()); if (sent) onDraftChange(""); }
                   }
                 }}
                 onFocus={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
-                placeholder="Type a response... (⌘+Enter to send)"
-                rows={4}
-                className="flex-1 min-w-0 bg-[var(--bg-panel)] border border-[var(--border)] rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[var(--text-light)] focus:ring-1 focus:ring-[var(--text-light)]/20 resize-none leading-relaxed overflow-hidden"
+                placeholder="Message agent..."
+                rows={3}
+                className="chat-input flex-1 min-w-0"
               />
               <button
                 type="button"
+                disabled={!draft.trim()}
                 onClick={() => { if (draft.trim()) { const sent = onSend(draft.trim()); if (sent) onDraftChange(""); } }}
-                className="px-5 rounded-lg bg-[var(--text-light)] text-[var(--bg)] text-sm font-semibold hover:bg-[var(--text-muted)] transition-colors shrink-0"
+                className="send-btn"
               >
                 Send
               </button>
@@ -550,7 +548,7 @@ export default function Home() {
       </header>
 
       {/* Body — 2×2 grid, shrinks when chat is open */}
-      <div className={`min-h-0 grid grid-cols-2 grid-rows-2 gap-3 p-4 sm:p-6 transition-all duration-200 ${!isViewer && selectedEntry ? "shrink-0 basis-[40%]" : "flex-1"}`}>
+      <div className={`min-h-0 grid grid-cols-2 grid-rows-2 gap-3 p-4 sm:p-6 transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0 basis-[40%]" : "flex-1"}`}>
         {Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).map((slot) => {
           const entry = numbered.find(({ num }) => num === slot);
           if (!entry) {
