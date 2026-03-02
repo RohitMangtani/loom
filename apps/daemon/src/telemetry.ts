@@ -9,28 +9,15 @@ import { sendInputToTty } from "./tty-input.js";
 import type { ProcessManager } from "./process-mgr.js";
 import type { ProcessDiscovery } from "./discovery.js";
 import type { WorkerState, TelemetryEvent } from "./types.js";
+import { TaskQueue } from "./task-queue.js";
+import type { QueuedTask } from "./task-queue.js";
+import { Scratchpad } from "./scratchpad.js";
+import type { ScratchpadEntry } from "./scratchpad.js";
+import { LockManager } from "./lock-manager.js";
+import { registerApiRoutes } from "./api-routes.js";
 
-const IDLE_THRESHOLD = 30_000; // 30 seconds without activity → idle
+const IDLE_THRESHOLD = 30_000;
 const HOME = process.env.HOME || `/Users/${process.env.USER}`;
-const QUEUE_PATH = join(HOME, ".hive", "queue.json");
-const SCRATCHPAD_PATH = join(HOME, ".hive", "scratchpad.json");
-const SCRATCHPAD_TTL = 60 * 60 * 1000; // 1 hour auto-expiry
-
-export interface QueuedTask {
-  id: string;
-  task: string;
-  project?: string;  // optional: prefer agents on this project
-  priority: number;   // lower = higher priority (0 = urgent, 10 = default)
-  createdAt: number;
-  blockedBy?: string; // ID of another queued task that must complete first
-}
-
-interface ScratchpadEntry {
-  key: string;
-  value: string;
-  setBy: string;   // worker ID or "human"
-  setAt: number;
-}
 
 export class TelemetryReceiver {
   private workers = new Map<string, WorkerState>();
@@ -41,61 +28,49 @@ export class TelemetryReceiver {
   private app: ReturnType<typeof express> | null = null;
   private requireAuth: ((req: Request, res: Response, next: NextFunction) => void) | null = null;
 
-  // Hook support: session_id → worker_id
+  // Hook support
   private sessionToWorker = new Map<string, string>();
-  // Track last hook event time per worker (discovery defers when hooks are fresh)
   private lastHookTime = new Map<string, number>();
-  // Tracks the in-flight tool (between PreToolUse and PostToolUse).
-  // Stores the tool name and start time so discovery can extend the trusted
-  // window for long-running tools like Agent (subagents run minutes).
   private toolInFlight = new Map<string, { tool: string; since: number } | null>();
-  // True when Claude Code sends idle_prompt notification — confirmed done, waiting for input.
-  // Cleared by any PreToolUse/PostToolUse hook (means Claude started working again).
-  // Discovery uses this to decide grace period: if idleConfirmed → RED fast, else → extended grace.
   private idleConfirmed = new Map<string, boolean>();
-  // Track last time a message was sent FROM the dashboard (website) to a worker.
-  // Auto-pilot uses this to know if the user is actively interacting.
   private lastDashboardInput = new Map<string, number>();
-  // Track last time ANY external input was sent to a worker (dashboard or auto-pilot).
-  // Discovery uses this to avoid flipping working→idle before JSONL catches up.
   private lastInputSent = new Map<string, number>();
-  // Track recent file modifications per worker (for cross-agent artifact reading).
-  // Each entry: { path, action, timestamp }
+
+  // Artifact tracking
   private artifacts = new Map<string, Array<{ path: string; action: string; ts: number }>>();
   private static readonly MAX_ARTIFACTS = 50;
-  // Track dispatched tasks — when a worker finishes a dispatch, auto-write a learning.
+
+  // Dispatch tracking
   private dispatchedTasks = new Map<string, { task: string; project: string; sentAt: number }>();
-  // Signal timeline — ring buffer per worker for compound debugging.
-  // Every status-affecting event is recorded: hooks, JSONL decisions, input sent, idle_prompt.
-  // Exposed via GET /api/signals for live diagnosis.
+
+  // Signal timeline (ring buffer per worker)
   private signals = new Map<string, Array<{ ts: number; signal: string; detail: string }>>();
   private static readonly MAX_SIGNALS = 50;
-  // Message queue: when a worker is busy, queue messages and drain when idle.
-  // Each entry has the content to send and the source (api, watchdog, etc).
+
+  // Message queue for busy workers
   private messageQueue = new Map<string, Array<{ content: string; source: string; queuedAt: number }>>();
-  // Pending hook queue: hooks waiting for session registration.
-  // Keyed by session_id. When registerSession() is called, queued hooks replay.
+
+  // Pending hook queue (hooks waiting for session registration)
   private pendingHooks = new Map<string, Array<{ body: Record<string, unknown>; receivedAt: number }>>();
   private static readonly HOOK_QUEUE_TTL = 10_000;
   private static readonly HOOK_QUEUE_MAX_PER_SESSION = 20;
-  // Global task queue: tasks picked up by any idle agent. Persisted to disk.
-  private taskQueue: QueuedTask[] = [];
-  private completedTaskIds = new Set<string>();
-  private static readonly QUEUE_COUNTER_KEY = "queue_next_id";
-  private queueNextId = 1;
-  // Shared scratchpad: ephemeral key-value store for inter-agent working context.
-  private scratchpad = new Map<string, ScratchpadEntry>();
-  // Advisory file lock registry: prevents agents from editing the same file simultaneously.
-  // Key = file path, value = { workerId, lockedAt }. Auto-released when worker goes idle.
-  private fileLocks = new Map<string, { workerId: string; tty?: string; lockedAt: number }>();
+
+  // Composed subsystems
+  private taskQueue: TaskQueue;
+  private scratchpad: Scratchpad;
+  private lockManager: LockManager;
 
   private token: string;
 
   constructor(port: number, token: string) {
     this.port = port;
     this.token = token;
-    this.loadQueue();
-    this.loadScratchpad();
+    this.taskQueue = new TaskQueue();
+    this.scratchpad = new Scratchpad();
+    this.lockManager = new LockManager(
+      (id) => this.workers.has(id),
+      (id) => this.workers.get(id)?.tty,
+    );
   }
 
   start(): void {
@@ -103,9 +78,6 @@ export class TelemetryReceiver {
     app.use(express.json());
     this.app = app;
 
-    // Token middleware for protected routes.
-    // Accepts either: Authorization: Bearer {token}  OR  ?token={token}
-    // (HTTP hooks from Claude Code can't set custom headers, so query param is the fallback)
     const requireAuth = (req: Request, res: Response, next: NextFunction) => {
       const header = req.headers.authorization || "";
       const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
@@ -119,25 +91,20 @@ export class TelemetryReceiver {
     };
     this.requireAuth = requireAuth;
 
-    // Health check stays open (liveness probe)
     app.get("/health", (_req, res) => {
       res.json({ ok: true });
     });
 
-    // Original telemetry endpoint (for managed workers)
     app.post("/telemetry", requireAuth, (req, res) => {
       const event = req.body as TelemetryEvent;
-
       if (!event.worker_id || !event.event) {
         res.status(400).json({ error: "Missing worker_id or event" });
         return;
       }
-
       this.handleEvent(event);
       res.json({ ok: true });
     });
 
-    // Claude Code hook endpoint — receives live tool events
     app.post("/hook", requireAuth, (req, res) => {
       this.handleHook(req.body);
       res.json({ ok: true });
@@ -148,315 +115,21 @@ export class TelemetryReceiver {
     });
   }
 
-  /** Register REST API routes for inter-agent communication (dispatch API). */
+  /** Register REST API routes (dispatch API). */
   registerApi(procMgr: ProcessManager, discovery: ProcessDiscovery): void {
-    const app = this.app;
-    const requireAuth = this.requireAuth;
-    if (!app || !requireAuth) {
+    if (!this.app || !this.requireAuth) {
       throw new Error("registerApi() called before start()");
     }
-
-    // GET /api/workers — list all workers with status, TTY, project, actions
-    app.get("/api/workers", requireAuth, (_req, res) => {
-      res.json(this.getAll());
-    });
-
-    // POST /api/message — send a message to a worker
-    app.post("/api/message", requireAuth, (req, res) => {
-      const { workerId, content } = req.body as { workerId?: string; content?: string };
-      if (!workerId || !content) {
-        res.status(400).json({ error: "Missing workerId or content" });
-        return;
-      }
-
-      // Try managed worker stdin first
-      const sent = procMgr.sendMessage(workerId, content);
-      if (sent) {
-        const managed = this.get(workerId);
-        if (managed) {
-          managed.status = "working";
-          managed.currentAction = "Thinking...";
-          managed.lastAction = "Received message";
-          managed.lastActionAt = Date.now();
-          managed.stuckMessage = undefined;
-          this.notifyExternal(managed);
-        }
-        this.trackDispatch(workerId, content.slice(0, 200));
-        res.json({ ok: true });
-        return;
-      }
-
-      // Fall back to TTY input for discovered workers
-      const worker = this.get(workerId);
-      if (!worker?.tty) {
-        res.status(404).json({ error: `Worker ${workerId} not found or no TTY` });
-        return;
-      }
-
-      // Queue if worker is actively working — don't inject into active conversation.
-      // "stuck" = waiting for user input → send immediately (dashboard quick-reply buttons).
-      if (worker.status === "working") {
-        this.enqueueMessage(workerId, content, "api:message");
-        const queue = this.messageQueue.get(workerId) || [];
-        console.log(`[queue] ${worker.tty}: queued message (${queue.length} pending, worker ${worker.status})`);
-        res.json({ ok: true, queued: true, position: queue.length });
-        return;
-      }
-
-      const result = sendInputToTty(worker.tty, content);
-      if (result.ok) {
-        worker.status = "working";
-        worker.currentAction = "Thinking...";
-        worker.lastAction = "Received message";
-        worker.lastActionAt = Date.now();
-        worker.stuckMessage = undefined;
-        this.idleConfirmed.set(workerId, false); // Agent is about to receive input — not idle
-        this.markInputSent(workerId, "api:message");
-        this.trackDispatch(workerId, content.slice(0, 200));
-        this.notifyExternal(worker);
-        res.json({ ok: true });
-      } else {
-        res.status(500).json({ error: result.error || `Failed to send to ${worker.tty}` });
-      }
-    });
-
-    // GET /api/message-queue — view queued per-worker messages (legacy)
-    app.get("/api/message-queue", requireAuth, (_req, res) => {
-      const result: Record<string, number> = {};
-      for (const [id, queue] of this.messageQueue) {
-        if (queue.length > 0) result[id] = queue.length;
-      }
-      res.json(result);
-    });
-
-    // GET /api/queue — view global task queue
-    app.get("/api/queue", requireAuth, (_req, res) => {
-      res.json(this.getTaskQueue());
-    });
-
-    // POST /api/queue — push a task to the global queue
-    app.post("/api/queue", requireAuth, (req, res) => {
-      const { task, project, priority, blockedBy } = req.body as {
-        task?: string;
-        project?: string;
-        priority?: number;
-        blockedBy?: string;
-      };
-      if (!task) {
-        res.status(400).json({ error: "Missing task" });
-        return;
-      }
-      const queued = this.pushTask(task, project, priority ?? 10, blockedBy);
-      res.json({ ok: true, task: queued, remaining: this.taskQueue.length });
-    });
-
-    // DELETE /api/queue/:id — remove a task from the queue
-    app.delete("/api/queue/:id", requireAuth, (req, res) => {
-      const removed = this.removeTask(req.params.id as string);
-      if (removed) {
-        res.json({ ok: true, remaining: this.taskQueue.length });
-      } else {
-        res.status(404).json({ error: `Task ${req.params.id} not found in queue` });
-      }
-    });
-
-    // GET /api/audit — quadrant status audit log
-    app.get("/api/audit", requireAuth, (req, res) => {
-      const tty = req.query.tty as string | undefined;
-      res.json(discovery.getAuditLog(tty));
-    });
-
-    // GET /api/artifacts — recent file modifications by a worker
-    app.get("/api/artifacts", requireAuth, (req, res) => {
-      const workerId = req.query.workerId as string | undefined;
-      if (workerId) {
-        res.json(this.getArtifacts(workerId));
-      } else {
-        // Return all artifacts keyed by worker
-        const all: Record<string, Array<{ path: string; action: string; ts: number }>> = {};
-        for (const w of this.getAll()) {
-          const arts = this.getArtifacts(w.id);
-          if (arts.length > 0) all[w.id] = arts;
-        }
-        res.json(all);
-      }
-    });
-
-    // GET /api/conflicts — check if a file was recently modified by another worker
-    app.get("/api/conflicts", requireAuth, (req, res) => {
-      const path = req.query.path as string | undefined;
-      const exclude = req.query.excludeWorker as string | undefined;
-      if (!path) {
-        res.status(400).json({ error: "Missing path query parameter" });
-        return;
-      }
-      const conflicts = this.checkConflicts(path, exclude);
-      res.json({ path, conflicts, hasConflict: conflicts.length > 0 });
-    });
-
-    // POST /api/learning — append a lesson to a project's learning file
-    app.post("/api/learning", requireAuth, (req, res) => {
-      const { project, lesson } = req.body as { project?: string; lesson?: string };
-      if (!project || !lesson) {
-        res.status(400).json({ error: "Missing project or lesson" });
-        return;
-      }
-
-      // Write to project's .claude/hive-learnings.md
-      // Claude Code reads all .md files in .claude/ directory
-      const claudeDir = join(project, ".claude");
-      const learningFile = join(claudeDir, "hive-learnings.md");
-
-      try {
-        if (!existsSync(claudeDir)) {
-          mkdirSync(claudeDir, { recursive: true });
-        }
-
-        // Create header if file is new
-        const header = !existsSync(learningFile)
-          ? "# Hive Learnings\n\nLessons captured from past sessions. Every agent in this project reads this file.\n\n"
-          : "";
-
-        const timestamp = new Date().toISOString().split("T")[0];
-        const entry = `${header}- [${timestamp}] ${lesson.trim()}\n`;
-
-        appendFileSync(learningFile, entry, "utf-8");
-        res.json({ ok: true, file: learningFile });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.status(500).json({ error: `Failed to write learning: ${msg.slice(0, 150)}` });
-      }
-    });
-
-    // GET /api/signals — per-worker signal timeline (compound debugging)
-    app.get("/api/signals", requireAuth, (req, res) => {
-      const workerId = req.query.workerId as string | undefined;
-      res.json(this.getSignals(workerId));
-    });
-
-    // GET /api/locks — list all active file locks
-    app.get("/api/locks", requireAuth, (_req, res) => {
-      res.json(this.getAllLocks());
-    });
-
-    // POST /api/locks — acquire an advisory lock on a file
-    app.post("/api/locks", requireAuth, (req, res) => {
-      const { workerId, path } = req.body as { workerId?: string; path?: string };
-      if (!workerId || !path) {
-        res.status(400).json({ error: "Missing workerId or path" });
-        return;
-      }
-      const result = this.acquireLock(path, workerId);
-      if (result.acquired) {
-        res.json({ ok: true, locked: path });
-      } else {
-        res.status(409).json({
-          error: `File locked by ${result.holder?.tty || result.holder?.workerId}`,
-          holder: result.holder,
-        });
-      }
-    });
-
-    // DELETE /api/locks — release a lock
-    app.delete("/api/locks", requireAuth, (req, res) => {
-      const workerId = req.query.workerId as string | undefined;
-      const path = req.query.path as string | undefined;
-      if (!workerId) {
-        res.status(400).json({ error: "Missing workerId query parameter" });
-        return;
-      }
-      if (path) {
-        const released = this.releaseLock(path, workerId);
-        res.json({ ok: true, released });
-      } else {
-        // Release all locks for this worker
-        const count = this.releaseAllLocks(workerId);
-        res.json({ ok: true, releasedCount: count });
-      }
-    });
-
-    // POST /api/scratchpad — set a key-value pair in shared scratchpad
-    app.post("/api/scratchpad", requireAuth, (req, res) => {
-      const { key, value, setBy } = req.body as { key?: string; value?: string; setBy?: string };
-      if (!key || value === undefined) {
-        res.status(400).json({ error: "Missing key or value" });
-        return;
-      }
-      const entry: ScratchpadEntry = {
-        key,
-        value,
-        setBy: setBy || "unknown",
-        setAt: Date.now(),
-      };
-      this.scratchpad.set(key, entry);
-      this.saveScratchpad();
-      res.json({ ok: true, entry });
-    });
-
-    // GET /api/scratchpad — read scratchpad (all keys or specific key)
-    app.get("/api/scratchpad", requireAuth, (req, res) => {
-      const key = req.query.key as string | undefined;
-      if (key) {
-        const entry = this.scratchpad.get(key);
-        if (entry) {
-          res.json(entry);
-        } else {
-          res.status(404).json({ error: `Key "${key}" not found` });
-        }
-        return;
-      }
-      // Return all entries
-      const all: Record<string, ScratchpadEntry> = {};
-      for (const [k, v] of this.scratchpad) all[k] = v;
-      res.json(all);
-    });
-
-    // DELETE /api/scratchpad — remove a key
-    app.delete("/api/scratchpad", requireAuth, (req, res) => {
-      const key = req.query.key as string | undefined;
-      if (!key) {
-        res.status(400).json({ error: "Missing key query parameter" });
-        return;
-      }
-      const deleted = this.scratchpad.delete(key);
-      if (deleted) this.saveScratchpad();
-      res.json({ ok: true, deleted });
-    });
-
-    // GET /api/debug — session routing state (compound debugging)
-    app.get("/api/debug", requireAuth, (_req, res) => {
-      const sessions: Record<string, string> = {};
-      for (const [sid, wid] of this.sessionToWorker) {
-        sessions[sid] = wid;
-      }
-      const hooks: Record<string, number> = {};
-      for (const w of this.getAll()) {
-        hooks[w.id] = this.lastHookTime.get(w.id) || 0;
-      }
-      const pendingHookQueue: Record<string, number> = {};
-      for (const [sid, queue] of this.pendingHooks) {
-        pendingHookQueue[sid.slice(0, 8)] = queue.length;
-      }
-      res.json({
-        sessionToWorker: sessions,
-        sessionFiles: discovery.getSessionFiles(),
-        lastHookTime: hooks,
-        signalCounts: Object.fromEntries(
-          [...this.signals.entries()].map(([k, v]) => [k, v.length])
-        ),
-        pendingHookQueue,
-      });
-    });
-
-    console.log("  Dispatch API registered: /api/workers, /api/message, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug");
+    registerApiRoutes(this.app, this.requireAuth, this, procMgr, discovery);
   }
+
+  // --- Session management ---
 
   registerSession(sessionId: string, workerId: string): void {
     this.sessionToWorker.set(sessionId, workerId);
     this.replayPendingHooks(sessionId, workerId);
   }
 
-  /** Check if a session UUID is registered to a DIFFERENT worker */
   isSessionOwnedByOther(sessionId: string, workerId: string): boolean {
     const owner = this.sessionToWorker.get(sessionId);
     return !!owner && owner !== workerId;
@@ -478,39 +151,36 @@ export class TelemetryReceiver {
     return this.toolInFlight.get(workerId) != null;
   }
 
-  /** Get details of the in-flight tool (name, start time), or null. */
   getToolInFlight(workerId: string): { tool: string; since: number } | null {
     return this.toolInFlight.get(workerId) ?? null;
   }
 
-  /** Record that a message was sent from the dashboard to this worker */
+  // --- Input tracking ---
+
   markDashboardInput(workerId: string): void {
     this.lastDashboardInput.set(workerId, Date.now());
   }
 
-  /** Get the last time a dashboard message was sent to this worker */
   getLastDashboardInput(workerId: string): number {
     return this.lastDashboardInput.get(workerId) || 0;
   }
 
-  /** Record that external input (dashboard or auto-pilot) was sent to this worker */
   markInputSent(workerId: string, source?: string): void {
     this.lastInputSent.set(workerId, Date.now());
     this.recordSignal(workerId, "input_sent", source ? `${source} → pending` : "external input → pending");
   }
 
-  /** Get the last time external input was sent to this worker */
   getLastInputSent(workerId: string): number {
     return this.lastInputSent.get(workerId) || 0;
   }
 
-  /** Record a file modification by a worker */
+  // --- Artifact tracking ---
+
   recordArtifact(workerId: string, filePath: string, action: string): void {
     if (!this.artifacts.has(workerId)) {
       this.artifacts.set(workerId, []);
     }
     const list = this.artifacts.get(workerId)!;
-    // Deduplicate: if same path was just modified, update timestamp
     const existing = list.find(a => a.path === filePath);
     if (existing) {
       existing.action = action;
@@ -523,16 +193,14 @@ export class TelemetryReceiver {
     }
   }
 
-  /** Get recent file modifications by a worker */
   getArtifacts(workerId: string): Array<{ path: string; action: string; ts: number }> {
     return this.artifacts.get(workerId) || [];
   }
 
-  /** Check if a file was recently modified by any OTHER worker. Returns conflicts. */
   checkConflicts(
     filePath: string,
     excludeWorkerId?: string,
-    maxAgeMs = 30 * 60 * 1000, // 30 min default
+    maxAgeMs = 30 * 60 * 1000,
   ): Array<{ workerId: string; tty?: string; action: string; ts: number }> {
     const results: Array<{ workerId: string; tty?: string; action: string; ts: number }> = [];
     const now = Date.now();
@@ -548,7 +216,8 @@ export class TelemetryReceiver {
     return results;
   }
 
-  /** Track a dispatched task so auto-learning fires when the worker finishes. */
+  // --- Dispatch tracking ---
+
   trackDispatch(workerId: string, taskBrief: string): void {
     const worker = this.workers.get(workerId);
     const project = worker?.project || "";
@@ -559,7 +228,6 @@ export class TelemetryReceiver {
     });
   }
 
-  /** Check dispatched tasks — auto-learn when agents finish. Called from tick(). */
   private checkCompletedDispatches(): void {
     for (const [workerId, dispatch] of this.dispatchedTasks) {
       const worker = this.workers.get(workerId);
@@ -568,7 +236,6 @@ export class TelemetryReceiver {
         continue;
       }
 
-      // Worker finished (idle) and enough time passed for it to have done work
       if (worker.status === "idle" && Date.now() - dispatch.sentAt > 10_000) {
         const artifacts = this.getArtifacts(workerId);
         const fileList = artifacts.length > 0
@@ -580,14 +247,12 @@ export class TelemetryReceiver {
         continue;
       }
 
-      // Cleanup stale dispatches (> 30 min without completion)
       if (Date.now() - dispatch.sentAt > 30 * 60 * 1000) {
         this.dispatchedTasks.delete(workerId);
       }
     }
   }
 
-  /** Write a learning entry to a project's hive-learnings.md */
   private writeLearning(project: string, lesson: string): void {
     if (!project) return;
     const claudeDir = join(project, ".claude");
@@ -603,7 +268,8 @@ export class TelemetryReceiver {
     } catch { /* non-critical */ }
   }
 
-  /** Record a signal in the per-worker timeline (ring buffer). */
+  // --- Signal timeline ---
+
   recordSignal(workerId: string, signal: string, detail: string): void {
     if (!this.signals.has(workerId)) {
       this.signals.set(workerId, []);
@@ -615,7 +281,6 @@ export class TelemetryReceiver {
     }
   }
 
-  /** Get signal timeline for a worker (or all workers). */
   getSignals(workerId?: string): Record<string, Array<{ ts: number; signal: string; detail: string }>> {
     if (workerId) {
       return { [workerId]: this.signals.get(workerId) || [] };
@@ -627,27 +292,15 @@ export class TelemetryReceiver {
     return all;
   }
 
-  registerWorker(
-    id: string,
-    pid: number,
-    project: string,
-    task: string | null
-  ): WorkerState {
+  // --- Worker lifecycle ---
+
+  registerWorker(id: string, pid: number, project: string, task: string | null): WorkerState {
     const projectName = project.split("/").pop() || project;
     const now = Date.now();
     const worker: WorkerState = {
-      id,
-      pid,
-      project,
-      projectName,
-      status: "working",
-      currentAction: null,
-      lastAction: "spawned",
-      lastActionAt: now,
-      errorCount: 0,
-      startedAt: now,
-      task,
-      managed: true,
+      id, pid, project, projectName,
+      status: "working", currentAction: null, lastAction: "spawned",
+      lastActionAt: now, errorCount: 0, startedAt: now, task, managed: true,
     };
     this.workers.set(id, worker);
     this.notify(worker);
@@ -656,9 +309,6 @@ export class TelemetryReceiver {
 
   registerDiscovered(id: string, worker: WorkerState): void {
     this.workers.set(id, worker);
-    // Initialize lastHookTime so hookAge doesn't default to Date.now()-0
-    // (bogus_hook_age anomaly). Fresh workers start with "hooks just seen"
-    // until a real hook arrives and overwrites this value.
     if (!this.lastHookTime.has(id)) {
       this.lastHookTime.set(id, Date.now());
     }
@@ -671,17 +321,13 @@ export class TelemetryReceiver {
     this.toolInFlight.delete(id);
     this.idleConfirmed.delete(id);
     this.lastInputSent.delete(id);
-    this.releaseAllLocks(id);
-    // Clean up session mappings pointing to this worker
+    this.lockManager.releaseAll(id);
     for (const [sid, wid] of this.sessionToWorker) {
       if (wid === id) {
         this.sessionToWorker.delete(sid);
-        // Also clean pending hooks for this session (edge case: session
-        // registered then worker dies before replay completes)
         this.pendingHooks.delete(sid);
       }
     }
-    // Notify listeners so the dashboard can remove the dead worker
     for (const cb of this.removalListeners) {
       cb(id);
     }
@@ -695,40 +341,19 @@ export class TelemetryReceiver {
     return Array.from(this.workers.values());
   }
 
-  /**
-   * Write worker state to ~/.hive/workers.json every tick cycle.
-   * Agents read this file directly (no network needed — bypasses sandbox).
-   * Includes quadrant assignment (sorted by startedAt) so each agent can
-   * self-identify by matching its own PID or TTY.
-   */
   writeWorkersFile(): void {
-    const workers = this.getAll()
-      .sort((a, b) => a.startedAt - b.startedAt);
+    const workers = this.getAll().sort((a, b) => a.startedAt - b.startedAt);
     const slots: Array<{
-      quadrant: number;
-      id: string;
-      pid: number;
-      tty: string | undefined;
-      project: string;
-      projectName: string;
-      status: string;
-      currentAction: string | null;
-      lastAction: string;
-      startedAt: number;
+      quadrant: number; id: string; pid: number; tty: string | undefined;
+      project: string; projectName: string; status: string;
+      currentAction: string | null; lastAction: string; startedAt: number;
     }> = [];
     for (let i = 0; i < workers.length && i < 4; i++) {
       const w = workers[i];
       slots.push({
-        quadrant: i + 1,
-        id: w.id,
-        pid: w.pid,
-        tty: w.tty,
-        project: w.project,
-        projectName: w.projectName,
-        status: w.status,
-        currentAction: w.currentAction,
-        lastAction: w.lastAction,
-        startedAt: w.startedAt,
+        quadrant: i + 1, id: w.id, pid: w.pid, tty: w.tty,
+        project: w.project, projectName: w.projectName, status: w.status,
+        currentAction: w.currentAction, lastAction: w.lastAction, startedAt: w.startedAt,
       });
     }
     try {
@@ -749,44 +374,37 @@ export class TelemetryReceiver {
     this.removalListeners.push(callback);
   }
 
+  // --- Tick loop ---
+
   tick(): void {
     const now = Date.now();
     for (const worker of this.workers.values()) {
       if (worker.status === "working" && now - worker.lastActionAt > IDLE_THRESHOLD) {
-        // Check if process is alive before marking idle.
-        // signal 0 doesn't kill — just checks existence.
         try {
           process.kill(worker.pid, 0);
-          // Process alive — let discovery scan decide status via JSONL analysis.
-          // Don't mark idle here; discovery's thinking detection handles the gap.
           continue;
         } catch {
-          // Process confirmed dead — safe to mark idle
           this.toolInFlight.set(worker.id, null);
         }
         worker.status = "idle";
         worker.currentAction = null;
-        this.releaseAllLocks(worker.id);
+        this.lockManager.releaseAll(worker.id);
         this.notify(worker);
       }
     }
-    // Auto-learn when dispatched tasks complete
     this.checkCompletedDispatches();
-    // Drain queued messages to idle workers
     this.drainQueues();
-    // Auto-dispatch from global task queue to idle agents
     this.dispatchFromQueue();
-    // Expire stale pending hooks
     this.expirePendingHooks();
-    // Expire old scratchpad entries (>1 hour)
-    this.expireScratchpad();
+    this.scratchpad.expire();
   }
 
   notifyExternal(worker: WorkerState): void {
     this.notify(worker);
   }
 
-  /** Queue a message for a busy worker. Drained when worker goes idle. */
+  // --- Message queue ---
+
   enqueueMessage(workerId: string, content: string, source: string): void {
     if (!this.messageQueue.has(workerId)) {
       this.messageQueue.set(workerId, []);
@@ -794,17 +412,26 @@ export class TelemetryReceiver {
     this.messageQueue.get(workerId)!.push({ content, source, queuedAt: Date.now() });
   }
 
-  /** Drain one queued message per idle worker per tick. */
+  getMessageQueueSize(workerId: string): number {
+    return (this.messageQueue.get(workerId) || []).length;
+  }
+
+  getMessageQueueSizes(): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const [id, queue] of this.messageQueue) {
+      if (queue.length > 0) result[id] = queue.length;
+    }
+    return result;
+  }
+
   private drainQueues(): void {
     for (const [workerId, queue] of this.messageQueue) {
       if (queue.length === 0) continue;
       const worker = this.get(workerId);
       if (!worker?.tty || worker.status !== "idle") continue;
-      // Don't drain during brief idle flickers — wait for stable idle (15s)
       if (Date.now() - worker.lastActionAt < 15_000) continue;
 
       const msg = queue.shift()!;
-      // Drop messages queued over 30 minutes ago
       if (Date.now() - msg.queuedAt > 30 * 60 * 1000) {
         console.log(`[queue] ${worker.tty}: dropped stale message (queued ${Math.round((Date.now() - msg.queuedAt) / 60000)}m ago)`);
         continue;
@@ -817,82 +444,38 @@ export class TelemetryReceiver {
         worker.lastAction = `Queued message (${msg.source})`;
         worker.lastActionAt = Date.now();
         worker.stuckMessage = undefined;
-        this.idleConfirmed.set(workerId, false); // Agent is about to receive input — not idle
+        this.idleConfirmed.set(workerId, false);
         this.markInputSent(workerId, msg.source);
         this.trackDispatch(workerId, msg.content.slice(0, 200));
         this.notifyExternal(worker);
         console.log(`[queue] ${worker.tty}: drained queued message (${queue.length} remaining)`);
       }
-      // Only drain one per tick — let the worker process it before sending the next
       break;
     }
   }
 
-  // --- Task queue (global work queue for idle agents) ---
+  // --- Task queue facade ---
 
-  private loadQueue(): void {
-    try {
-      if (existsSync(QUEUE_PATH)) {
-        const data = JSON.parse(readFileSync(QUEUE_PATH, "utf-8")) as {
-          tasks: QueuedTask[];
-          nextId: number;
-          completedIds?: string[];
-        };
-        this.taskQueue = data.tasks || [];
-        this.queueNextId = data.nextId || 1;
-        for (const id of data.completedIds || []) this.completedTaskIds.add(id);
-      }
-    } catch {
-      this.taskQueue = [];
-    }
-  }
-
-  private saveQueue(): void {
-    try {
-      const dir = QUEUE_PATH.replace(/\/[^/]+$/, "");
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(QUEUE_PATH, JSON.stringify({
-        tasks: this.taskQueue,
-        nextId: this.queueNextId,
-        completedIds: [...this.completedTaskIds].slice(-100), // keep last 100
-      }, null, 2));
-    } catch { /* best-effort */ }
-  }
-
-  pushTask(task: string, project?: string, priority = 10, blockedBy?: string): QueuedTask {
-    const queued: QueuedTask = {
-      id: `q${this.queueNextId++}`,
-      task,
-      project,
-      priority,
-      createdAt: Date.now(),
-      blockedBy,
-    };
-    this.taskQueue.push(queued);
-    this.taskQueue.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
-    this.saveQueue();
-    console.log(`[task-queue] Added ${queued.id}: "${task.slice(0, 80)}..." (priority ${priority})`);
-    return queued;
+  pushTask(task: string, project?: string, priority?: number, blockedBy?: string): QueuedTask {
+    return this.taskQueue.push(task, project, priority, blockedBy);
   }
 
   removeTask(taskId: string): boolean {
-    const idx = this.taskQueue.findIndex(t => t.id === taskId);
-    if (idx === -1) return false;
-    this.taskQueue.splice(idx, 1);
-    this.saveQueue();
-    return true;
+    return this.taskQueue.remove(taskId);
   }
 
   getTaskQueue(): QueuedTask[] {
-    return [...this.taskQueue];
+    return this.taskQueue.getAll();
   }
 
-  /** Build a context brief for dispatched tasks — situational awareness for the receiving agent. */
+  getTaskQueueLength(): number {
+    return this.taskQueue.length;
+  }
+
   private buildContextBrief(targetWorkerId: string, taskProject?: string): string {
     const lines: string[] = [];
     const others = this.getAll().filter(w => w.id !== targetWorkerId);
 
-    // What other agents are doing right now
     const active = others.filter(w => w.status === "working");
     if (active.length > 0) {
       lines.push("## Hive Context");
@@ -903,17 +486,16 @@ export class TelemetryReceiver {
       }
     }
 
-    // Recent artifacts in the same project (file conflict awareness)
     if (taskProject) {
       const relevantArtifacts: Array<{ worker: string; path: string; action: string }> = [];
       for (const w of others) {
         if (!w.project.includes(taskProject)) continue;
         const arts = this.getArtifacts(w.id);
         for (const art of arts) {
-          if (Date.now() - art.ts < 30 * 60 * 1000) { // last 30 min
+          if (Date.now() - art.ts < 30 * 60 * 1000) {
             relevantArtifacts.push({
               worker: w.tty || w.id,
-              path: art.path.split("/").slice(-2).join("/"), // last 2 path segments
+              path: art.path.split("/").slice(-2).join("/"),
               action: art.action,
             });
           }
@@ -929,7 +511,6 @@ export class TelemetryReceiver {
       }
     }
 
-    // Project learnings (first 300 chars)
     if (taskProject) {
       const learningPaths = [
         join(taskProject, ".claude", "hive-learnings.md"),
@@ -953,31 +534,22 @@ export class TelemetryReceiver {
     return lines.length > 0 ? "\n\n" + lines.join("\n") : "";
   }
 
-  /** Auto-dispatch: pick the next eligible task and send to an idle agent. Called from tick(). */
   private dispatchFromQueue(): void {
     if (this.taskQueue.length === 0) return;
 
-    // Find genuinely idle agents — must be idle AND not recently working.
-    // The 15s cooldown prevents dispatching to agents that briefly flicker idle
-    // during API thinking gaps (working→idle→working in 3-10 seconds).
     const now = Date.now();
     const idleWorkers = this.getAll().filter(w =>
       w.status === "idle" && w.tty && (now - w.lastActionAt > 15_000)
     );
     if (idleWorkers.length === 0) return;
 
-    for (let i = 0; i < this.taskQueue.length; i++) {
-      const task = this.taskQueue[i];
+    for (const [i, task] of this.taskQueue.entries()) {
+      if (task.blockedBy && !this.taskQueue.isCompleted(task.blockedBy)) continue;
 
-      // Check blockedBy: skip if the blocking task hasn't completed
-      if (task.blockedBy && !this.completedTaskIds.has(task.blockedBy)) continue;
-
-      // Find best idle worker: prefer project match, otherwise any idle agent
       let target = idleWorkers.find(w => task.project && w.project.includes(task.project));
       if (!target) target = idleWorkers[0];
       if (!target?.tty) continue;
 
-      // Append context brief — situational awareness for the receiving agent
       const brief = this.buildContextBrief(target.id, task.project);
       const fullTask = task.task + brief;
 
@@ -992,103 +564,77 @@ export class TelemetryReceiver {
         this.trackDispatch(target.id, `Queue ${task.id}: ${task.task.slice(0, 150)}`);
         this.notifyExternal(target);
 
-        // Remove from queue, mark completed
-        this.taskQueue.splice(i, 1);
-        this.completedTaskIds.add(task.id);
-        this.saveQueue();
+        this.taskQueue.take(i);
+        this.taskQueue.markCompleted(task.id);
         console.log(`[task-queue] Dispatched ${task.id} to ${target.tty} (${this.taskQueue.length} remaining)`);
 
-        // Remove this worker from candidates (one task per tick per worker)
         const targetIdx = idleWorkers.indexOf(target);
         if (targetIdx >= 0) idleWorkers.splice(targetIdx, 1);
         if (idleWorkers.length === 0) break;
-        // Don't increment i — array shifted
-        i--;
       }
     }
   }
 
-  // --- Shared scratchpad ---
+  // --- Scratchpad facade ---
 
-  private loadScratchpad(): void {
-    try {
-      if (existsSync(SCRATCHPAD_PATH)) {
-        const entries = JSON.parse(readFileSync(SCRATCHPAD_PATH, "utf-8")) as ScratchpadEntry[];
-        const now = Date.now();
-        for (const e of entries) {
-          if (now - e.setAt < SCRATCHPAD_TTL) {
-            this.scratchpad.set(e.key, e);
-          }
-        }
-      }
-    } catch { /* start fresh */ }
+  getScratchpad(key: string): ScratchpadEntry | undefined {
+    return this.scratchpad.get(key);
   }
 
-  private saveScratchpad(): void {
-    try {
-      const dir = SCRATCHPAD_PATH.replace(/\/[^/]+$/, "");
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(SCRATCHPAD_PATH, JSON.stringify([...this.scratchpad.values()], null, 2));
-    } catch { /* best-effort */ }
+  getAllScratchpad(): Record<string, ScratchpadEntry> {
+    return this.scratchpad.getAll();
   }
 
-  /** Expire old scratchpad entries. Called from tick(). */
-  private expireScratchpad(): void {
-    const now = Date.now();
-    let expired = false;
-    for (const [key, entry] of this.scratchpad) {
-      if (now - entry.setAt > SCRATCHPAD_TTL) {
-        this.scratchpad.delete(key);
-        expired = true;
-      }
-    }
-    if (expired) this.saveScratchpad();
+  setScratchpad(key: string, value: string, setBy: string): ScratchpadEntry {
+    return this.scratchpad.set(key, value, setBy);
   }
 
-  // --- File lock registry ---
+  deleteScratchpad(key: string): boolean {
+    return this.scratchpad.delete(key);
+  }
 
-  /** Acquire an advisory lock on a file path. Returns true if acquired, false if held by another. */
+  // --- Lock manager facade ---
+
   acquireLock(filePath: string, workerId: string): { acquired: boolean; holder?: { workerId: string; tty?: string; lockedAt: number } } {
-    const existing = this.fileLocks.get(filePath);
-    if (existing && existing.workerId !== workerId) {
-      // Check if holder is still alive (not removed)
-      const holder = this.workers.get(existing.workerId);
-      if (holder) {
-        return { acquired: false, holder: existing };
-      }
-      // Holder is dead — reclaim
-      this.fileLocks.delete(filePath);
-    }
-    const worker = this.workers.get(workerId);
-    this.fileLocks.set(filePath, { workerId, tty: worker?.tty, lockedAt: Date.now() });
-    return { acquired: true };
+    return this.lockManager.acquire(filePath, workerId);
   }
 
-  /** Release a lock held by a specific worker. */
   releaseLock(filePath: string, workerId: string): boolean {
-    const existing = this.fileLocks.get(filePath);
-    if (!existing || existing.workerId !== workerId) return false;
-    this.fileLocks.delete(filePath);
-    return true;
+    return this.lockManager.release(filePath, workerId);
   }
 
-  /** Release all locks held by a worker. Called when worker goes idle or is removed. */
   releaseAllLocks(workerId: string): number {
-    let released = 0;
-    for (const [path, lock] of this.fileLocks) {
-      if (lock.workerId === workerId) {
-        this.fileLocks.delete(path);
-        released++;
-      }
-    }
-    return released;
+    return this.lockManager.releaseAll(workerId);
   }
 
-  /** Get all active locks. */
   getAllLocks(): Array<{ path: string; workerId: string; tty?: string; lockedAt: number }> {
-    return [...this.fileLocks.entries()].map(([path, lock]) => ({
-      path, ...lock,
-    }));
+    return this.lockManager.getAll();
+  }
+
+  // --- Debug state ---
+
+  getDebugState(discovery: ProcessDiscovery): Record<string, unknown> {
+    const sessions: Record<string, string> = {};
+    for (const [sid, wid] of this.sessionToWorker) {
+      sessions[sid] = wid;
+    }
+    const hooks: Record<string, number> = {};
+    for (const w of this.getAll()) {
+      hooks[w.id] = this.lastHookTime.get(w.id) || 0;
+    }
+    const pendingHookQueue: Record<string, number> = {};
+    for (const [sid, queue] of this.pendingHooks) {
+      pendingHookQueue[sid.slice(0, 8)] = queue.length;
+    }
+    return {
+      sessionToWorker: sessions,
+      sessionFiles: discovery.getSessionFiles(),
+      lastHookTime: hooks,
+      signalCounts: Object.fromEntries(
+        [...this.signals.entries()].map(([k, v]) => [k, v.length])
+      ),
+      pendingHookQueue,
+    };
   }
 
   // --- Hook handling ---
@@ -1102,12 +648,8 @@ export class TelemetryReceiver {
 
     if (!sessionId || !eventName) return;
 
-    // Find the worker this hook belongs to
     let workerId = this.sessionToWorker.get(sessionId);
 
-    // Fallback: match by cwd. Prefer the most specific project match (longest path).
-    // When multiple workers share the SAME project path → truly ambiguous → queue.
-    // When one is a parent dir of another (e.g. ~ vs ~/factory/project) → pick the deeper one.
     if (!workerId && cwd) {
       const candidates: Array<{ id: string; pathLen: number }> = [];
       for (const w of this.workers.values()) {
@@ -1116,16 +658,12 @@ export class TelemetryReceiver {
         }
       }
       if (candidates.length >= 1) {
-        // Sort by specificity (longest project path first)
         candidates.sort((a, b) => b.pathLen - a.pathLen);
         const best = candidates[0];
-        // Check if there's a tie at the top (truly ambiguous — same project dir)
         const tied = candidates.filter(c => c.pathLen === best.pathLen);
         if (tied.length === 1) {
           workerId = best.id;
-          // Don't cache — Discovery registers the canonical mapping.
         } else {
-          // AMBIGUOUS — same project path, can't tell apart → queue for replay.
           this.enqueueHook(sessionId, body);
           return;
         }
@@ -1133,7 +671,6 @@ export class TelemetryReceiver {
     }
 
     if (!workerId) {
-      // No CWD match either — queue in case Discovery resolves it.
       this.enqueueHook(sessionId, body);
       return;
     }
@@ -1141,7 +678,6 @@ export class TelemetryReceiver {
     this.processHook(workerId, body, sessionId, eventName, toolName, toolInput, cwd);
   }
 
-  /** Process a hook that has been resolved to a specific worker. */
   private processHook(
     workerId: string,
     body: Record<string, unknown>,
@@ -1158,7 +694,6 @@ export class TelemetryReceiver {
     this.lastHookTime.set(workerId, now);
     worker.lastActionAt = now;
 
-    // Update project from cwd if available (most accurate source)
     if (cwd) {
       const name = cwd.split("/").pop();
       if (name && name !== "rmgtni" && name !== "/") {
@@ -1169,8 +704,6 @@ export class TelemetryReceiver {
 
     switch (eventName) {
       case "PreToolUse": {
-        // AskUserQuestion = Claude is asking the user to pick an option.
-        // Treat as "stuck" so the dashboard shows the question + quick-reply buttons.
         if (toolName === "AskUserQuestion") {
           worker.status = "stuck";
           this.toolInFlight.set(workerId, null);
@@ -1200,7 +733,6 @@ export class TelemetryReceiver {
         const postAction = describeAction(toolName, toolInput);
         worker.lastAction = postAction;
         this.recordSignal(workerId, "PostToolUse", postAction);
-        // Track file modifications for cross-agent artifact reading
         if (toolName && toolInput) {
           const filePath = toolInput.file_path as string | undefined;
           if (filePath && (toolName === "Edit" || toolName === "Write")) {
@@ -1215,23 +747,19 @@ export class TelemetryReceiver {
         const notifType = body.notification_type as string | undefined;
         const message = body.message as string | undefined;
 
-        // idle_prompt = THE DONE SIGNAL. Claude finished its turn.
-        // This is the definitive "I'm done" notification — set idle directly.
-        // NOT stuck (auto-pilot ignores idle workers). Just done.
         if (notifType === "idle_prompt") {
           this.idleConfirmed.set(workerId, true);
           worker.status = "idle";
           worker.currentAction = null;
           worker.stuckMessage = undefined;
           worker.lastAction = "Waiting for input";
-          this.releaseAllLocks(workerId);
+          this.lockManager.releaseAll(workerId);
           this.recordSignal(workerId, "idle_prompt", "done");
           break;
         }
 
         worker.status = "stuck";
         if (notifType === "permission_prompt") {
-          // Include tool context so dashboard shows WHAT needs permission
           if (toolName) {
             const desc = describeAction(toolName, toolInput);
             worker.currentAction = `Allow? ${desc}`;
@@ -1242,7 +770,6 @@ export class TelemetryReceiver {
           worker.currentAction = "Needs your attention";
         }
 
-        // Store the actual prompt text so the dashboard can show real options
         worker.stuckMessage = message || undefined;
         worker.lastAction = worker.currentAction;
         break;
@@ -1269,11 +796,6 @@ export class TelemetryReceiver {
       }
 
       case "UserPromptSubmit": {
-        // Earliest signal that the agent received new work.
-        // Clears idleConfirmed so discovery doesn't force RED during
-        // the thinking gap before the first PreToolUse fires.
-        // Also marks input sent so discovery's input-sent guard keeps
-        // status green for 15s even if JSONL hasn't caught up yet.
         worker.status = "working";
         worker.stuckMessage = undefined;
         this.idleConfirmed.set(workerId, false);
@@ -1290,20 +812,18 @@ export class TelemetryReceiver {
 
   // --- Pending hook queue ---
 
-  /** Queue a hook whose session_id isn't registered yet. */
   private enqueueHook(sessionId: string, body: Record<string, unknown>): void {
     if (!this.pendingHooks.has(sessionId)) {
       this.pendingHooks.set(sessionId, []);
     }
     const queue = this.pendingHooks.get(sessionId)!;
     if (queue.length >= TelemetryReceiver.HOOK_QUEUE_MAX_PER_SESSION) {
-      queue.shift(); // Drop oldest to stay under cap
+      queue.shift();
     }
     queue.push({ body, receivedAt: Date.now() });
     this.recordSignal("_pending", "hook_queued", `session=${sessionId.slice(0, 8)} queue=${queue.length}`);
   }
 
-  /** Replay all queued hooks for a session that just got registered. */
   replayPendingHooks(sessionId: string, workerId: string): void {
     const queue = this.pendingHooks.get(sessionId);
     if (!queue || queue.length === 0) return;
@@ -1312,7 +832,6 @@ export class TelemetryReceiver {
     const now = Date.now();
     let replayed = 0;
     for (const entry of queue) {
-      // Skip expired hooks (process may have died before registration)
       if (now - entry.receivedAt > TelemetryReceiver.HOOK_QUEUE_TTL) continue;
 
       const b = entry.body;
@@ -1332,7 +851,6 @@ export class TelemetryReceiver {
     }
   }
 
-  /** Expire stale entries. Called from tick(). */
   private expirePendingHooks(): void {
     const now = Date.now();
     for (const [sessionId, queue] of this.pendingHooks) {
@@ -1345,7 +863,7 @@ export class TelemetryReceiver {
     }
   }
 
-  // --- Original telemetry event handling ---
+  // --- Original telemetry events ---
 
   private handleEvent(event: TelemetryEvent): void {
     const worker = this.workers.get(event.worker_id);
@@ -1411,12 +929,6 @@ export class TelemetryReceiver {
   }
 }
 
-/**
- * Format AskUserQuestion toolInput into a stuckMessage string
- * that the dashboard's quickButtons parser can read.
- *
- * Produces: "Question text?\n1. Option A\n2. Option B\n3. Option C"
- */
 function formatAskQuestion(toolInput: Record<string, unknown> | undefined): string {
   if (!toolInput) return "Waiting for your answer";
 
