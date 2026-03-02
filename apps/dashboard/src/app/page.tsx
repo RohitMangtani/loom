@@ -227,9 +227,12 @@ function ChatPanel({
     }
   }, [entries.length]);
 
-  // Auto-focus textarea on mount so you're ready to type
+  // Auto-focus textarea on mount and scroll it into view so user sees the chat
   useEffect(() => {
-    requestAnimationFrame(() => textareaRef.current?.focus());
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    });
   }, []);
 
   // Auto-resize textarea to fit content
