@@ -72,7 +72,7 @@ Each agent gets a quadrant number based on when it started (earliest = Q1). The 
 
 This was built using the agents it manages. Four Claude Code instances iterated on the daemon and dashboard simultaneously while a human directed architecture and resolved conflicts.
 
-- [Project page](https://www.rohitmangtani.com/lab/hive) — Full writeup on why this matters
+- [Project page](https://www.rohitmangtani.com/projects/hive) — Full writeup on why this matters
 
 ## Architecture
 
