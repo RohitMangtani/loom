@@ -395,6 +395,15 @@ function ChatPanel({
                         title="Copy"
                       >&#9112;</button>
                       <pre className="whitespace-pre-wrap break-words font-sans text-[var(--text)] pr-8">{entry.text}</pre>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          const msgEl = (e.target as HTMLElement).closest(".chat-bubble");
+                          if (msgEl) msgEl.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }}
+                        className="absolute bottom-2 right-2 w-7 h-7 flex items-center justify-center text-[12px] text-[var(--text-light)] hover:text-[var(--text)] bg-[var(--bg-card)] border border-[var(--border)] rounded-md sm:opacity-0 sm:group-hover/msg:opacity-100 transition-all duration-150 active:scale-90"
+                        title="Scroll to top of message"
+                      >&#9650;</button>
                     </div>
                   </div>
                 );
