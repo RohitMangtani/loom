@@ -1,5 +1,5 @@
 {
-  "name": "dashboard",
+  "name": "@hive/dashboard",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@hive/types": "*",
     "geist": "^1.7.0",
     "next": "16.1.6",
     "react": "19.2.3",
