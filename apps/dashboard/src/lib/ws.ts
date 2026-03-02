@@ -34,6 +34,12 @@ export function useHive(daemonUrl: string) {
       }
       subscribedRef.current = workerId;
       if (workerId) {
+        // Clear existing entries so the fresh history from server replaces them
+        setChatEntries((prev) => {
+          const next = new Map(prev);
+          next.delete(workerId);
+          return next;
+        });
         send({ type: "subscribe", workerId });
       }
     },
