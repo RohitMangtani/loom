@@ -218,9 +218,13 @@ function ChatPanel({
   const stuck = worker.status === "stuck";
   const buttons = stuck ? quickButtons(worker) : [];
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on mount and on new messages
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = scrollRef.current;
+    if (el) {
+      // requestAnimationFrame ensures DOM has painted (especially on first mount)
+      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    }
   }, [entries.length]);
 
   // Auto-resize textarea to fit content
@@ -359,7 +363,7 @@ function ChatPanel({
                 ))}
               </div>
             )}
-            <div className="flex gap-2 items-end">
+            <div className="flex gap-2 items-stretch">
               <textarea
                 ref={textareaRef}
                 value={draft}
@@ -379,7 +383,7 @@ function ChatPanel({
               <button
                 type="button"
                 onClick={() => { if (draft.trim()) { const sent = onSend(draft.trim()); if (sent) onDraftChange(""); } }}
-                className="px-4 py-2.5 rounded-lg bg-[var(--text-light)] text-[var(--bg)] text-xs font-medium hover:bg-[var(--text-muted)] transition-colors shrink-0 self-end"
+                className="px-5 rounded-lg bg-[var(--text-light)] text-[var(--bg)] text-sm font-semibold hover:bg-[var(--text-muted)] transition-colors shrink-0"
               >
                 Send
               </button>
