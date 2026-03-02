@@ -555,7 +555,7 @@ export default function Home() {
     <div className="h-dvh flex flex-col overflow-hidden bg-[var(--bg)]">
       {/* Header — fixed height */}
       <header
-        className="shrink-0 px-4 sm:px-6 pt-4 pb-3"
+        className={`shrink-0 px-4 sm:px-6 pt-4 pb-3 transition-[background-color] duration-500 ease-in-out ${chatExpanded ? "bg-[rgba(255,255,255,0.06)] cursor-pointer" : ""}`}
         onClick={() => { if (chatExpanded) { setChatExpanded(false); } }}
       >
         <div className="text-center relative">
