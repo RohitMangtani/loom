@@ -269,14 +269,20 @@ function ChatPanel({
             if (touchStartY.current === null) return;
             const dy = e.changedTouches[0].clientY - touchStartY.current;
             touchStartY.current = null;
-            if (dy > 40 && document.activeElement !== textareaRef.current) onDismiss();
+            if (dy > 40) {
+              if (document.activeElement === textareaRef.current) { textareaRef.current?.blur(); }
+              else { onDismiss(); }
+            }
           }}
           onMouseDown={(e) => { touchStartY.current = e.clientY; }}
           onMouseUp={(e) => {
             if (touchStartY.current === null) return;
             const dy = e.clientY - touchStartY.current;
             touchStartY.current = null;
-            if (dy > 40 && document.activeElement !== textareaRef.current) onDismiss();
+            if (dy > 40) {
+              if (document.activeElement === textareaRef.current) { textareaRef.current?.blur(); }
+              else { onDismiss(); }
+            }
           }}
         >
           {/* Swipe handle */}
