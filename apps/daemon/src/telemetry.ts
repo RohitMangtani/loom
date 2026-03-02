@@ -2,6 +2,7 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { basename, join } from "path";
 import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from "fs";
+import { describeAction, truncate } from "./utils.js";
 import type { Server } from "http";
 import { validateToken } from "./auth.js";
 import { sendInputToTty } from "./tty-input.js";
@@ -1408,51 +1409,6 @@ export class TelemetryReceiver {
       listener(worker.id, worker);
     }
   }
-}
-
-/** Human-readable description of what a tool is doing */
-function describeAction(
-  toolName: string | undefined,
-  toolInput: Record<string, unknown> | undefined
-): string {
-  if (!toolName) return "Working";
-
-  const filePath = toolInput?.file_path as string | undefined;
-  const fileName = filePath ? basename(filePath) : undefined;
-
-  switch (toolName) {
-    case "Bash":
-      return (toolInput?.description as string) ||
-        truncate(toolInput?.command as string, 50) ||
-        "Running command";
-    case "Edit":
-      return fileName ? `Editing ${fileName}` : "Editing file";
-    case "Write":
-      return fileName ? `Writing ${fileName}` : "Writing file";
-    case "Read":
-      return fileName ? `Reading ${fileName}` : "Reading file";
-    case "Grep":
-      return toolInput?.pattern
-        ? `Searching "${truncate(toolInput.pattern as string, 25)}"`
-        : "Searching code";
-    case "Glob":
-      return toolInput?.pattern
-        ? `Finding ${truncate(toolInput.pattern as string, 30)}`
-        : "Finding files";
-    case "WebFetch":
-      return "Fetching web page";
-    case "WebSearch":
-      return `Searching web`;
-    case "Task":
-      return "Running subagent";
-    default:
-      return toolName.replace(/^mcp__\w+__/, "");
-  }
-}
-
-function truncate(s: string | undefined, max: number): string {
-  if (!s) return "";
-  return s.length > max ? s.slice(0, max) + "..." : s;
 }
 
 /**

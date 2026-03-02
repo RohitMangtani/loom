@@ -1,9 +1,10 @@
 import { execFileSync } from "child_process";
-import { appendFileSync, readFileSync, readdirSync, statSync } from "fs";
+import { appendFileSync, readdirSync, statSync } from "fs";
 import { basename, dirname, join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { SessionStreamer } from "./session-stream.js";
 import type { WorkerState } from "./types.js";
+import { readTail } from "./utils.js";
 
 /** Quadrant Audit — logs every status transition with full decision context */
 interface AuditEntry {
@@ -826,14 +827,14 @@ export class ProcessDiscovery {
    */
   private analyzeJsonlTail(filePath: string, result: SessionContext): SessionContext {
     try {
-      let tail = this.readTail(filePath, 50_000);
+      let tail = readTail(filePath, 50_000);
 
       // Long-running Bash commands flood the JSONL with progress entries.
       // If 50KB yields zero real entries after filtering, read a bigger chunk
       // to find the actual conversation state buried underneath the noise.
       const hasRealEntry = /"type"\s*:\s*"(assistant|user)"/.test(tail);
       if (!hasRealEntry) {
-        tail = this.readTail(filePath, 500_000);
+        tail = readTail(filePath, 500_000);
       }
 
       // Extract project name from cwd field
@@ -1020,12 +1021,6 @@ export class ProcessDiscovery {
     } catch {
       return null;
     }
-  }
-
-  private readTail(path: string, bytes: number): string {
-    const buf = readFileSync(path);
-    if (buf.length <= bytes) return buf.toString("utf-8");
-    return buf.subarray(buf.length - bytes).toString("utf-8");
   }
 
   private projectNameFromCwd(cwd: string): string {

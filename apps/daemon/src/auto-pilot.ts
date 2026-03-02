@@ -1,7 +1,7 @@
-import { readFileSync } from "fs";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { SessionStreamer } from "./session-stream.js";
 import { sendInputToTty, sendSelectionToTty } from "./tty-input.js";
+import { readTail } from "./utils.js";
 
 /**
  * Auto-pilot: ensures agents NEVER stay stuck waiting for keyboard input.
@@ -235,7 +235,7 @@ export class AutoPilot {
     isSelection: boolean;
   } | null {
     try {
-      const tail = this.readTail(filePath, 15_000);
+      const tail = readTail(filePath, 15_000);
       const lines = tail.split("\n").filter(Boolean);
 
       for (let i = lines.length - 1; i >= Math.max(0, lines.length - 25); i--) {
@@ -322,9 +322,4 @@ export class AutoPilot {
     return { response, reason, toolUseId, isSelection };
   }
 
-  private readTail(path: string, bytes: number): string {
-    const buf = readFileSync(path);
-    if (buf.length <= bytes) return buf.toString("utf-8");
-    return buf.subarray(buf.length - bytes).toString("utf-8");
-  }
 }

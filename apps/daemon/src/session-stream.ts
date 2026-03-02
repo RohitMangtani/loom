@@ -1,6 +1,7 @@
 import { readFileSync, statSync, readdirSync, watch, type FSWatcher } from "fs";
-import { basename, join } from "path";
+import { join } from "path";
 import type { ChatEntry } from "./types.js";
+import { describeAction, truncate } from "./utils.js";
 
 const MAX_HISTORY = 50;
 const POLL_INTERVAL = 500; // fallback poll if fs.watch misses events
@@ -215,7 +216,7 @@ function parseLine(line: string): ChatEntry[] | null {
           if (block.type === "text" && block.text?.trim()) {
             entries.push({ role: "agent", text: block.text.trim() });
           } else if (block.type === "tool_use") {
-            const desc = describeToolUse(block.name, block.input);
+            const desc = describeAction(block.name, block.input);
             entries.push({ role: "tool", text: desc });
           }
         }
@@ -244,52 +245,3 @@ function extractText(content: unknown): string | null {
   return null;
 }
 
-function describeToolUse(name: string, input: Record<string, unknown> | undefined): string {
-  if (!input) return `Using ${name}`;
-
-  const filePath = input.file_path as string | undefined;
-  const fileName = filePath ? basename(filePath) : undefined;
-
-  switch (name) {
-    case "Bash":
-      return input.description as string || `$ ${truncate(input.command as string, 80)}` || "Running command";
-    case "Edit":
-      return fileName ? `Editing ${fileName}` : "Editing file";
-    case "Write":
-      return fileName ? `Writing ${fileName}` : "Writing file";
-    case "Read":
-      return fileName ? `Reading ${fileName}` : "Reading file";
-    case "Grep":
-      return input.pattern ? `Searching "${truncate(input.pattern as string, 40)}"` : "Searching code";
-    case "Glob":
-      return input.pattern ? `Finding ${truncate(input.pattern as string, 40)}` : "Finding files";
-    case "WebFetch":
-      return "Fetching web page";
-    case "WebSearch":
-      return `Searching web: ${truncate(input.query as string, 50)}`;
-    case "Task":
-      return `Running subagent: ${truncate(input.description as string, 50)}`;
-    case "AskUserQuestion": {
-      const questions = input.questions as Array<{
-        question?: string;
-        options?: Array<{ label?: string; description?: string }>;
-      }> | undefined;
-      if (questions && questions.length > 0) {
-        const q = questions[0];
-        let text = q.question || "Question";
-        if (q.options && q.options.length > 0) {
-          text += "\n" + q.options.map((o, i) => `${i + 1}. ${o.label || "Option"}`).join("\n");
-        }
-        return text;
-      }
-      return "Asking you a question";
-    }
-    default:
-      return `Using ${name}`;
-  }
-}
-
-function truncate(s: string | undefined, max: number): string {
-  if (!s) return "";
-  return s.length > max ? s.slice(0, max) + "..." : s;
-}
