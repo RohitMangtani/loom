@@ -5,7 +5,7 @@ import { realpathSync } from "fs";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { ProcessManager } from "./process-mgr.js";
 import type { SessionStreamer } from "./session-stream.js";
-import { sendInputToTty } from "./tty-input.js";
+import { sendInputToTty, sendSelectionToTty } from "./tty-input.js";
 import { validateToken } from "./auth.js";
 import type { DaemonMessage, DaemonResponse } from "./types.js";
 
@@ -269,6 +269,34 @@ export class WsServer {
             type: "error",
             error: `Worker ${msg.workerId} not found or no TTY`,
           });
+        }
+        break;
+      }
+
+      case "selection": {
+        if (!msg.workerId) {
+          this.send(ws, { type: "error", error: "Missing workerId" });
+          return;
+        }
+        const selWorker = this.telemetry.get(msg.workerId);
+        if (!selWorker?.tty) {
+          this.send(ws, { type: "error", error: `Worker ${msg.workerId} not found or no TTY` });
+          return;
+        }
+        const selResult = sendSelectionToTty(selWorker.tty, msg.optionIndex || 0);
+        if (selResult.ok) {
+          selWorker.status = "working";
+          selWorker.currentAction = "Thinking...";
+          selWorker.lastAction = "User approved from dashboard";
+          selWorker.lastActionAt = Date.now();
+          selWorker.stuckMessage = undefined;
+          this.telemetry.markDashboardInput(msg.workerId);
+          this.telemetry.markInputSent(msg.workerId, "dashboard:selection");
+          this.telemetry.notifyExternal(selWorker);
+          this.streamer.nudge(msg.workerId);
+          console.log(`Selection sent to ${selWorker.tty}: option ${msg.optionIndex || 0}`);
+        } else {
+          this.send(ws, { type: "error", error: selResult.error || "Selection failed" });
         }
         break;
       }

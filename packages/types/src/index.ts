@@ -33,11 +33,12 @@ export interface TelemetryEvent {
 }
 
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "list" | "orchestrator" | "subscribe" | "unsubscribe";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe";
   workerId?: string;
   project?: string;
   task?: string;
   content?: string;
+  optionIndex?: number;
 }
 
 export interface ChatEntry {
