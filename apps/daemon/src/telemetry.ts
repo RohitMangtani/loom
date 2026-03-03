@@ -745,6 +745,17 @@ export class TelemetryReceiver {
           this.recordSignal(workerId, "PreToolUse", `AskUserQuestion → stuck`);
           break;
         }
+        if (toolName === "EnterPlanMode" || toolName === "ExitPlanMode") {
+          worker.status = "stuck";
+          this.toolInFlight.set(workerId, null);
+          worker.currentAction = toolName;
+          worker.stuckMessage = toolName === "ExitPlanMode"
+            ? "Claude Code needs your approval for the plan"
+            : "Claude Code wants to enter plan mode";
+          worker.lastAction = toolName;
+          this.recordSignal(workerId, "PreToolUse", `${toolName} → stuck`);
+          break;
+        }
         worker.status = "working";
         worker.stuckMessage = undefined;
         this.toolInFlight.set(workerId, { tool: toolName || "unknown", since: Date.now() });
