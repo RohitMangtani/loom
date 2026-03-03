@@ -14,6 +14,8 @@ export function useHive(daemonUrl: string) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subscribedRef = useRef<string | null>(null);
+  // Track optimistic user messages for dedup: Map<"workerId:text", count>
+  const optimisticRef = useRef<Map<string, number>>(new Map());
 
   const send = useCallback(
     (msg: DaemonMessage): boolean => {
@@ -113,17 +115,21 @@ export function useHive(daemonUrl: string) {
               setChatEntries((prev) => {
                 const next = new Map(prev);
                 const existing = next.get(wid) ?? [];
-                // Dedup: skip incoming user messages that match a recent optimistic entry.
-                // Optimistic entries have a timestamp; server echoes don't (or have a different one).
-                // Match by role + text within the last 5 entries to avoid duplicates.
-                const recentTexts = new Set(
-                  existing.slice(-5).filter(e => e.role === "user").map(e => e.text)
-                );
-                const deduped = newEntries.filter(e =>
-                  !(e.role === "user" && recentTexts.has(e.text))
-                );
+                // Dedup: skip incoming user messages that match a tracked optimistic entry.
+                // Each optimistic send registers a key; the first matching echo consumes it.
+                const deduped = newEntries.filter(e => {
+                  if (e.role === "user") {
+                    const key = `${wid}:${e.text}`;
+                    const count = optimisticRef.current.get(key);
+                    if (count && count > 0) {
+                      if (count === 1) optimisticRef.current.delete(key);
+                      else optimisticRef.current.set(key, count - 1);
+                      return false;
+                    }
+                  }
+                  return true;
+                });
                 const updated = [...existing, ...deduped];
-                // Keep within limit
                 if (updated.length > MAX_CHAT_ENTRIES) {
                   updated.splice(0, updated.length - MAX_CHAT_ENTRIES);
                 }
@@ -194,6 +200,8 @@ export function useHive(daemonUrl: string) {
   /** Optimistically add a user message to the chat (shows immediately before server echo) */
   const addOptimisticEntry = useCallback(
     (workerId: string, text: string) => {
+      const key = `${workerId}:${text}`;
+      optimisticRef.current.set(key, (optimisticRef.current.get(key) || 0) + 1);
       const entry: ChatEntry = { role: "user", text, timestamp: Date.now() };
       setChatEntries((prev) => {
         const next = new Map(prev);
