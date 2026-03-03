@@ -7,6 +7,7 @@ import { AutoPilot } from "./auto-pilot.js";
 import { Watchdog } from "./watchdog.js";
 import { StateStore } from "./state-store.js";
 import { NotificationManager } from "./notifications.js";
+import { Collector } from "./collector.js";
 import { loadOrCreateToken, deriveViewerToken, patchHookUrls } from "./auth.js";
 
 const token = loadOrCreateToken();
@@ -20,11 +21,13 @@ const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken);
 const discovery = new ProcessDiscovery(telemetry, streamer);
 const autoPilot = new AutoPilot(telemetry, streamer);
 const watchdog = new Watchdog(telemetry);
+const collector = new Collector();
 const stateStore = new StateStore();
 const notifications = new NotificationManager();
 
 telemetry.start();
 telemetry.registerApi(procMgr, discovery);
+telemetry.registerCollector(collector);
 ws.start();
 
 // Restore state from previous daemon run (if fresh enough)
@@ -48,6 +51,7 @@ setInterval(() => {
   telemetry.writeWorkersFile();
   autoPilot.tick();
   watchdog.tick();
+  collector.tick();
 }, 3_000);
 
 // Write initial workers file immediately after first scan

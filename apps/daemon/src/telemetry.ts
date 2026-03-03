@@ -16,6 +16,7 @@ import { Scratchpad } from "./scratchpad.js";
 import type { ScratchpadEntry } from "./scratchpad.js";
 import { LockManager } from "./lock-manager.js";
 import { registerApiRoutes } from "./api-routes.js";
+import type { Collector } from "./collector.js";
 
 const IDLE_THRESHOLD = 30_000;
 const HOME = process.env.HOME || `/Users/${process.env.USER}`;
@@ -63,6 +64,7 @@ export class TelemetryReceiver {
   private lockManager: LockManager;
 
   private token: string;
+  private collector: Collector | null = null;
 
   constructor(port: number, token: string) {
     this.port = port;
@@ -123,6 +125,13 @@ export class TelemetryReceiver {
       throw new Error("registerApi() called before start()");
     }
     registerApiRoutes(this.app, this.requireAuth, this, procMgr, discovery);
+  }
+
+  registerCollector(collector: Collector): void {
+    this.collector = collector;
+    if (this.app && this.requireAuth) {
+      collector.registerRoutes(this.app, this.requireAuth);
+    }
   }
 
   // --- Session management ---
@@ -850,6 +859,7 @@ export class TelemetryReceiver {
       }
     }
 
+    this.collector?.record(workerId, sessionId, body);
     this.notify(worker);
   }
 
