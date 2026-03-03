@@ -283,6 +283,11 @@ export class WsServer {
           this.send(ws, { type: "error", error: `Worker ${msg.workerId} not found or no TTY` });
           return;
         }
+        // Guard: only send if still stuck (prevents double-send if auto-pilot already handled it)
+        if (selWorker.status !== "stuck") {
+          this.send(ws, { type: "error", error: "Already handled" });
+          return;
+        }
         const selResult = sendSelectionToTty(selWorker.tty, msg.optionIndex || 0);
         if (selResult.ok) {
           selWorker.status = "working";

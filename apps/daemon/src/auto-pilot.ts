@@ -63,7 +63,8 @@ export class AutoPilot {
       // `do script` text injection. Send arrow keys + Enter via System Events.
       const isSelectionPrompt = (worker.currentAction || "").includes("question") ||
         (worker.currentAction || "").includes("Asking") ||
-        (worker.currentAction || "").includes("EnterPlanMode");
+        (worker.currentAction || "").includes("EnterPlanMode") ||
+        (worker.currentAction || "").includes("ExitPlanMode");
       const result = isSelectionPrompt
         ? sendSelectionToTty(worker.tty, parseInt(response.text, 10) - 1 || 0)
         : sendInputToTty(worker.tty, response.text);
@@ -101,14 +102,34 @@ export class AutoPilot {
   }
 
   /**
-   * Choose the best response. Priority:
-   * 1. "(Recommended)" option
-   * 2. Affirmative option (yes/approve/proceed/allow/accept/continue/confirm)
-   * 3. First numbered option
-   * 4. "y" for y/n prompts
-   * 5. "1" as universal fallback
-   *
-   * Never says no. Always picks the most optimal path forward.
+   * Shared picker: given normalized options, apply priority logic.
+   * Priority 1: "(Recommended)" → Priority 2: Affirmative keyword → Priority 3: First option.
+   */
+  private pickBestOption(
+    options: Array<{ num: string; label: string }>
+  ): { text: string; reason: string } | null {
+    if (options.length === 0) return null;
+
+    for (const opt of options) {
+      if (/recommended/i.test(opt.label)) {
+        return { text: opt.num, reason: `picked recommended "${opt.label}"` };
+      }
+    }
+
+    const affirmative = /\b(yes|approve|proceed|allow|accept|continue|confirm|ok|sure|go ahead)\b/i;
+    for (const opt of options) {
+      if (affirmative.test(opt.label)) {
+        return { text: opt.num, reason: `picked "${opt.label}"` };
+      }
+    }
+
+    return { text: options[0].num, reason: `picked first option "${options[0].label}"` };
+  }
+
+  /**
+   * Choose the best response for a stuck agent.
+   * Delegates numbered-option picking to pickBestOption().
+   * Keeps text-specific early exits (permission prompts, y/n, etc.).
    */
   private chooseResponse(
     currentAction: string | null,
@@ -132,23 +153,8 @@ export class AutoPilot {
         return m ? { num: m[1], label: m[2].trim() } : null;
       }).filter(Boolean) as { num: string; label: string }[];
 
-      // Priority 1: "(Recommended)" option
-      for (const opt of parsed) {
-        if (opt.label.toLowerCase().includes("recommended")) {
-          return { text: opt.num, reason: `picked recommended "${opt.label}"` };
-        }
-      }
-
-      // Priority 2: Affirmative option
-      const affirmative = /\b(yes|approve|proceed|allow|accept|continue|confirm|ok|sure|go ahead)\b/i;
-      for (const opt of parsed) {
-        if (affirmative.test(opt.label)) {
-          return { text: opt.num, reason: `picked "${opt.label}"` };
-        }
-      }
-
-      // Priority 3: First option (Claude convention puts best option first)
-      return { text: parsed[0].num, reason: `picked first option "${parsed[0].label}"` };
+      const pick = this.pickBestOption(parsed);
+      if (pick) return pick;
     }
 
     // y/n style prompts → always yes
@@ -279,9 +285,6 @@ export class AutoPilot {
     }
 
     // AskUserQuestion → parse options and pick the best one
-    let response = "1";
-    let reason = "picked first option";
-
     try {
       const parsed = JSON.parse(line);
       const content = parsed?.message?.content || [];
@@ -289,37 +292,18 @@ export class AutoPilot {
         if (c?.name === "AskUserQuestion" && c?.input?.questions) {
           const q = c.input.questions[0];
           const opts = q?.options || [];
-
-          // Priority 1: "(Recommended)" in any option
-          for (let i = 0; i < opts.length; i++) {
-            const label = (opts[i].label || "");
-            if (label.includes("Recommended") || label.includes("recommended")) {
-              response = String(i + 1);
-              reason = `picked recommended "${label}"`;
-              return { response, reason, toolUseId, isSelection };
-            }
-          }
-
-          // Priority 2: Affirmative option
-          const affirmative = /\b(yes|allow|accept|approve|proceed|continue|confirm|go ahead)\b/i;
-          for (let i = 0; i < opts.length; i++) {
-            if (affirmative.test(opts[i].label || "")) {
-              response = String(i + 1);
-              reason = `picked "${opts[i].label}"`;
-              return { response, reason, toolUseId, isSelection };
-            }
-          }
-
-          // Priority 3: First option (Claude puts best first by convention)
-          if (opts[0]?.label) {
-            reason = `picked first option "${opts[0].label}"`;
-          }
+          const normalized = opts.map((o: { label?: string }, i: number) => ({
+            num: String(i + 1),
+            label: o.label || "",
+          }));
+          const pick = this.pickBestOption(normalized);
+          if (pick) return { response: pick.text, reason: pick.reason, toolUseId, isSelection };
           break;
         }
       }
     } catch { /* parse failed, default to "1" */ }
 
-    return { response, reason, toolUseId, isSelection };
+    return { response: "1", reason: "picked first option", toolUseId, isSelection };
   }
 
 }
