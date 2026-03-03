@@ -37,40 +37,49 @@ function badgeStyle(color: DotColor) {
   return map[color];
 }
 
-/** Tools that use ink's selection UI (arrow keys + enter, not text input) */
-const SELECTION_TOOLS = new Set(["AskUserQuestion", "EnterPlanMode", "ExitPlanMode"]);
-
 /** Whether this stuck state needs selection keystrokes vs text input */
 export function isSelectionStuck(w: WorkerState): boolean {
-  return SELECTION_TOOLS.has(w.currentAction || "");
+  const action = (w.currentAction || "").toLowerCase();
+  // Match both raw tool names and friendly descriptions from describeAction()
+  return action.includes("asking") || action.includes("question") ||
+    action === "askuserquestion" || action === "enterplanmode" ||
+    action === "exitplanmode" || action.includes("plan mode") ||
+    action.includes("approval");
 }
 
 /**
  * Parse quick-reply buttons from the worker state.
- * Priority: parse real options from stuckMessage > infer from currentAction > fallback
+ * For selection UIs (AskUserQuestion etc.), buttons use `index` to send
+ * arrow-key selection via sendSelectionToTty. For text prompts, buttons
+ * send text via sendInputToTty.
  */
 export function quickButtons(w: WorkerState): { label: string; value: string; index?: number }[] {
   const msg = w.stuckMessage || "";
   const reason = (w.currentAction || "").toLowerCase();
-
-  // Selection UIs: first option is always "approve/yes" (index 0)
-  if (isSelectionStuck(w)) {
-    return [{ label: "Approve", value: "0", index: 0 }];
-  }
+  const isSelection = isSelectionStuck(w);
 
   if (reason.includes("permission")) {
     return [{ label: "Allow", value: "y" }, { label: "Deny", value: "n" }];
   }
 
+  // Parse numbered options from stuckMessage: "1. Green\n2. Blue\n3. Red"
   const numbered = msg.match(/(?:^|\n)\s*(?:\(?(\d)[.)]\s*|(\d)\s+(?:for|[-:])\s+)(.+)/gim);
   if (numbered && numbered.length >= 2) {
-    return numbered.slice(0, 4).map((line) => {
+    return numbered.slice(0, 4).map((line, i) => {
       const m = line.match(/(\d)/);
       const num = m ? m[1] : "1";
       const labelPart = line.replace(/^\s*\(?(\d)[.)]\s*/, "").replace(/^\s*(\d)\s+(?:for|[-:])\s+/i, "").trim();
       const label = labelPart.length > 20 ? `${num}` : labelPart || num;
-      return { label, value: num };
+      // Selection UIs need arrow-key index, text UIs need the number string
+      return isSelection
+        ? { label, value: num, index: i }
+        : { label, value: num };
     });
+  }
+
+  // EnterPlanMode / ExitPlanMode — just approve
+  if (isSelection) {
+    return [{ label: "Approve", value: "0", index: 0 }];
   }
 
   if (msg.match(/\b(y\/n|yes\/no)\b/i) || reason.includes("proceed") || reason.includes("approve") || reason.includes("plan")) {
@@ -83,10 +92,12 @@ export function quickButtons(w: WorkerState): { label: string; value: string; in
 export { dotColor, DOT_BG, statusLabel, statusWord, badgeStyle };
 export type { DotColor };
 
+const FLAG_COLOR = "#f97316";
+
 export function AgentCard({
-  worker, num, selected, onClick, onSend, onSelect,
+  worker, num, selected, flagged, onClick, onSend, onSelect, onFlag,
 }: {
-  worker: WorkerState; num: number; selected: boolean; onClick: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void;
+  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; onClick: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void;
 }) {
   const color = dotColor(worker);
   const stuck = color === "yellow";
@@ -97,16 +108,28 @@ export function AgentCard({
     <div
       onClick={onClick}
       className={`card relative ${stuck ? "card-stuck" : ""} ${selected ? "card-selected" : ""}`}
-      style={{ borderLeftColor: DOT_BG[color] }}
+      style={{ borderLeftColor: flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
+      {onFlag && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onFlag(); }}
+          className="absolute top-2 right-2 w-4 h-4 rounded-full border transition-all duration-200 cursor-pointer hover:scale-110 z-10"
+          style={{
+            borderColor: flagged ? FLAG_COLOR : "var(--border)",
+            background: flagged ? FLAG_COLOR : "transparent",
+          }}
+          title={flagged ? "Unflag" : "Flag for later"}
+        />
+      )}
       <div className="flex items-center gap-2.5 mb-1.5">
         <span className="text-lg font-bold tabular-nums text-[var(--text)]">{num}</span>
         <span
           className={`w-2 h-2 rounded-full shrink-0 ${stuck ? "animate-pulse" : ""}`}
-          style={{ background: DOT_BG[color] }}
+          style={{ background: flagged ? FLAG_COLOR : DOT_BG[color] }}
         />
-        <span className="text-[10px] font-medium px-1.5 py-px rounded ml-auto" style={badgeStyle(color)}>
-          {statusWord(worker)}
+        <span className="text-[10px] font-medium px-1.5 py-px rounded ml-auto" style={flagged ? { background: "rgba(249,115,22,0.12)", color: FLAG_COLOR } : badgeStyle(color)}>
+          {flagged ? "Flagged" : statusWord(worker)}
         </span>
       </div>
 

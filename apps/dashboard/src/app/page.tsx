@@ -59,6 +59,7 @@ export default function Home() {
   const [chatExpanded, setChatExpanded] = useState(false);
   const draftsRef = useRef<Map<string, string>>(new Map());
   const [, setDraftTick] = useState(0);
+  const [flaggedIds, setFlaggedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     try {
@@ -71,8 +72,21 @@ export default function Home() {
         setDraftTick((k) => k + 1);
       }
     } catch { /* corrupted storage, start fresh */ }
+    try {
+      const savedFlags = localStorage.getItem("hive_flags");
+      if (savedFlags) setFlaggedIds(new Set(JSON.parse(savedFlags)));
+    } catch { /* start fresh */ }
   }, []);
   const isViewer = mode === "viewer";
+
+  const toggleFlag = useCallback((id: string) => {
+    setFlaggedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem("hive_flags", JSON.stringify([...next])); } catch { /* non-critical */ }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     const stored = localStorage.getItem("hive_daemon_url");
@@ -243,9 +257,11 @@ export default function Home() {
               worker={w}
               num={num}
               selected={!isViewer && selectedId === w.id}
+              flagged={flaggedIds.has(w.id)}
               onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
               onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
               onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
+              onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
             />
           );
         })}
