@@ -60,6 +60,10 @@ export class ProcessDiscovery {
   // Prevents working→idle flicker during API thinking gaps where hooks
   // go stale but the agent is still processing.
   private lastConfirmedWorking = new Map<string, number>();
+  // PTY stdout byte offset tracking for output flow detection.
+  // Stores the last known FD 1 offset per PID. If the offset increases
+  // between scans, the process is writing to the terminal = working.
+  private prevPtyOffset = new Map<number, number>();
 
   constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
     this.telemetry = telemetry;
@@ -304,6 +308,7 @@ export class ProcessDiscovery {
       if (!alivePids.has(pid)) {
         this.telemetry.removeWorker(`discovered_${pid}`);
         this.discoveredPids.delete(pid);
+        this.prevPtyOffset.delete(pid);
       }
     }
   }
@@ -446,21 +451,23 @@ export class ProcessDiscovery {
           existing.lastActionAt = Date.now();
           this.checkTransition(id, tty, "working", `JSONL tail idle but cooldown active (${Math.round(workingCooldown/1000)}s/25s since last confirmed working)`, tailCtx);
         } else {
-          // LAYER 8 — CPU signal: before going idle, check if the process is
-          // actively consuming CPU. During text generation, Claude Code has zero
-          // hooks and zero JSONL writes, but the process burns 10-50% CPU.
+          // LAYER 8 — CPU + PTY signal: before going idle, check if the process is
+          // actively consuming CPU or writing output to the terminal.
           // Only applies when transitioning FROM working (don't wake idle agents).
-          // Threshold: 8% filters GC noise (5-7%) while catching generation (10%+).
           // Cap at 3 minutes to prevent permanent green from runaway processes.
           const cpuPct = existing.status === "working" ? this.getCpuForPid(existing.pid) : 0;
-          if (cpuPct > 8 && existing.status === "working" && workingCooldown < 180_000) {
+          const ptyDelta = existing.status === "working" ? this.getPtyOutputDelta(existing.pid) : 0;
+          const isActive = (cpuPct > 8 || ptyDelta > 100) && workingCooldown < 180_000;
+
+          if (isActive && existing.status === "working") {
             existing.currentAction = ctx.latestAction || "Generating response...";
             existing.lastAction = ctx.latestAction || existing.lastAction;
             existing.lastActionAt = Date.now();
-            this.telemetry.recordSignal(id, "cpu_keepalive", `${cpuPct.toFixed(1)}% CPU`);
-            this.checkTransition(id, tty, "working", `CPU active (${cpuPct.toFixed(1)}%) — text generation detected`, { ...tailCtx, cpuPct });
+            const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
+            this.telemetry.recordSignal(id, ptyDelta > 100 ? "pty_keepalive" : "cpu_keepalive", signal);
+            this.checkTransition(id, tty, "working", `Output active (${signal}) — generation detected`, { ...tailCtx, cpuPct, ptyDelta });
           } else {
-            // File >2 min stale OR 2+ consecutive idle signals OR cooldown expired OR CPU idle → RED
+            // File >2 min stale OR 2+ consecutive idle signals OR cooldown expired OR CPU+PTY idle → RED
             if (ctx.latestAction) existing.lastAction = ctx.latestAction;
             existing.status = "idle";
             existing.currentAction = null;
@@ -470,7 +477,7 @@ export class ProcessDiscovery {
             // Only real hooks (PreToolUse/PostToolUse) or high-confidence JSONL
             // signals can clear it.
             this.telemetry.setIdleConfirmed(id, true);
-            this.checkTransition(id, tty, "idle", `JSONL tail idle: fileAge=${Math.round(ctx.fileAgeMs/1000)}s hookAge=${Math.round(hookAge/1000)}s idleCount=${idleCount} cooldown=${Math.round(workingCooldown/1000)}s cpuPct=${cpuPct.toFixed(1)}`, tailCtx);
+            this.checkTransition(id, tty, "idle", `JSONL tail idle: fileAge=${Math.round(ctx.fileAgeMs/1000)}s hookAge=${Math.round(hookAge/1000)}s idleCount=${idleCount} cooldown=${Math.round(workingCooldown/1000)}s cpuPct=${cpuPct.toFixed(1)} ptyDelta=${ptyDelta}`, tailCtx);
           }
         }
       }
@@ -478,7 +485,7 @@ export class ProcessDiscovery {
   }
 
   /**
-   * Layer 8: Get instantaneous CPU usage for a process.
+   * Layer 8a: Get instantaneous CPU usage for a process.
    * Returns 0 on any error (process gone, permission denied).
    * Lightweight — single `ps` call, ~5ms.
    */
@@ -489,6 +496,37 @@ export class ProcessDiscovery {
         timeout: 2000,
       }).trim();
       return parseFloat(out) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Layer 8b: Detect terminal output flow via PTY stdout byte offset.
+   * Reads the FD 1 (stdout) byte offset from lsof and compares to
+   * the previous scan. If bytes increased, the process is writing
+   * to the terminal = actively generating output.
+   *
+   * Non-invasive — reads kernel FD metadata, does not consume output.
+   * Returns the byte delta (0 = no output, >0 = bytes written since last check).
+   */
+  private getPtyOutputDelta(pid: number): number {
+    try {
+      const out = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "1"], {
+        encoding: "utf-8",
+        timeout: 2000,
+      }).trim();
+      // Parse the SIZE/OFF column (7th field) — format is "0t12345678"
+      const lastLine = out.split("\n").pop();
+      if (!lastLine) return 0;
+      const fields = lastLine.trim().split(/\s+/);
+      const offsetStr = fields[6] || "";
+      const offset = parseInt(offsetStr.replace(/^0t/, ""), 10);
+      if (isNaN(offset)) return 0;
+
+      const prev = this.prevPtyOffset.get(pid) ?? offset;
+      this.prevPtyOffset.set(pid, offset);
+      return offset - prev;
     } catch {
       return 0;
     }
