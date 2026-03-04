@@ -31,6 +31,7 @@ Hive fixes that by giving you one screen where you can see everything.
 - **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it's ready. Direct agents from your phone.
 - **Coordination** — file locks prevent two agents from editing the same file. Task queue auto-dispatches work to idle agents. Scratchpad lets agents leave notes for each other.
+- **Workflow handoff** — tag related tasks with a workflow ID and the daemon automatically passes context from one agent to the next. When Agent 1 finishes "Build the API," Agent 2 receives a summary of what was built and which files changed before starting "Build the UI." No manual bridging needed for sequential work.
 - **Compound learning** — every solved problem gets written to a per-project knowledge file. The next agent reads it before starting. Your fleet gets smarter over time.
 
 ## Prerequisites
@@ -148,6 +149,21 @@ Multiple agents can safely work on the same codebase:
 - **Scratchpad** — leave ephemeral notes for other agents (`POST /api/scratchpad`), auto-expires in 1 hour
 - **Inter-agent messaging** — send a prompt to any other agent (`POST /api/message`)
 - **Task queue** — push tasks to a global queue, auto-dispatched to the next idle agent (`POST /api/queue`)
+- **Workflow handoff** — tag tasks with the same `workflowId` and the daemon passes completion context automatically. When Agent 1 finishes step 1, the daemon builds a summary of what it did (files created, files edited) and prepends it to step 2 before dispatching to the next agent. Queue it like this:
+
+```bash
+# Step 1: Build the API
+curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"task":"Build API endpoints for users","project":"/path/to/project","workflowId":"feature-auth"}' \
+  http://localhost:3001/api/queue
+
+# Step 2: Build the UI (waits for step 1)
+curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"task":"Build UI against the API","project":"/path/to/project","workflowId":"feature-auth","blockedBy":"STEP1_ID"}' \
+  http://localhost:3001/api/queue
+```
+
+Agent 2 receives: "Previous step completed by Q3: created src/api/users.ts, created src/api/auth.ts. Your task: Build UI against the API."
 
 ### Compound Learning
 Every solved problem gets written to a per-project knowledge file (`.claude/hive-learnings.md`). The next agent that works on that project reads it before starting. Every debugging session, every style correction, every architectural decision compounds. After months of running, the system knows things about your projects that no fresh agent could replicate.
@@ -177,7 +193,7 @@ All endpoints require the auth token from `~/.hive/token` via the `Authorization
 | Method | Endpoint | Body | Description |
 |--------|----------|------|-------------|
 | `GET` | `/api/queue` | — | View all queued tasks |
-| `POST` | `/api/queue` | `{task, project?, priority?, blockedBy?}` | Push a task. Auto-dispatched to next idle agent. |
+| `POST` | `/api/queue` | `{task, project?, priority?, blockedBy?, workflowId?}` | Push a task. Auto-dispatched to next idle agent. Add `workflowId` to link related tasks for automatic handoff. |
 | `DELETE` | `/api/queue/:id` | — | Remove a queued task |
 
 ### File Coordination
