@@ -95,9 +95,9 @@ export type { DotColor };
 const FLAG_COLOR = "#f97316";
 
 export function AgentCard({
-  worker, num, selected, flagged, onClick, onSend, onSelect, onFlag,
+  worker, num, selected, flagged, onClick, onPointerDown, onSend, onSelect, onFlag,
 }: {
-  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; onClick: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void;
+  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void;
 }) {
   const color = dotColor(worker);
   const stuck = color === "yellow";
@@ -107,6 +107,7 @@ export function AgentCard({
   return (
     <div
       onClick={onClick}
+      onPointerDown={onPointerDown}
       className={`card relative ${stuck ? "card-stuck" : ""} ${selected ? "card-selected" : ""}`}
       style={{ borderLeftColor: flagged ? FLAG_COLOR : DOT_BG[color] }}
     >

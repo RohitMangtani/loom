@@ -282,6 +282,7 @@ export default function Home() {
               selected={!isViewer && selectedId === w.id}
               flagged={flaggedIds.has(w.id)}
               onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
+              onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
               onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
               onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
               onFlag={isViewer ? undefined : () => toggleFlag(w.id)}

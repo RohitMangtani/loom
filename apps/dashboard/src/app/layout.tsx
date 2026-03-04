@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { SitePasswordGate } from "@/components/SitePasswordGate";
+import { ServiceWorker } from "@/components/ServiceWorker";
 import "./globals.css";
 
 export const viewport: Viewport = {
@@ -35,6 +36,7 @@ export default function RootLayout({
       <body
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
       >
+        <ServiceWorker />
         <SitePasswordGate>
           {children}
         </SitePasswordGate>
