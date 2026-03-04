@@ -1,8 +1,21 @@
 # Hive
 
-See all your AI agents on one screen. Green means working. Red means done. Yellow means stuck. Type into any tile to talk to it.
+One screen for all your AI agents. Find My iPhone, but for Claude Code.
 
-Think about Find My iPhone. You open one app and see every Apple device you own. Green dot, online. Grey dot, offline. You do not open a separate app for each device. One visual layer shows you everything. Hive does the same thing for AI agents. Open four terminals, run `claude` in each, and the dashboard shows you what all of them are doing. No alt-tabbing. No guessing which one finished. No lost output from an agent stuck on a permission prompt you did not notice.
+```
+  Your terminals                     Your phone
+┌───────────┬───────────┐       ┌─────────────────┐
+│  Agent 1  │  Agent 2  │       │ ● Q1    ● Q2    │
+│  (Q1)     │  (Q2)     │  ───► │ green   red     │
+├───────────┼───────────┤       │ ● Q3    ● Q4    │
+│  Agent 3  │  Agent 4  │       │ yellow  green    │
+│  (Q3)     │  (Q4)     │       └─────────────────┘
+└───────────┴───────────┘
+```
+
+The dashboard maps 1:1 to your terminal layout. Top-left terminal is top-left tile. Bottom-right terminal is bottom-right tile. Green means working. Red means done. Yellow means stuck. You look at your phone and know exactly which terminal needs attention without reading a single line of output.
+
+Open four terminals, run `claude` in each, and every agent appears on the dashboard in the order you opened them. Close one and the rest shift to fill the gap. Open a new one and it takes the next slot. The spatial mapping stays consistent so your muscle memory works. Q1 is always top-left. The agent in the top-left terminal is always the top-left tile on your phone.
 
 One person. Four agents. The output of a small team.
 
@@ -10,29 +23,31 @@ One person. Four agents. The output of a small team.
 
 Running one AI agent is manageable. Running four at once on different tasks is where things break down. You lose track of which one finished, which one is stuck, and which one drifted from what you asked. You end up alt-tabbing between terminals, re-reading output, and spending more energy tracking status than directing work.
 
-Hive fixes that by giving you one screen where you can see everything.
+The quadrant layout solves this. Your brain is good at spatial memory. When you arrange four terminals in a grid and the dashboard mirrors that grid, you stop thinking in terminal names and start thinking in positions. "Top-left is building the API, bottom-right is writing tests." You glance at four colored dots and know the state of everything in under a second.
 
-**You can walk away.** Start four agents on four tasks, close your laptop, come back an hour later. The dashboard shows you exactly where each one stands. Green means it kept working. Yellow means it hit something and waited for you. Red means it finished. You pick up exactly where things paused without re-reading anything.
+**You catch problems by looking, not reading.** Four green dots means everything is fine. One yellow dot and your eye goes straight to it. You do not read logs. You do not scroll. Color is faster than text because your brain processes it before you consciously look. The spatial layout tells you which terminal to switch to without thinking.
 
-**You catch problems by looking, not reading.** When all four tiles are green, everything is fine. When one turns yellow, your eye goes there automatically. You do not need to read logs or scroll terminal output. The color tells you which agent needs attention and which ones are fine. This is faster than reading because your brain processes color before it processes text.
+**You can walk away.** Start four agents, close your laptop, go to lunch. Come back and the dashboard shows you exactly what happened. Green tiles kept working. Yellow tiles are waiting for you. Red tiles finished. You pick up where things paused without re-reading anything.
 
-**Agents coordinate without you bridging every message.** If Agent 1 finds something Agent 3 needs to know, you can send that context directly through the dashboard. Agents can leave notes for each other on a shared scratchpad. They can queue tasks for the next available agent. File locks prevent two agents from stepping on each other's edits. You are still in charge of the big decisions, but the routine coordination happens without you manually copying context between terminals.
+**Talk to agents from your phone.** Tap any tile, type a message, it goes straight to that agent's terminal. Direct all four agents from the couch. The 2x2 grid on your phone matches the 2x2 grid on your screen, so you always know which agent you are talking to.
 
-**Every session makes the next one better.** When an agent solves a tricky problem, the solution gets saved to a learning file. The next agent that works on that project reads it before starting. After weeks of running, the system knows your project's quirks, your preferred patterns, your past fixes. Fresh agents start with months of accumulated knowledge instead of a blank slate.
+**Agents coordinate without you bridging every message.** File locks prevent two agents from editing the same file. Task queue auto-dispatches work to idle agents. Scratchpad lets agents leave notes for each other. Workflow handoff passes context from one step to the next automatically. You handle direction. They handle implementation.
 
-**The safeguards are built in.** Auto-pilot handles permission prompts so agents do not stall on routine approvals. A watchdog detects when an agent is looping on the same error and flags it. File locks prevent edit conflicts. You get a grace period before auto-pilot acts, so you can override from the dashboard if you want to answer differently. The system keeps agents moving while giving you final say on anything that matters.
+**Every session makes the next one better.** Solved problems get saved to a per-project knowledge file. The next agent reads it before starting. Your fleet gets smarter over time.
+
+**The safeguards are built in.** Auto-pilot handles permission prompts. A watchdog catches stuck loops. File locks prevent edit conflicts. You get a grace period to override from the dashboard before auto-pilot acts.
 
 ## What You Get
 
-- **Stoplight dashboard** — 2x2 grid matching your terminal layout. Green/red/yellow at a glance. Each tile shows what the agent is doing and what you last asked it. Open on your phone, tablet, or second monitor.
-- **Auto-discovery** — start `claude` in any terminal and the daemon finds it within 3 seconds. No registration, no config.
+- **Stoplight dashboard** — 2x2 grid that mirrors your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor. The tile positions match your terminal positions.
+- **Auto-discovery** — start `claude` in any terminal and it appears on the dashboard within 3 seconds. First terminal opened becomes Q1. Second becomes Q2. No registration, no config.
 - **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Agents never sit idle waiting for a click.
-- **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it's ready. Direct agents from your phone.
-- **Coordination** — file locks prevent two agents from editing the same file. Task queue auto-dispatches work to idle agents. Scratchpad lets agents leave notes for each other.
-- **Workflow handoff** — tag related tasks with a workflow ID and the daemon automatically passes context from one agent to the next. When Agent 1 finishes "Build the API," Agent 2 receives a summary of what was built and which files changed before starting "Build the UI." No manual bridging needed for sequential work.
-- **Compound learning** — every solved problem gets written to a per-project knowledge file. The next agent reads it before starting. Your fleet gets smarter over time.
-- **State persistence** — daemon snapshots its state every 30 seconds. If it crashes or you restart, workers, message queues, and locks restore automatically. No lost context.
-- **Push notifications** — when an agent goes yellow (stuck), you get a macOS notification with the project name and what it needs. You do not have to watch the dashboard.
+- **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
+- **Coordination** — file locks, task queue, scratchpad, conflict detection. Multiple agents working on the same codebase without stepping on each other.
+- **Workflow handoff** — tag related tasks with a workflow ID. When Agent 1 finishes "Build the API," Agent 2 automatically receives a summary of what was built and which files changed before starting "Build the UI."
+- **Compound learning** — every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge instead of a blank slate.
+- **State persistence** — daemon snapshots state every 30 seconds. Restart your computer, reopen terminals, and routing restores after one prompt per terminal.
+- **Push notifications** — when an agent goes yellow, macOS sends a native notification with the project name and what it needs.
 
 ## Prerequisites
 
@@ -93,42 +108,13 @@ The daemon auto-discovers agents within 3 seconds. The dashboard shows their sta
 
 Open the dashboard URL on your phone and add it to your home screen. It runs full-screen like a native app. See the [Install as App](#install-as-app) section below.
 
-## The Quadrant Setup
+## Using the Quadrants
 
-Arrange your 4 terminal tabs in a 2x2 grid:
+**Assign tasks by complexity, not by file.** Give your hardest task to Q1 (top-left) so you can keep an eye on it. Put your most independent tasks in Q3 and Q4 where they can run unattended longest.
 
-```
-┌───────────┬───────────┐
-│  Agent 1  │  Agent 2  │
-│  (Q1)     │  (Q2)     │
-├───────────┼───────────┤
-│  Agent 3  │  Agent 4  │
-│  (Q3)     │  (Q4)     │
-└───────────┴───────────┘
-```
+**Bridge context between agents.** When Agent 1 discovers something Agent 3 needs, tap Agent 3's tile and paste the relevant finding. Or use the scratchpad so any agent can read it.
 
-Each agent gets a quadrant number based on when it started (earliest = Q1). The dashboard mirrors this layout so your screen matches your mental model. If you close a terminal, the remaining agents shift up to fill the gap. Open a new terminal and it takes the next available slot.
-
-**Use it as a stoplight.** Put the dashboard on a phone, tablet, or second monitor. Each agent card is a stoplight:
-- **Green** — working
-- **Red** — idle / done
-- **Yellow** — stuck, needs input
-
-Tap any tile to open its chat. Type a message and it goes straight to that agent's terminal.
-
-### How to Use the Quadrants
-
-**Assign tasks by complexity, not by file.** Give your hardest task to Q1 so you can keep an eye on it in the top-left. Put your most independent tasks in Q3 and Q4 where they can run unattended longest.
-
-**Check in by glancing, not by reading.** When you look at the grid and all four dots are green, keep doing whatever you are doing. When one turns yellow, tap it, read the question, answer it, and go back to what you were doing. The whole interaction takes seconds.
-
-**Walk away and come back.** Start all four agents, close the laptop, go to lunch. When you come back, the dashboard shows you exactly what happened. Green tiles finished and moved on. Yellow tiles are waiting for you. Red tiles are done. You do not need to scroll through terminal history to reconstruct what happened while you were gone.
-
-**Talk to agents from your phone.** Open the dashboard on your phone while your computer runs. Tap a yellow tile, read what it is stuck on, type your answer, and it keeps going. You can direct all four agents from the couch.
-
-**Bridge context between agents.** When Agent 1 discovers something Agent 3 needs, tap Agent 3's tile and paste the relevant finding. Or use the scratchpad so any agent can read it. You are the one connecting dots across the fleet. The agents handle the implementation. You handle the direction.
-
-**Give commands to specific agents.** Tap any tile and type a plain English instruction: "Stop what you are doing and fix the login bug first" or "Read what Agent 2 just committed and review it." The message goes straight to that agent's terminal as if you typed it there.
+**Give commands to specific agents.** Tap any tile and type a plain English instruction: "Stop what you are doing and fix the login bug first" or "Read what Q2 just committed and review it." The message goes straight to that agent's terminal as if you typed it there.
 
 ## How It Works
 
