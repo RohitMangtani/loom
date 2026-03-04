@@ -43,7 +43,10 @@ export class TelemetryReceiver {
   private static readonly MAX_ARTIFACTS = 50;
 
   // Dispatch tracking
-  private dispatchedTasks = new Map<string, { task: string; project: string; sentAt: number }>();
+  private dispatchedTasks = new Map<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string }>();
+
+  // Workflow handoffs: workflowId → handoff context from completed steps
+  private workflowHandoffs = new Map<string, string[]>();
 
   // Signal timeline (ring buffer per worker)
   private signals = new Map<string, Array<{ ts: number; signal: string; detail: string }>>();
@@ -229,13 +232,15 @@ export class TelemetryReceiver {
 
   // --- Dispatch tracking ---
 
-  trackDispatch(workerId: string, taskBrief: string): void {
+  trackDispatch(workerId: string, taskBrief: string, taskId?: string, workflowId?: string): void {
     const worker = this.workers.get(workerId);
     const project = worker?.project || "";
     this.dispatchedTasks.set(workerId, {
       task: taskBrief.slice(0, 200),
       project,
       sentAt: Date.now(),
+      taskId,
+      workflowId,
     });
   }
 
@@ -254,6 +259,16 @@ export class TelemetryReceiver {
           : "";
         const lesson = `Completed: ${dispatch.task}${fileList}`;
         this.writeLearning(dispatch.project, lesson);
+
+        // Auto-handoff: if this task was part of a workflow, build handoff for next step
+        if (dispatch.workflowId) {
+          const handoff = this.buildHandoff(workerId, worker, dispatch);
+          const existing = this.workflowHandoffs.get(dispatch.workflowId) || [];
+          existing.push(handoff);
+          this.workflowHandoffs.set(dispatch.workflowId, existing);
+          console.log(`[handoff] ${worker.tty || workerId}: workflow ${dispatch.workflowId} step done → handoff queued`);
+        }
+
         this.dispatchedTasks.delete(workerId);
         continue;
       }
@@ -262,6 +277,25 @@ export class TelemetryReceiver {
         this.dispatchedTasks.delete(workerId);
       }
     }
+  }
+
+  private buildHandoff(workerId: string, worker: WorkerState, dispatch: { task: string; project: string; taskId?: string }): string {
+    const artifacts = this.getArtifacts(workerId);
+    const recentArtifacts = artifacts.filter(a => Date.now() - a.ts < 30 * 60 * 1000);
+    const files = recentArtifacts.map(a => {
+      const short = a.path.split("/").slice(-2).join("/");
+      return `  - ${short} (${a.action})`;
+    });
+
+    const lines = [
+      `## Handoff from ${worker.tty || workerId}${dispatch.taskId ? ` (${dispatch.taskId})` : ""}`,
+      `Completed: ${dispatch.task}`,
+    ];
+    if (files.length > 0) {
+      lines.push("Files modified:");
+      lines.push(...files.slice(-10));
+    }
+    return lines.join("\n");
   }
 
   private writeLearning(project: string, lesson: string): void {
@@ -494,8 +528,8 @@ export class TelemetryReceiver {
 
   // --- Task queue facade ---
 
-  pushTask(task: string, project?: string, priority?: number, blockedBy?: string): QueuedTask {
-    return this.taskQueue.push(task, project, priority, blockedBy);
+  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string): QueuedTask {
+    return this.taskQueue.push(task, project, priority, blockedBy, workflowId);
   }
 
   removeTask(taskId: string): boolean {
@@ -591,7 +625,17 @@ export class TelemetryReceiver {
       if (!target?.tty) continue;
 
       const brief = this.buildContextBrief(target.id, task.project);
-      const fullTask = task.task + brief;
+
+      // Inject workflow handoff if previous steps completed
+      let handoff = "";
+      if (task.workflowId) {
+        const steps = this.workflowHandoffs.get(task.workflowId);
+        if (steps && steps.length > 0) {
+          handoff = "\n\n" + steps.join("\n\n");
+        }
+      }
+
+      const fullTask = task.task + handoff + brief;
 
       const result = sendInputToTty(target.tty, fullTask);
       if (result.ok) {
@@ -601,7 +645,7 @@ export class TelemetryReceiver {
         target.lastActionAt = Date.now();
         target.stuckMessage = undefined;
         this.markInputSent(target.id, "task-queue");
-        this.trackDispatch(target.id, `Queue ${task.id}: ${task.task.slice(0, 150)}`);
+        this.trackDispatch(target.id, `Queue ${task.id}: ${task.task.slice(0, 150)}`, task.id, task.workflowId);
         this.notifyExternal(target);
 
         this.taskQueue.remove(task.id);
@@ -996,9 +1040,14 @@ export class TelemetryReceiver {
       if (queue.length > 0) messageQueue[wid] = [...queue];
     }
 
-    const dispatchedTasks: Record<string, { task: string; project: string; sentAt: number }> = {};
+    const dispatchedTasks: Record<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string }> = {};
     for (const [wid, dt] of this.dispatchedTasks) {
       dispatchedTasks[wid] = { ...dt };
+    }
+
+    const workflowHandoffs: Record<string, string[]> = {};
+    for (const [wfId, steps] of this.workflowHandoffs) {
+      workflowHandoffs[wfId] = [...steps];
     }
 
     return {
@@ -1008,6 +1057,7 @@ export class TelemetryReceiver {
       messageIdCounter: this.messageIdCounter,
       locks: this.lockManager.getAll(),
       dispatchedTasks,
+      workflowHandoffs,
     };
   }
 
@@ -1036,6 +1086,12 @@ export class TelemetryReceiver {
 
     for (const [wid, dt] of Object.entries(snapshot.dispatchedTasks)) {
       this.dispatchedTasks.set(wid, { ...dt });
+    }
+
+    if (snapshot.workflowHandoffs) {
+      for (const [wfId, steps] of Object.entries(snapshot.workflowHandoffs)) {
+        this.workflowHandoffs.set(wfId, [...steps]);
+      }
     }
 
     console.log(`[state-store] Restored ${workerCount} worker(s), ${Object.keys(snapshot.messageQueue).length} queue(s), ${snapshot.locks.length} lock(s)`);

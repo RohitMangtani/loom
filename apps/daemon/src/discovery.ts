@@ -350,7 +350,8 @@ export class ProcessDiscovery {
     }
 
     // idleConfirmed = idle_prompt hook fired OR hysteresis confirmed idle.
-    // Definitive RED — unless we know new input was just sent.
+    // Definitive RED — unless we know new input was just sent OR the process
+    // is actively consuming CPU/PTY (agent thinking without tool calls).
     const isIdleConfirmed = this.telemetry.isIdleConfirmed(id);
     if (isIdleConfirmed) {
       // Don't enforce idleConfirmed if input was sent recently — the agent
@@ -362,15 +363,27 @@ export class ProcessDiscovery {
       // input at tail). Safe: highConfidence=false for noise, so phantom green
       // can't sneak through.
       const jsonlOverride = ctx.status === "working" && ctx.highConfidence;
-      if (!recentInput && !jsonlOverride) {
+      // LAYER 8 override: CPU/PTY activity can break out of idleConfirmed.
+      // This catches the case where an idle agent starts thinking (high CPU)
+      // but no hooks fire because it hasn't called any tools yet.
+      const cpuPct = this.getCpuForPid(existing.pid);
+      const ptyDelta = this.getPtyOutputDelta(existing.pid);
+      const cpuOverride = cpuPct > 8 || ptyDelta > 100;
+      if (!recentInput && !jsonlOverride && !cpuOverride) {
         if (ctx.latestAction) existing.lastAction = ctx.latestAction;
         existing.status = "idle";
         existing.currentAction = null;
-        this.telemetry.recordSignal(id, "jsonl_analysis", `idle (idleConfirmed) fileAge=${Math.round(ctx.fileAgeMs/1000)}s`);
-        this.checkTransition(id, tty, "idle", `idleConfirmed=true fileAge=${Math.round(ctx.fileAgeMs/1000)}s`, tailCtx);
+        this.telemetry.recordSignal(id, "jsonl_analysis", `idle (idleConfirmed) fileAge=${Math.round(ctx.fileAgeMs/1000)}s cpu=${cpuPct.toFixed(1)}%`);
+        this.checkTransition(id, tty, "idle", `idleConfirmed=true fileAge=${Math.round(ctx.fileAgeMs/1000)}s cpu=${cpuPct.toFixed(1)}%`, tailCtx);
         return;
       }
-      // Recent input overrides idleConfirmed — fall through to normal analysis
+      if (cpuOverride) {
+        // CPU/PTY active — clear idleConfirmed and fall through to normal analysis
+        this.telemetry.setIdleConfirmed(id, false);
+        const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
+        this.telemetry.recordSignal(id, cpuPct > 8 ? "cpu_wakeup" : "pty_wakeup", signal);
+      }
+      // Recent input / JSONL / CPU overrides idleConfirmed — fall through to normal analysis
     }
 
     // Guard: External input sent recently, JSONL hasn't caught up
@@ -423,8 +436,25 @@ export class ProcessDiscovery {
       // just because the file is fresh. The "idle but fresh" grace only
       // applies when we're currently working and unsure if we should go idle.
       if (existing.status === "idle") {
-        if (ctx.latestAction) existing.lastAction = ctx.latestAction;
-        this.checkTransition(id, tty, "idle", `JSONL tail idle, already idle (count=${idleCount})`, tailCtx);
+        // LAYER 8 — idle→working recovery: even when idle, check if the
+        // process woke up (high CPU or PTY output). This catches agents that
+        // start thinking after being idle — no hooks fire during thinking,
+        // but CPU spikes immediately.
+        const cpuPct = this.getCpuForPid(existing.pid);
+        const ptyDelta = this.getPtyOutputDelta(existing.pid);
+        if (cpuPct > 8 || ptyDelta > 100) {
+          const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
+          existing.status = "working";
+          existing.currentAction = "Thinking...";
+          existing.lastActionAt = Date.now();
+          this.consecutiveIdleChecks.set(id, 0);
+          this.telemetry.setIdleConfirmed(id, false);
+          this.telemetry.recordSignal(id, cpuPct > 8 ? "cpu_wakeup" : "pty_wakeup", signal);
+          this.checkTransition(id, tty, "working", `Idle→working via ${signal}`, { ...tailCtx, cpuPct, ptyDelta });
+        } else {
+          if (ctx.latestAction) existing.lastAction = ctx.latestAction;
+          this.checkTransition(id, tty, "idle", `JSONL tail idle, already idle (count=${idleCount}) cpu=${cpuPct.toFixed(1)}%`, tailCtx);
+        }
       } else if (ctx.fileAgeMs < 120_000 && idleCount < 2 && hookAge < 30_000) {
         // File written in last 2 min AND first idle signal AND hooks recently
         // active (<30s) — stay GREEN. All three conditions required:
@@ -451,18 +481,20 @@ export class ProcessDiscovery {
           existing.lastActionAt = Date.now();
           this.checkTransition(id, tty, "working", `JSONL tail idle but cooldown active (${Math.round(workingCooldown/1000)}s/25s since last confirmed working)`, tailCtx);
         } else {
-          // LAYER 8 — CPU + PTY signal: before going idle, check if the process is
-          // actively consuming CPU or writing output to the terminal.
-          // Only applies when transitioning FROM working (don't wake idle agents).
+          // LAYER 8 — CPU + PTY signal: check if the process is actively consuming
+          // CPU or writing output to the terminal before going/staying idle.
           // Cap at 3 minutes to prevent permanent green from runaway processes.
-          const cpuPct = existing.status === "working" ? this.getCpuForPid(existing.pid) : 0;
-          const ptyDelta = existing.status === "working" ? this.getPtyOutputDelta(existing.pid) : 0;
+          const cpuPct = this.getCpuForPid(existing.pid);
+          const ptyDelta = this.getPtyOutputDelta(existing.pid);
           const isActive = (cpuPct > 8 || ptyDelta > 100) && workingCooldown < 180_000;
 
-          if (isActive && existing.status === "working") {
+          if (isActive) {
+            existing.status = "working";
             existing.currentAction = ctx.latestAction || "Generating response...";
             existing.lastAction = ctx.latestAction || existing.lastAction;
             existing.lastActionAt = Date.now();
+            this.consecutiveIdleChecks.set(id, 0);
+            this.telemetry.setIdleConfirmed(id, false);
             const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
             this.telemetry.recordSignal(id, ptyDelta > 100 ? "pty_keepalive" : "cpu_keepalive", signal);
             this.checkTransition(id, tty, "working", `Output active (${signal}) — generation detected`, { ...tailCtx, cpuPct, ptyDelta });

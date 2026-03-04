@@ -25,7 +25,8 @@ export interface DaemonSnapshot {
   messageQueue: Record<string, Array<{ id: string; content: string; source: string; queuedAt: number }>>;
   messageIdCounter: number;
   locks: Array<{ path: string; workerId: string; tty?: string; lockedAt: number }>;
-  dispatchedTasks: Record<string, { task: string; project: string; sentAt: number }>;
+  dispatchedTasks: Record<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string }>;
+  workflowHandoffs?: Record<string, string[]>;
 }
 
 export class StateStore {

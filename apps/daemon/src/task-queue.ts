@@ -11,6 +11,7 @@ export interface QueuedTask {
   priority: number;
   createdAt: number;
   blockedBy?: string;
+  workflowId?: string;
 }
 
 export class TaskQueue {
@@ -51,7 +52,7 @@ export class TaskQueue {
     } catch { /* best-effort */ }
   }
 
-  push(task: string, project?: string, priority = 10, blockedBy?: string): QueuedTask {
+  push(task: string, project?: string, priority = 10, blockedBy?: string, workflowId?: string): QueuedTask {
     const queued: QueuedTask = {
       id: `q${this.nextId++}`,
       task,
@@ -59,6 +60,7 @@ export class TaskQueue {
       priority,
       createdAt: Date.now(),
       blockedBy,
+      workflowId,
     };
     this.tasks.push(queued);
     this.tasks.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);
