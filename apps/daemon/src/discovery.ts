@@ -56,6 +56,10 @@ export class ProcessDiscovery {
   // Hysteresis: count consecutive idle signals per worker.
   // Require 2+ before transitioning working→idle (prevents single-scan flapping).
   private consecutiveIdleChecks = new Map<string, number>();
+  // Reverse hysteresis: count consecutive CPU-active signals per idle worker.
+  // Require 2+ before transitioning idle→working (prevents false green flickers
+  // from brief CPU spikes like GC or shell init).
+  private consecutiveActiveChecks = new Map<string, number>();
   // Cooldown: timestamp of last confirmed working state per worker.
   // Prevents working→idle flicker during API thinking gaps where hooks
   // go stale but the agent is still processing.
@@ -389,7 +393,12 @@ export class ProcessDiscovery {
       // but no hooks fire because it hasn't called any tools yet.
       const cpuPct = this.getCpuForPid(existing.pid);
       const ptyDelta = this.getPtyOutputDelta(existing.pid);
-      const cpuOverride = cpuPct > 8 || ptyDelta > 100;
+      const cpuActive = cpuPct > 15 || ptyDelta > 100;
+      // Require 2+ consecutive active ticks before CPU breaks idleConfirmed
+      const activeCount = cpuActive ? (this.consecutiveActiveChecks.get(id) || 0) + 1 : 0;
+      if (cpuActive) this.consecutiveActiveChecks.set(id, activeCount);
+      else this.consecutiveActiveChecks.set(id, 0);
+      const cpuOverride = cpuActive && activeCount >= 2;
       if (!recentInput && !jsonlOverride && !cpuOverride) {
         if (ctx.latestAction) existing.lastAction = ctx.latestAction;
         existing.status = "idle";
@@ -402,7 +411,7 @@ export class ProcessDiscovery {
         // CPU/PTY active — clear idleConfirmed and fall through to normal analysis
         this.telemetry.setIdleConfirmed(id, false);
         const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
-        this.telemetry.recordSignal(id, cpuPct > 8 ? "cpu_wakeup" : "pty_wakeup", signal);
+        this.telemetry.recordSignal(id, cpuPct > 15 ? "cpu_wakeup" : "pty_wakeup", signal);
       }
       // Recent input / JSONL / CPU overrides idleConfirmed — fall through to normal analysis
     }
@@ -430,6 +439,7 @@ export class ProcessDiscovery {
       }
       // JSONL tail says working (tool_use at tail, or user/tool_result with fresh file)
       this.consecutiveIdleChecks.set(id, 0); // reset hysteresis
+      this.consecutiveActiveChecks.set(id, 0); // reset CPU hysteresis
       // Only set lastConfirmedWorking from high-confidence signals (tool_use at
       // tail, real hooks). Low-confidence signals (mid-stream heuristic, noise-
       // driven) must NOT set the cooldown timer — otherwise a 1s "ok" response
@@ -463,16 +473,25 @@ export class ProcessDiscovery {
         // but CPU spikes immediately.
         const cpuPct = this.getCpuForPid(existing.pid);
         const ptyDelta = this.getPtyOutputDelta(existing.pid);
-        if (cpuPct > 8 || ptyDelta > 100) {
-          const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
-          existing.status = "working";
-          existing.currentAction = "Thinking...";
-          existing.lastActionAt = Date.now();
-          this.consecutiveIdleChecks.set(id, 0);
-          this.telemetry.setIdleConfirmed(id, false);
-          this.telemetry.recordSignal(id, cpuPct > 8 ? "cpu_wakeup" : "pty_wakeup", signal);
-          this.checkTransition(id, tty, "working", `Idle→working via ${signal}`, { ...tailCtx, cpuPct, ptyDelta });
+        if (cpuPct > 15 || ptyDelta > 100) {
+          const activeCount = (this.consecutiveActiveChecks.get(id) || 0) + 1;
+          this.consecutiveActiveChecks.set(id, activeCount);
+          if (activeCount >= 2) {
+            // 2+ consecutive active ticks — real work, flip to working
+            const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
+            existing.status = "working";
+            existing.currentAction = "Thinking...";
+            existing.lastActionAt = Date.now();
+            this.consecutiveIdleChecks.set(id, 0);
+            this.consecutiveActiveChecks.set(id, 0);
+            this.telemetry.setIdleConfirmed(id, false);
+            this.telemetry.recordSignal(id, cpuPct > 15 ? "cpu_wakeup" : "pty_wakeup", signal);
+            this.checkTransition(id, tty, "working", `Idle→working via ${signal} (confirmed ${activeCount} ticks)`, { ...tailCtx, cpuPct, ptyDelta });
+          } else {
+            this.checkTransition(id, tty, "idle", `CPU active but unconfirmed (${activeCount}/2) cpu=${cpuPct.toFixed(1)}%`, tailCtx);
+          }
         } else {
+          this.consecutiveActiveChecks.set(id, 0);
           if (ctx.latestAction) existing.lastAction = ctx.latestAction;
           this.checkTransition(id, tty, "idle", `JSONL tail idle, already idle (count=${idleCount}) cpu=${cpuPct.toFixed(1)}%`, tailCtx);
         }
@@ -507,7 +526,7 @@ export class ProcessDiscovery {
           // Cap at 3 minutes to prevent permanent green from runaway processes.
           const cpuPct = this.getCpuForPid(existing.pid);
           const ptyDelta = this.getPtyOutputDelta(existing.pid);
-          const isActive = (cpuPct > 8 || ptyDelta > 100) && workingCooldown < 180_000;
+          const isActive = (cpuPct > 15 || ptyDelta > 100) && workingCooldown < 180_000;
 
           if (isActive) {
             existing.status = "working";
