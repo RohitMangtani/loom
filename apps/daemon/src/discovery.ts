@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { appendFileSync, readdirSync, statSync } from "fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { basename, dirname, join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { SessionStreamer } from "./session-stream.js";
@@ -137,7 +137,22 @@ export class ProcessDiscovery {
     const processes = this.findClaudeProcesses();
     const alivePids = new Set<number>();
 
-    for (const proc of processes) {
+    // Sort by startedAt so earliest worker gets first pick at birthtime matching.
+    // This prevents all workers from grabbing the same JSONL when they start
+    // within seconds of each other (e.g. after a system restart).
+    const sorted = [...processes].sort((a, b) => a.startedAt - b.startedAt);
+
+    // Track JSONL files already claimed this scan cycle.
+    // Passed to findSessionFileByStartTime to prevent multiple workers
+    // from matching the same file when birthtimes are clustered.
+    const claimedFiles = new Set<string>();
+
+    // Content-based TTY→file map: read JSONL tails for identity hook output
+    // ("You are Q{N} (ttysXXX, project)") to build ground-truth assignments.
+    // This survives daemon restarts and doesn't depend on birthtime heuristics.
+    const ttyToFile = this.buildTtyFileMap(sorted);
+
+    for (const proc of sorted) {
       alivePids.add(proc.pid);
       const id = `discovered_${proc.pid}`;
 
@@ -146,44 +161,71 @@ export class ProcessDiscovery {
         this.telemetry.registerSession(sid, id);
       }
 
-      // Register session file with streamer for chat history.
-      // Priority: lsof JSONL path > session ID match > birthtime match.
-      // Never use "most recently modified in cwd dir" — when multiple workers
-      // share the same cwd (e.g. home dir), it picks the wrong worker's file.
-      let sessionFile: string | null = proc.jsonlFile; // Direct from lsof — most reliable
-      if (!sessionFile && proc.sessionIds.length > 0) {
-        sessionFile = this.streamer.findSessionFile(proc.sessionIds);
+      // If register-tty has pinned this worker's session (ground truth from identity.sh),
+      // skip heuristic session file resolution — the pin is authoritative.
+      const pinnedSession = this.telemetry.getPinnedSessionForWorker(id);
+      let sessionFile: string | null = null;
+
+      if (pinnedSession) {
+        // Use the pinned session file directly
+        const cachedFile = this.streamer.getSessionFile(id);
+        if (cachedFile) {
+          claimedFiles.add(cachedFile);
+          sessionFile = cachedFile; // Already set correctly by register-tty
+        }
+      } else {
+        // Priority 0: content-based match (ground truth from identity hook in JSONL).
+        // Overrides all heuristics because it matches TTY↔file using actual content.
+        if (proc.tty) {
+          const contentMatch = ttyToFile.get(proc.tty);
+          if (contentMatch && !claimedFiles.has(contentMatch)) {
+            sessionFile = contentMatch;
+          }
+        }
+
         if (!sessionFile) {
-          const jsonl = this.findBestJsonlFile(proc.sessionIds);
-          if (jsonl) sessionFile = jsonl.path;
+          // Register session file with streamer for chat history.
+          // Priority: lsof JSONL path > session ID match > birthtime match.
+          // Never use "most recently modified in cwd dir" — when multiple workers
+          // share the same cwd (e.g. home dir), it picks the wrong worker's file.
+          sessionFile = proc.jsonlFile; // Direct from lsof — most reliable
+          if (!sessionFile && proc.sessionIds.length > 0) {
+            sessionFile = this.streamer.findSessionFile(proc.sessionIds);
+            if (!sessionFile) {
+              const jsonl = this.findBestJsonlFile(proc.sessionIds);
+              if (jsonl) sessionFile = jsonl.path;
+            }
+          }
+          // Fallback: match JSONL by creation time closest to process start.
+          // Each Claude session creates a fresh JSONL, so birthtime ≈ startedAt.
+          // Deduplication via claimedFiles prevents collision when all workers
+          // start within seconds (birthtimes cluster within 1-2s).
+          if (!sessionFile) {
+            sessionFile = this.findSessionFileByStartTime(proc.cwd, proc.startedAt, claimedFiles);
+          }
+        }
+
+        // Stale-file recovery: when context compaction creates a new session,
+        // the old JSONL stops being written to. If the cached file is stale
+        // (>2min), search for a successor JSONL in the same directory.
+        // DO NOT reduce below 120s — long subagent chains (Task tool) cause
+        // 30-90s gaps in JSONL writes. At 30s, stale-file recovery triggers
+        // mid-task and grabs ANOTHER worker's file (cross-contamination)
+        // when multiple workers share the same project directory.
+        const effectiveFile = sessionFile || this.streamer.getSessionFile(id);
+        if (effectiveFile) {
+          try {
+            const age = Date.now() - statSync(effectiveFile).mtimeMs;
+            if (age > 120_000) {
+              const newer = this.findNewerSessionFile(effectiveFile, id);
+              if (newer) sessionFile = newer;
+            }
+          } catch { /* file gone */ }
         }
       }
-      // Fallback: match JSONL by creation time closest to process start.
-      // Each Claude session creates a fresh JSONL, so birthtime ≈ startedAt.
-      // Safe even with shared cwd — birthtimes are unique per session.
-      if (!sessionFile) {
-        sessionFile = this.findSessionFileByStartTime(proc.cwd, proc.startedAt);
-      }
 
-      // Stale-file recovery: when context compaction creates a new session,
-      // the old JSONL stops being written to. If the cached file is stale
-      // (>2min), search for a successor JSONL in the same directory.
-      // DO NOT reduce below 120s — long subagent chains (Task tool) cause
-      // 30-90s gaps in JSONL writes. At 30s, stale-file recovery triggers
-      // mid-task and grabs ANOTHER worker's file (cross-contamination)
-      // when multiple workers share the same project directory.
-      const effectiveFile = sessionFile || this.streamer.getSessionFile(id);
-      if (effectiveFile) {
-        try {
-          const age = Date.now() - statSync(effectiveFile).mtimeMs;
-          if (age > 120_000) {
-            const newer = this.findNewerSessionFile(effectiveFile, id);
-            if (newer) sessionFile = newer;
-          }
-        } catch { /* file gone */ }
-      }
-
-      if (sessionFile) {
+      if (sessionFile && !pinnedSession) {
+        claimedFiles.add(sessionFile);
         this.streamer.setSessionFile(id, sessionFile);
 
         // Register the JSONL filename UUID as a session→worker mapping.
@@ -388,12 +430,17 @@ export class ProcessDiscovery {
       // input at tail). Safe: highConfidence=false for noise, so phantom green
       // can't sneak through.
       const jsonlOverride = ctx.status === "working" && ctx.highConfidence;
-      // LAYER 8 override: CPU/PTY activity can break out of idleConfirmed.
+      // LAYER 8 override: CPU activity can break out of idleConfirmed.
       // This catches the case where an idle agent starts thinking (high CPU)
       // but no hooks fire because it hasn't called any tools yet.
+      // PTY alone is NOT sufficient — user typing echoes ~900B to PTY stdout,
+      // indistinguishable from agent output.
       const cpuPct = this.getCpuForPid(existing.pid);
       const ptyDelta = this.getPtyOutputDelta(existing.pid);
-      const cpuActive = cpuPct > 15 || ptyDelta > 100;
+      // 25% threshold: typing in the terminal causes 15-21% CPU (character rendering),
+      // but actual agent work (thinking/tool calls) is 30-50%+. Previous 15% threshold
+      // caused false green flashes whenever the user typed in an idle terminal.
+      const cpuActive = cpuPct > 25;
       // Require 2+ consecutive active ticks before CPU breaks idleConfirmed
       const activeCount = cpuActive ? (this.consecutiveActiveChecks.get(id) || 0) + 1 : 0;
       if (cpuActive) this.consecutiveActiveChecks.set(id, activeCount);
@@ -411,7 +458,7 @@ export class ProcessDiscovery {
         // CPU/PTY active — clear idleConfirmed and fall through to normal analysis
         this.telemetry.setIdleConfirmed(id, false);
         const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
-        this.telemetry.recordSignal(id, cpuPct > 15 ? "cpu_wakeup" : "pty_wakeup", signal);
+        this.telemetry.recordSignal(id, cpuPct > 25 ? "cpu_wakeup" : "pty_wakeup", signal);
       }
       // Recent input / JSONL / CPU overrides idleConfirmed — fall through to normal analysis
     }
@@ -468,12 +515,13 @@ export class ProcessDiscovery {
       // applies when we're currently working and unsure if we should go idle.
       if (existing.status === "idle") {
         // LAYER 8 — idle→working recovery: even when idle, check if the
-        // process woke up (high CPU or PTY output). This catches agents that
-        // start thinking after being idle — no hooks fire during thinking,
-        // but CPU spikes immediately.
+        // process woke up. Only use CPU for idle→working (not PTY alone),
+        // because user typing in the terminal echoes characters to PTY stdout
+        // (~900B per keystroke burst) which is indistinguishable from agent output.
+        // PTY delta is still tracked for the working keepalive path below.
         const cpuPct = this.getCpuForPid(existing.pid);
         const ptyDelta = this.getPtyOutputDelta(existing.pid);
-        if (cpuPct > 15 || ptyDelta > 100) {
+        if (cpuPct > 25) {
           const activeCount = (this.consecutiveActiveChecks.get(id) || 0) + 1;
           this.consecutiveActiveChecks.set(id, activeCount);
           if (activeCount >= 2) {
@@ -485,7 +533,7 @@ export class ProcessDiscovery {
             this.consecutiveIdleChecks.set(id, 0);
             this.consecutiveActiveChecks.set(id, 0);
             this.telemetry.setIdleConfirmed(id, false);
-            this.telemetry.recordSignal(id, cpuPct > 15 ? "cpu_wakeup" : "pty_wakeup", signal);
+            this.telemetry.recordSignal(id, cpuPct > 25 ? "cpu_wakeup" : "pty_wakeup", signal);
             this.checkTransition(id, tty, "working", `Idle→working via ${signal} (confirmed ${activeCount} ticks)`, { ...tailCtx, cpuPct, ptyDelta });
           } else {
             this.checkTransition(id, tty, "idle", `CPU active but unconfirmed (${activeCount}/2) cpu=${cpuPct.toFixed(1)}%`, tailCtx);
@@ -526,7 +574,8 @@ export class ProcessDiscovery {
           // Cap at 3 minutes to prevent permanent green from runaway processes.
           const cpuPct = this.getCpuForPid(existing.pid);
           const ptyDelta = this.getPtyOutputDelta(existing.pid);
-          const isActive = (cpuPct > 15 || ptyDelta > 100) && workingCooldown < 180_000;
+          // Only use CPU for keepalive — PTY alone triggers on user typing (~900B echo).
+          const isActive = cpuPct > 25 && workingCooldown < 180_000;
 
           if (isActive) {
             existing.status = "working";
@@ -774,13 +823,59 @@ export class ProcessDiscovery {
   }
 
   /**
+   * Build a TTY→file map from marker files written by identity.sh.
+   * Each agent writes ~/.hive/sessions/{tty} containing its session_id on every prompt.
+   * This is ground truth — it directly links a TTY to a specific JSONL file.
+   * Marker files persist across daemon restarts (no in-memory state needed).
+   */
+  private buildTtyFileMap(processes: ProcessInfo[]): Map<string, string> {
+    const ttyToFile = new Map<string, string>();
+    if (processes.length === 0) return ttyToFile;
+
+    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+    const sessionsDir = join(homeDir, ".hive", "sessions");
+    const projectsDir = join(homeDir, ".claude", "projects");
+
+    // Collect all known TTYs from current processes
+    const knownTtys = new Set(processes.map(p => p.tty).filter(Boolean));
+
+    try {
+      for (const ttyFile of readdirSync(sessionsDir)) {
+        if (!knownTtys.has(ttyFile)) continue;
+        try {
+          const sessionId = readFileSync(join(sessionsDir, ttyFile), "utf-8").trim();
+          if (!sessionId) continue;
+
+          // Search ALL project directories for this session's JSONL.
+          // After restart, sessions may land in a different encoded-cwd dir.
+          try {
+            for (const dir of readdirSync(projectsDir)) {
+              const jsonlPath = join(projectsDir, dir, `${sessionId}.jsonl`);
+              if (existsSync(jsonlPath)) {
+                ttyToFile.set(ttyFile, jsonlPath);
+                break;
+              }
+            }
+          } catch { /* projectsDir doesn't exist */ }
+        } catch { /* can't read marker */ }
+      }
+    } catch { /* sessions dir doesn't exist yet */ }
+
+    if (ttyToFile.size > 0) {
+      console.log(`[discovery] Marker-based TTY map: ${[...ttyToFile.entries()].map(([t, f]) => `${t}→${basename(f, ".jsonl").slice(0, 8)}`).join(", ")}`);
+    }
+
+    return ttyToFile;
+  }
+
+  /**
    * Find session file by matching JSONL creation time to process start time.
    * Each Claude Code session creates a fresh JSONL file on launch, so the
    * file's birthtime should be within ~30s of the process startedAt.
    * This is safe for shared-cwd scenarios (multiple home-dir sessions)
    * because birthtimes are unique per file, unlike mtime which changes constantly.
    */
-  private findSessionFileByStartTime(cwd: string, startedAt: number): string | null {
+  private findSessionFileByStartTime(cwd: string, startedAt: number, claimedFiles?: Set<string>): string | null {
     const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
     const projectsDir = join(homeDir, ".claude", "projects");
     const encoded = cwd.replace(/\//g, "-");
@@ -793,12 +888,17 @@ export class ProcessDiscovery {
     try {
       for (const file of readdirSync(candidateDir)) {
         if (!file.endsWith(".jsonl")) continue;
+        const fullPath = join(candidateDir, file);
+        // Skip files already claimed by another worker this scan cycle.
+        // Without this, when all workers start within seconds (system restart),
+        // all birthtimes cluster and every worker grabs the same file.
+        if (claimedFiles?.has(fullPath)) continue;
         try {
-          const stat = statSync(join(candidateDir, file));
+          const stat = statSync(fullPath);
           const delta = Math.abs(stat.birthtimeMs - startedAt);
           if (delta < MAX_DELTA && delta < bestDelta) {
             bestDelta = delta;
-            bestFile = join(candidateDir, file);
+            bestFile = fullPath;
           }
         } catch { /* skip */ }
       }

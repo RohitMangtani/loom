@@ -28,6 +28,7 @@ const notifications = new NotificationManager();
 telemetry.start();
 telemetry.registerApi(procMgr, discovery);
 telemetry.registerCollector(collector);
+telemetry.setStreamer(streamer);
 ws.start();
 
 // Restore state from previous daemon run (if fresh enough)

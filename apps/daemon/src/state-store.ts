@@ -27,6 +27,9 @@ export interface DaemonSnapshot {
   locks: Array<{ path: string; workerId: string; tty?: string; lockedAt: number }>;
   dispatchedTasks: Record<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string }>;
   workflowHandoffs?: Record<string, string[]>;
+  /** TTY → session_id mapping from register-tty. Survives daemon restarts so
+   *  session file assignment is deterministic without birthtime heuristics. */
+  ttySessionMap?: Record<string, string>;
 }
 
 export class StateStore {

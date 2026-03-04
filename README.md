@@ -107,7 +107,7 @@ Arrange your 4 terminal tabs in a 2x2 grid:
 └───────────┴───────────┘
 ```
 
-Each agent gets a quadrant number based on when it started (earliest = Q1). The dashboard mirrors this layout so your screen matches your mental model.
+Each agent gets a quadrant number based on when it started (earliest = Q1). The dashboard mirrors this layout so your screen matches your mental model. If you close a terminal, the remaining agents shift up to fill the gap. Open a new terminal and it takes the next available slot.
 
 **Use it as a stoplight.** Put the dashboard on a phone, tablet, or second monitor. Each agent card is a stoplight:
 - **Green** — working
@@ -174,6 +174,15 @@ Every solved problem gets written to a per-project knowledge file (`.claude/hive
 
 ### State Persistence
 The daemon writes `~/.hive/daemon-state.json` every 30 seconds and on shutdown. If the daemon restarts, it rehydrates workers, message queues, locks, and workflow handoffs from the snapshot (discarded if older than 10 minutes). Discovery reconciles actual processes within 3 seconds. You do not configure this. It just works.
+
+### Session Routing (Restart Resilience)
+When you open 4 terminals within seconds of each other, their session log files are created nearly simultaneously. The daemon needs to know which log file belongs to which terminal. It solves this with marker files:
+
+1. Each terminal writes `~/.hive/sessions/{tty}` with its session ID on every prompt (via the `identity.sh` hook)
+2. The daemon reads these marker files on startup and maps each terminal to the correct log file
+3. Marker files persist across computer restarts, so the mapping is durable
+
+On a fresh computer restart, the old marker files are overwritten the moment you type your first prompt in each terminal. The daemon picks up the correct mapping within 3 seconds. This means routing is accurate after one prompt per terminal, which is invisible to you since you would be typing anyway.
 
 ### Push Notifications
 When any agent transitions to stuck (yellow), macOS sends a native notification with the agent name, project, and what it needs. 60-second cooldown per agent prevents spam. Configure at `~/.hive/notifications.json` (enabled, cooldownMs, errorThreshold, sound). Defaults work out of the box.
@@ -327,6 +336,7 @@ Dashboard (Next.js, port 3000 — installable as PWA)
 | `apps/daemon/src/ws-server.ts` | WebSocket server for dashboard |
 | `apps/daemon/src/watchdog.ts` | Stuck loop detection |
 | `apps/daemon/src/state-store.ts` | Snapshot persistence across restarts |
+| `~/.hive/sessions/` | Marker files mapping each TTY to its session ID (written by identity.sh) |
 | `apps/daemon/src/notifications.ts` | macOS push notifications on stuck |
 | `apps/daemon/src/task-queue.ts` | Global task queue |
 | `apps/daemon/src/lock-manager.ts` | File lock coordination |
@@ -351,9 +361,15 @@ Dashboard (Next.js, port 3000 — installable as PWA)
 - Daemon must be running on port 3001 before agents start
 - Check nothing else is using port 3001: `lsof -i :3001`
 
-**Dashboard shows stale data**
+**Dashboard shows stale data after restart**
+- This is normal for the first few seconds. Send one prompt to each terminal and the routing self-corrects.
 - Refresh the page. WebSocket reconnects automatically.
 - Check that port 3002 is reachable: `curl http://localhost:3002`
+
+**Chat history showing in the wrong terminal**
+- The daemon may have mapped session files incorrectly. Send a prompt to each terminal and the marker files update automatically.
+- Check marker files: `ls ~/.hive/sessions/` should show one file per active TTY
+- Force re-mapping: restart the daemon (`npm run dev:daemon`)
 
 **Hooks not reporting events**
 - Verify hooks exist: `cat ~/.claude/settings.json | jq .hooks`

@@ -1,7 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { basename, join } from "path";
-import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { describeAction, truncate } from "./utils.js";
 import type { DaemonSnapshot } from "./state-store.js";
 import type { Server } from "http";
@@ -41,6 +41,26 @@ export class TelemetryReceiver {
   // Artifact tracking
   private artifacts = new Map<string, Array<{ path: string; action: string; ts: number }>>();
   private static readonly MAX_ARTIFACTS = 50;
+
+  // Session file streamer reference (set via setStreamer, used for register-tty correction)
+  private streamer: { getSessionFile(id: string): string | null; setSessionFile(id: string, path: string): void } | null = null;
+
+  // Sessions corrected by register-tty are "pinned" — discovery's registerSession
+  // must not overwrite them with wrong birthtime-based guesses.
+  private pinnedSessions = new Map<string, string>(); // session_id → correct workerId
+
+  // Pending register-tty corrections: queued when identity.sh fires before
+  // the daemon has discovered the worker (race on cold boot).
+  // Replayed in registerDiscovered() when the worker appears.
+  private pendingTtyRegistrations = new Map<string, string>(); // tty → session_id
+
+  // Durable TTY→session_id file path. Written on every register-tty call,
+  // read on daemon startup. Survives daemon AND computer restarts because
+  // it has no expiry — identity.sh overwrites it on the first prompt of each
+  // new session, so stale entries are harmless (the JSONL file just won't exist).
+  private static readonly TTY_SESSION_PATH = join(
+    process.env.HOME || `/Users/${process.env.USER}`, ".hive", "tty-sessions.json"
+  );
 
   // Dispatch tracking
   private dispatchedTasks = new Map<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string }>();
@@ -117,6 +137,76 @@ export class TelemetryReceiver {
       res.json({ ok: true });
     });
 
+    // Session→TTY correction endpoint.
+    // Called by identity.sh on every UserPromptSubmit with {session_id, tty}.
+    // Corrects birthtime-based session file mapping when workers start
+    // within seconds of each other (system restart scenario).
+    app.post("/api/register-tty", requireAuth, (req, res) => {
+      const { session_id, tty } = req.body as { session_id?: string; tty?: string };
+      if (!session_id || !tty) {
+        res.status(400).json({ error: "session_id and tty required" });
+        return;
+      }
+
+      // Find which worker owns this TTY
+      let targetWorker: WorkerState | undefined;
+      for (const w of this.workers.values()) {
+        if (w.tty === tty) {
+          targetWorker = w;
+          break;
+        }
+      }
+      if (!targetWorker) {
+        // Worker not discovered yet (identity.sh fired before first scan).
+        // Queue for replay when the worker appears.
+        this.pendingTtyRegistrations.set(tty, session_id);
+        this.saveTtySessions();
+        console.log(`[register-tty] Queued ${session_id} for tty=${tty} (worker not yet discovered)`);
+        res.json({ ok: true, action: "queued" });
+        return;
+      }
+
+      // Check if session is already correctly mapped
+      const currentMapping = this.sessionToWorker.get(session_id);
+      if (currentMapping === targetWorker.id) {
+        res.json({ ok: true, action: "already-correct" });
+        return;
+      }
+
+      // Correct the mapping: session_id → worker on this TTY
+      console.log(`[register-tty] Correcting session ${session_id}: ${currentMapping || "unmapped"} → ${targetWorker.id} (tty=${tty})`);
+
+      // Pin this session so discovery's registerSession doesn't overwrite it
+      this.pinnedSessions.set(session_id, targetWorker.id);
+      this.sessionToWorker.set(session_id, targetWorker.id);
+
+      // Update the session file to match this session_id
+      const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+      const projectsDir = join(homeDir, ".claude", "projects");
+      // The JSONL is in the encoded-cwd directory. Try the worker's known project path first,
+      // then fall back to home directory encoding.
+      const encodings = [
+        targetWorker.project.replace(/\//g, "-"),
+        (homeDir).replace(/\//g, "-"),
+      ];
+      for (const encoded of encodings) {
+        const candidateFile = join(projectsDir, encoded, `${session_id}.jsonl`);
+        if (existsSync(candidateFile)) {
+          // Also clear the old session file assignment if it was wrong
+          const oldFile = this.streamer?.getSessionFile(targetWorker.id);
+          if (oldFile && basename(oldFile, ".jsonl") !== session_id) {
+            console.log(`[register-tty] Updating session file for ${targetWorker.id}: ${basename(oldFile)} → ${session_id}.jsonl`);
+          }
+          this.streamer?.setSessionFile(targetWorker.id, candidateFile);
+          this.replayPendingHooks(session_id, targetWorker.id);
+          break;
+        }
+      }
+
+      this.saveTtySessions();
+      res.json({ ok: true, action: "corrected", workerId: targetWorker.id });
+    });
+
     this.server = app.listen(this.port, "127.0.0.1", () => {
       console.log(`  Telemetry receiver listening on 127.0.0.1:${this.port}`);
     });
@@ -137,11 +227,72 @@ export class TelemetryReceiver {
     }
   }
 
+  /** Give telemetry access to the session streamer for register-tty corrections */
+  setStreamer(s: { getSessionFile(id: string): string | null; setSessionFile(id: string, path: string): void }): void {
+    this.streamer = s;
+  }
+
+  /** Persist TTY→session_id map to disk. Called on every register-tty so mappings
+   *  survive daemon restarts AND computer restarts. */
+  private saveTtySessions(): void {
+    const map: Record<string, string> = {};
+    for (const [tty, sessionId] of this.pendingTtyRegistrations) {
+      map[tty] = sessionId;
+    }
+    for (const [sessionId, workerId] of this.pinnedSessions) {
+      const worker = this.workers.get(workerId);
+      if (worker?.tty) map[worker.tty] = sessionId;
+    }
+    try {
+      writeFileSync(TelemetryReceiver.TTY_SESSION_PATH, JSON.stringify(map) + "\n");
+    } catch { /* best-effort */ }
+  }
+
+  /** Load TTY→session_id map from disk and resolve to JSONL file paths.
+   *  Returns tty → absolute JSONL path for each valid entry. */
+  loadTtySessions(): Map<string, string> {
+    const result = new Map<string, string>();
+    try {
+      if (!existsSync(TelemetryReceiver.TTY_SESSION_PATH)) return result;
+      const raw = JSON.parse(readFileSync(TelemetryReceiver.TTY_SESSION_PATH, "utf-8")) as Record<string, string>;
+      const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+      const projectsDir = join(homeDir, ".claude", "projects");
+
+      for (const [tty, sessionId] of Object.entries(raw)) {
+        // Search all project dirs for this session's JSONL file
+        try {
+          for (const dir of readdirSync(projectsDir)) {
+            const candidate = join(projectsDir, dir, `${sessionId}.jsonl`);
+            if (existsSync(candidate)) {
+              result.set(tty, candidate);
+              break;
+            }
+          }
+        } catch { /* skip */ }
+      }
+    } catch { /* file missing or corrupt */ }
+    return result;
+  }
+
   // --- Session management ---
 
   registerSession(sessionId: string, workerId: string): void {
+    // Respect pinned sessions: register-tty provides ground truth (TTY→session mapping
+    // from identity.sh). Discovery's birthtime heuristic must not overwrite it.
+    const pinned = this.pinnedSessions.get(sessionId);
+    if (pinned && pinned !== workerId) {
+      return; // Don't overwrite — register-tty already corrected this
+    }
     this.sessionToWorker.set(sessionId, workerId);
     this.replayPendingHooks(sessionId, workerId);
+  }
+
+  /** Returns the pinned session_id for a worker, if register-tty has corrected it */
+  getPinnedSessionForWorker(workerId: string): string | null {
+    for (const [sid, wid] of this.pinnedSessions) {
+      if (wid === workerId) return sid;
+    }
+    return null;
   }
 
   isSessionOwnedByOther(sessionId: string, workerId: string): boolean {
@@ -357,6 +508,35 @@ export class TelemetryReceiver {
     if (!this.lastHookTime.has(id)) {
       this.lastHookTime.set(id, Date.now());
     }
+
+    // Replay pending register-tty corrections queued before discovery.
+    // identity.sh may fire before the daemon's first scan discovers the worker.
+    if (worker.tty) {
+      const pendingSession = this.pendingTtyRegistrations.get(worker.tty);
+      if (pendingSession) {
+        console.log(`[register-tty] Replaying queued correction: tty=${worker.tty} session=${pendingSession} → ${id}`);
+        this.pinnedSessions.set(pendingSession, id);
+        this.sessionToWorker.set(pendingSession, id);
+
+        // Set the session file
+        const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+        const projectsDir = join(homeDir, ".claude", "projects");
+        const encodings = [
+          worker.project.replace(/\//g, "-"),
+          (homeDir).replace(/\//g, "-"),
+        ];
+        for (const encoded of encodings) {
+          const candidateFile = join(projectsDir, encoded, `${pendingSession}.jsonl`);
+          if (existsSync(candidateFile)) {
+            this.streamer?.setSessionFile(id, candidateFile);
+            break;
+          }
+        }
+        this.pendingTtyRegistrations.delete(worker.tty);
+        this.replayPendingHooks(pendingSession, id);
+      }
+    }
+
     this.notify(worker);
   }
 
@@ -1050,6 +1230,15 @@ export class TelemetryReceiver {
       workflowHandoffs[wfId] = [...steps];
     }
 
+    // Build TTY → session_id map from pinned sessions (ground truth from identity.sh)
+    const ttySessionMap: Record<string, string> = {};
+    for (const [sessionId, workerId] of this.pinnedSessions) {
+      const worker = this.workers.get(workerId);
+      if (worker?.tty) {
+        ttySessionMap[worker.tty] = sessionId;
+      }
+    }
+
     return {
       savedAt: Date.now(),
       workers,
@@ -1058,6 +1247,7 @@ export class TelemetryReceiver {
       locks: this.lockManager.getAll(),
       dispatchedTasks,
       workflowHandoffs,
+      ttySessionMap,
     };
   }
 
@@ -1092,6 +1282,15 @@ export class TelemetryReceiver {
       for (const [wfId, steps] of Object.entries(snapshot.workflowHandoffs)) {
         this.workflowHandoffs.set(wfId, [...steps]);
       }
+    }
+
+    // Restore TTY → session_id mappings so session files are correct immediately
+    // on daemon restart, without waiting for identity.sh to fire.
+    if (snapshot.ttySessionMap) {
+      for (const [tty, sessionId] of Object.entries(snapshot.ttySessionMap)) {
+        this.pendingTtyRegistrations.set(tty, sessionId);
+      }
+      console.log(`[state-store] Restored ${Object.keys(snapshot.ttySessionMap).length} TTY→session mapping(s)`);
     }
 
     console.log(`[state-store] Restored ${workerCount} worker(s), ${Object.keys(snapshot.messageQueue).length} queue(s), ${snapshot.locks.length} lock(s)`);
