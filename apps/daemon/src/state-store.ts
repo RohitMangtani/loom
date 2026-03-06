@@ -25,7 +25,7 @@ export interface DaemonSnapshot {
   messageQueue: Record<string, Array<{ id: string; content: string; source: string; queuedAt: number }>>;
   messageIdCounter: number;
   locks: Array<{ path: string; workerId: string; tty?: string; lockedAt: number }>;
-  dispatchedTasks: Record<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string }>;
+  dispatchedTasks: Record<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string; fromWorkerId?: string }>;
   workflowHandoffs?: Record<string, string[]>;
   /** TTY → session_id mapping from register-tty. Survives daemon restarts so
    *  session file assignment is deterministic without birthtime heuristics. */

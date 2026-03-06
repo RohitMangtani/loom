@@ -63,7 +63,7 @@ export class TelemetryReceiver {
   );
 
   // Dispatch tracking
-  private dispatchedTasks = new Map<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string }>();
+  private dispatchedTasks = new Map<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string; fromWorkerId?: string }>();
 
   // Workflow handoffs: workflowId → handoff context from completed steps
   private workflowHandoffs = new Map<string, string[]>();
@@ -387,7 +387,7 @@ export class TelemetryReceiver {
 
   // --- Dispatch tracking ---
 
-  trackDispatch(workerId: string, taskBrief: string, taskId?: string, workflowId?: string): void {
+  trackDispatch(workerId: string, taskBrief: string, taskId?: string, workflowId?: string, fromWorkerId?: string): void {
     const worker = this.workers.get(workerId);
     const project = worker?.project || "";
     this.dispatchedTasks.set(workerId, {
@@ -396,6 +396,7 @@ export class TelemetryReceiver {
       sentAt: Date.now(),
       taskId,
       workflowId,
+      fromWorkerId,
     });
   }
 
@@ -409,6 +410,7 @@ export class TelemetryReceiver {
 
       if (worker.status === "idle" && Date.now() - dispatch.sentAt > 10_000) {
         const artifacts = this.getArtifacts(workerId);
+        const recentArtifacts = artifacts.filter(a => Date.now() - a.ts < 30 * 60 * 1000);
         const fileList = artifacts.length > 0
           ? ` Files: ${artifacts.map(a => basename(a.path)).join(", ")}`
           : "";
@@ -422,6 +424,25 @@ export class TelemetryReceiver {
           existing.push(handoff);
           this.workflowHandoffs.set(dispatch.workflowId, existing);
           console.log(`[handoff] ${worker.tty || workerId}: workflow ${dispatch.workflowId} step done → handoff queued`);
+        }
+
+        // Completion callback: notify the agent that dispatched this task
+        if (dispatch.fromWorkerId) {
+          const sender = this.workers.get(dispatch.fromWorkerId);
+          if (sender) {
+            const receiverName = worker.tty || workerId;
+            const senderName = sender.tty || dispatch.fromWorkerId;
+            const files = recentArtifacts.map(a => {
+              const short = a.path.split("/").slice(-2).join("/");
+              return `${short} (${a.action})`;
+            });
+            const filesSummary = files.length > 0
+              ? ` Files changed: ${files.slice(-8).join(", ")}.`
+              : " No files changed.";
+            const notification = `[Hive] ${receiverName} finished your task: "${dispatch.task}".${filesSummary} Verify their work didn't overwrite or conflict with yours.`;
+            this.enqueueMessage(dispatch.fromWorkerId, notification, "dispatch-callback");
+            console.log(`[dispatch-callback] ${receiverName} → ${senderName}: task complete, verification queued`);
+          }
         }
 
         this.dispatchedTasks.delete(workerId);
@@ -1244,7 +1265,7 @@ export class TelemetryReceiver {
       if (queue.length > 0) messageQueue[wid] = [...queue];
     }
 
-    const dispatchedTasks: Record<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string }> = {};
+    const dispatchedTasks: Record<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string; fromWorkerId?: string }> = {};
     for (const [wid, dt] of this.dispatchedTasks) {
       dispatchedTasks[wid] = { ...dt };
     }

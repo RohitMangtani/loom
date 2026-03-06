@@ -22,7 +22,7 @@ export function registerApiRoutes(
 
   // POST /api/message
   app.post("/api/message", requireAuth, (req, res) => {
-    const { workerId, content } = req.body as { workerId?: string; content?: string };
+    const { workerId, content, from } = req.body as { workerId?: string; content?: string; from?: string };
     if (!workerId || !content) {
       res.status(400).json({ error: "Missing workerId or content" });
       return;
@@ -39,7 +39,7 @@ export function registerApiRoutes(
         managed.stuckMessage = undefined;
         receiver.notifyExternal(managed);
       }
-      receiver.trackDispatch(workerId, content.slice(0, 200));
+      receiver.trackDispatch(workerId, content.slice(0, 200), undefined, undefined, from);
       res.json({ ok: true });
       return;
     }
@@ -51,7 +51,7 @@ export function registerApiRoutes(
     }
 
     if (worker.status === "working") {
-      const msgId = receiver.enqueueMessage(workerId, content, "api:message");
+      const msgId = receiver.enqueueMessage(workerId, content, from ? `api:message:from:${from}` : "api:message");
       const queue = receiver.getMessageQueueSize(workerId);
       console.log(`[queue] ${worker.tty}: queued ${msgId} (${queue} pending, worker ${worker.status})`);
       res.json({ ok: true, queued: true, id: msgId, position: queue });
@@ -67,7 +67,7 @@ export function registerApiRoutes(
       worker.stuckMessage = undefined;
       receiver.setIdleConfirmed(workerId, false);
       receiver.markInputSent(workerId, "api:message");
-      receiver.trackDispatch(workerId, content.slice(0, 200));
+      receiver.trackDispatch(workerId, content.slice(0, 200), undefined, undefined, from);
       receiver.notifyExternal(worker);
       res.json({ ok: true });
     } else {
