@@ -530,6 +530,7 @@ export class ProcessDiscovery {
             existing.status = "working";
             existing.currentAction = "Thinking...";
             existing.lastActionAt = Date.now();
+            this.lastConfirmedWorking.set(id, Date.now());
             this.consecutiveIdleChecks.set(id, 0);
             this.consecutiveActiveChecks.set(id, 0);
             this.telemetry.setIdleConfirmed(id, false);
@@ -586,6 +587,7 @@ export class ProcessDiscovery {
             existing.currentAction = ctx.latestAction || "Generating response...";
             existing.lastAction = ctx.latestAction || existing.lastAction;
             existing.lastActionAt = Date.now();
+            this.lastConfirmedWorking.set(id, Date.now());
             this.consecutiveIdleChecks.set(id, 0);
             this.telemetry.setIdleConfirmed(id, false);
             const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
