@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEntry, WorkerState } from "@/lib/types";
 import { dotColor, DOT_BG, statusLabel, quickButtons } from "./AgentCard";
-import { LivePreview, describePins, type Pin } from "./LivePreview";
+import { describePins, type Pin } from "./LivePreview";
 
 export function ChatPanel({
   worker, num, entries, draft, onDraftChange, onSend, onClose, onDismiss, expanded, onExpand,
@@ -25,8 +25,7 @@ export function ChatPanel({
   const stuck = worker.status === "stuck";
   const buttons = stuck ? quickButtons(worker) : [];
 
-  // Live preview + reference points
-  const [showPreview, setShowPreview] = useState(false);
+  // Reference points
   const [pins, setPins] = useState<Pin[]>([]);
   const pinCounterRef = useRef(0);
 
@@ -152,28 +151,9 @@ export function ChatPanel({
             </p>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setShowPreview((p) => !p)}
-              className={`preview-toggle-btn ${showPreview ? "preview-toggle-active" : ""}`}
-              title={showPreview ? "Hide preview" : "Show live preview"}
-            >
-              {showPreview ? "Hide" : "Preview"}
-            </button>
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full text-[var(--text-light)] hover:text-[var(--text)] hover:bg-[var(--bg-panel)] text-lg leading-none transition-colors">&times;</button>
           </div>
         </div>
-
-        {showPreview && (
-          <LivePreview
-            url={previewUrl}
-            onUrlChange={onPreviewUrlChange}
-            pins={pins}
-            onAddPin={handleAddPin}
-            onRemovePin={handleRemovePin}
-            onClearPins={handleClearPins}
-          />
-        )}
 
         <div className="relative flex-1 min-h-0">
         <div className="absolute left-2 bottom-2 z-10 flex flex-col gap-1.5">

@@ -225,40 +225,13 @@ export function AgentCard({
         </div>
       )}
 
-      {idle && (() => {
-        // Use LLM suggestions when available, fall back to templates
-        const suggestions = worker.suggestions && worker.suggestions.length > 0
-          ? worker.suggestions.map((s) => ({ label: s.label, message: s.message }))
-          : idleSuggestions(worker);
-        return (
+      {idle && (
           <div className="ready-overlay absolute inset-0 flex flex-col items-center justify-center rounded-[10px]">
             <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16] pointer-events-none">
               READY
             </span>
-            {(worker.managed || !!worker.tty) && (
-              <div className="flex items-center gap-1 mt-2 flex-wrap justify-center z-10" onClick={(e) => e.stopPropagation()}>
-                {suggestions.map((s) => (
-                  <button
-                    key={s.label}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSend(s.message);
-                      if (onSuggestionApply) {
-                        onSuggestionApply(s.label, suggestions.map((x) => x.label));
-                      }
-                    }}
-                    className="suggestion-btn"
-                    title={worker.suggestions?.find((ws) => ws.label === s.label)?.reason}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
-        );
-      })()}
+      )}
     </div>
   );
 }

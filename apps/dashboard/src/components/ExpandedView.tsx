@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEntry, WorkerState } from "@/lib/types";
 import { dotColor, DOT_BG, statusLabel, quickButtons } from "./AgentCard";
-import { LivePreview, describePins, type Pin } from "./LivePreview";
-import { SuggestionFeed } from "./SuggestionFeed";
+import { describePins, type Pin } from "./LivePreview";
 
 export function ExpandedView({
   worker,
@@ -109,37 +108,15 @@ export function ExpandedView({
         </span>
       </div>
 
-      {/* Main: preview left, feed+chat right */}
-      <div className="flex-1 min-h-0 flex flex-col sm:flex-row">
-        {/* Left: Live Preview */}
-        <div className="h-[35vh] sm:h-auto sm:w-1/2 sm:border-r border-b sm:border-b-0 border-[var(--border)] flex flex-col">
-          <LivePreview
-            url={previewUrl}
-            onUrlChange={onPreviewUrlChange}
-            pins={pins}
-            onAddPin={handleAddPin}
-            onRemovePin={handleRemovePin}
-            onClearPins={handleClearPins}
-            fullHeight
-          />
-        </div>
-
-        {/* Right: Suggestion Feed + Chat */}
-        <div className="flex-1 min-h-0 flex flex-col sm:w-1/2">
-          {/* Suggestion feed — primary interaction */}
-          <SuggestionFeed
-            worker={worker}
-            onApply={(msg) => guardedSend(msg)}
-            onSuggestionFeedback={onSuggestionApply}
-          />
-
-          {/* Chat transcript — compact, secondary */}
+      {/* Main: chat */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col">
+          {/* Chat transcript */}
           {recentEntries.length > 0 && (
-            <div className="border-t border-[var(--border)] shrink-0" style={{ maxHeight: "35%" }}>
+            <div className="flex-1 min-h-0">
               <div
                 ref={chatScrollRef}
-                className="overflow-y-auto px-3 py-2 space-y-1.5"
-                style={{ maxHeight: "180px" }}
+                className="overflow-y-auto px-3 py-2 space-y-1.5 h-full"
               >
                 {recentEntries.map((entry, i) => (
                   <div
