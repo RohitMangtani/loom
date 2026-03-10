@@ -737,9 +737,13 @@ export class ProcessDiscovery {
       if (!raw) return [];
       const results: ProcessInfo[] = [];
 
+      const seenTtys = new Set<string>();
       for (const line of raw.split("\n")) {
         const trimmed = line.trim();
         if (trimmed.includes("grep")) continue;
+        // Skip Node.js wrapper processes (e.g. "node /opt/homebrew/bin/codex")
+        // that share a TTY with the actual agent binary.
+        if (/\bnode\s+/.test(trimmed) && !trimmed.endsWith("claude")) continue;
 
         // Match against all known agent patterns
         const matched = ProcessDiscovery.AGENT_PATTERNS.find(p => p.regex.test(trimmed));
@@ -761,6 +765,10 @@ export class ProcessDiscovery {
         // Extract TTY from ps output (e.g., "ttys001", "??")
         const psTty = parts[7] || "";
 
+        // Deduplicate: skip if another agent process already claimed this TTY.
+        // Codex spawns multiple processes (node wrapper + binary) on the same TTY.
+        if (psTty && psTty !== "??" && seenTtys.has(psTty)) continue;
+
         const info = this.getProcessInfo(pid);
         if (!info) {
           // lsof failed (process still initializing) — use ps data as fallback.
@@ -778,6 +786,7 @@ export class ProcessDiscovery {
               jsonlFile: null,
               model: matched.model,
             });
+            seenTtys.add(psTty);
           }
           continue;
         }
@@ -787,6 +796,10 @@ export class ProcessDiscovery {
           info.tty = psTty;
         }
 
+        const effectiveTty = info.tty || psTty;
+        if (effectiveTty && effectiveTty !== "??" && effectiveTty.startsWith("ttys")) {
+          seenTtys.add(effectiveTty);
+        }
         results.push({ pid, cpuPercent, startedAt, ...info, model: matched.model });
       }
 
