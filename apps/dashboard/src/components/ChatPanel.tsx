@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEntry, WorkerState } from "@/lib/types";
-import { dotColor, DOT_BG, statusLabel, quickButtons } from "./AgentCard";
+import { dotColor, DOT_BG, statusLabel, quickButtons, modelLabel } from "./AgentCard";
 import { describePins, type Pin } from "./LivePreview";
 
 export function ChatPanel({
@@ -144,7 +144,7 @@ export function ChatPanel({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: DOT_BG[color] }} />
-              <span className="font-semibold text-[15px]">Agent {num}</span>
+              <span className="font-semibold text-[15px]">{modelLabel(worker)} {num}</span>
             </div>
             <p className="text-[11px] text-[var(--text-light)] mt-0.5 ml-[18px]">
               {statusLabel(worker)}

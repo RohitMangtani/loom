@@ -21,6 +21,8 @@ export interface WorkerState {
   stuckMessage?: string;
   lastDirection?: string;
   suggestions?: Suggestion[];
+  /** Which AI tool this worker is running (e.g. "claude", "codex"). Defaults to "claude". */
+  model?: string;
 }
 
 export interface TelemetryEvent {

@@ -30,6 +30,8 @@ interface ProcessInfo {
   projectName: string;
   sessionIds: string[];
   jsonlFile: string | null;
+  /** Which AI tool ("claude", "codex", etc.). Defaults to "claude". */
+  model?: string;
 }
 
 /** Parsed context from a session JSONL tail */
@@ -355,6 +357,7 @@ export class ProcessDiscovery {
         managed: false,
         tty: proc.tty,
         lastDirection: ctx.lastDirection || undefined,
+        model: proc.model,
       };
 
       this.telemetry.registerDiscovered(id, worker);
@@ -659,6 +662,12 @@ export class ProcessDiscovery {
     }
   }
 
+  /** Patterns to match AI agent processes in `ps` output. Order matters — first match wins. */
+  private static readonly AGENT_PATTERNS: { regex: RegExp; model: string }[] = [
+    { regex: /claude\s*$/, model: "claude" },
+    { regex: /codex\s*$/, model: "codex" },
+  ];
+
   private findClaudeProcesses(): ProcessInfo[] {
     try {
       const raw = execFileSync("ps", ["-eo", "pid,pcpu,lstart,tty,command"], {
@@ -671,8 +680,11 @@ export class ProcessDiscovery {
 
       for (const line of raw.split("\n")) {
         const trimmed = line.trim();
-        if (!trimmed.endsWith("claude") && !trimmed.match(/claude\s*$/)) continue;
         if (trimmed.includes("grep")) continue;
+
+        // Match against all known agent patterns
+        const matched = ProcessDiscovery.AGENT_PATTERNS.find(p => p.regex.test(trimmed));
+        if (!matched) continue;
 
         const parts = trimmed.split(/\s+/);
         if (parts.length < 9) continue;
@@ -693,7 +705,7 @@ export class ProcessDiscovery {
         const info = this.getProcessInfo(pid);
         if (!info) {
           // lsof failed (process still initializing) — use ps data as fallback.
-          // This ensures newly opened Claude instances get picked up immediately
+          // This ensures newly opened instances get picked up immediately
           // instead of being silently skipped until lsof starts working.
           if (psTty && psTty !== "??" && psTty.startsWith("ttys")) {
             const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
@@ -705,6 +717,7 @@ export class ProcessDiscovery {
               projectName: "unknown",
               sessionIds: [],
               jsonlFile: null,
+              model: matched.model,
             });
           }
           continue;
@@ -715,7 +728,7 @@ export class ProcessDiscovery {
           info.tty = psTty;
         }
 
-        results.push({ pid, cpuPercent, startedAt, ...info });
+        results.push({ pid, cpuPercent, startedAt, ...info, model: matched.model });
       }
 
       return results;

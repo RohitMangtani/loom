@@ -144,7 +144,13 @@ function idleSuggestions(w: WorkerState): { label: string; message: string }[] {
   ];
 }
 
-export { dotColor, DOT_BG, statusLabel, statusWord, badgeStyle, idleSuggestions };
+/** Display name for the worker's model (e.g. "Claude", "Codex"). */
+function modelLabel(w: WorkerState): string {
+  const m = (w.model || "claude").toLowerCase();
+  return m.charAt(0).toUpperCase() + m.slice(1);
+}
+
+export { dotColor, DOT_BG, statusLabel, statusWord, badgeStyle, idleSuggestions, modelLabel };
 export type { DotColor };
 
 const FLAG_COLOR = "#f97316";
@@ -180,6 +186,9 @@ export function AgentCard({
       )}
       <div className={`flex items-center gap-2.5 mb-1.5 ${onFlag ? "pr-5" : ""}`}>
         <span className="text-lg font-bold tabular-nums text-[var(--text)]">{num}</span>
+        {worker.model && worker.model !== "claude" && (
+          <span className="text-[9px] font-mono text-[var(--text-muted)] uppercase tracking-wider">{modelLabel(worker)}</span>
+        )}
         <span
           className={`w-2 h-2 rounded-full shrink-0 ${stuck ? "animate-pulse" : ""}`}
           style={{ background: flagged ? FLAG_COLOR : DOT_BG[color] }}

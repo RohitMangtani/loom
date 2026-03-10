@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEntry, WorkerState } from "@/lib/types";
-import { dotColor, DOT_BG, statusLabel, quickButtons } from "./AgentCard";
+import { dotColor, DOT_BG, statusLabel, quickButtons, modelLabel } from "./AgentCard";
 import { describePins, type Pin } from "./LivePreview";
 
 export function ExpandedView({
@@ -99,7 +99,7 @@ export function ExpandedView({
           className={`w-2 h-2 rounded-full shrink-0 ${stuck ? "animate-pulse" : ""}`}
           style={{ background: DOT_BG[color] }}
         />
-        <span className="font-semibold text-[13px]">Agent {num}</span>
+        <span className="font-semibold text-[13px]">{modelLabel(worker)} {num}</span>
         <span className="text-[11px] text-[var(--text-light)] truncate">
           {worker.projectName}
         </span>
