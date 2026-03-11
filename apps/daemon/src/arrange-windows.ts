@@ -236,7 +236,7 @@ export function updateTerminalTitles(slots: QuadrantSlot[]): void {
     .sort()
     .join("|");
   if (fingerprint === lastTitleFingerprint) return;
-  lastTitleFingerprint = fingerprint;
+  // Don't set fingerprint yet — only on success, so failures retry next tick
 
   const tabBlocks = slots.map(slot => {
     const device = slot.tty.startsWith("/dev/") ? slot.tty : `/dev/${slot.tty}`;
@@ -270,6 +270,9 @@ end tell
     if (err) {
       const msg = err.message || String(err);
       console.log(`[arrange] Failed to update titles: ${msg.slice(0, 150)}`);
+      // Don't cache fingerprint — retry next tick
+    } else {
+      lastTitleFingerprint = fingerprint;
     }
   });
 }
