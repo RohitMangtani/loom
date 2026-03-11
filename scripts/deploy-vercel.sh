@@ -7,6 +7,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TUNNEL_FILE="$HOME/.hive/tunnel-url.txt"
 DRY_RUN=0
+ROOT_VERCEL_DIR="$ROOT/.vercel"
+DASHBOARD_VERCEL_DIR="$ROOT/apps/dashboard/.vercel"
+TEMP_ROOT_LINK=0
+
+cleanup() {
+  if [ "$TEMP_ROOT_LINK" -eq 1 ]; then
+    rm -rf "$ROOT_VERCEL_DIR"
+  fi
+}
+
+trap cleanup EXIT
 
 if [ "${1:-}" = "--dry-run" ]; then
   DRY_RUN=1
@@ -36,10 +47,17 @@ echo "Using tunnel URL: $TUNNEL_URL"
 echo "Using WebSocket URL: $WS_URL"
 echo "Keep 'npm start' running while you use the deployed dashboard."
 
+if [ ! -d "$ROOT_VERCEL_DIR" ] && [ -d "$DASHBOARD_VERCEL_DIR" ]; then
+  mkdir -p "$ROOT_VERCEL_DIR"
+  cp "$DASHBOARD_VERCEL_DIR"/project.json "$ROOT_VERCEL_DIR"/project.json
+  [ -f "$DASHBOARD_VERCEL_DIR/README.txt" ] && cp "$DASHBOARD_VERCEL_DIR/README.txt" "$ROOT_VERCEL_DIR/README.txt"
+  TEMP_ROOT_LINK=1
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "Dry run only. Would execute:"
-  echo "  cd \"$ROOT/apps/dashboard\""
+  echo "  cd \"$ROOT\""
   echo "  npx vercel deploy --prod --yes -b NEXT_PUBLIC_WS_URL=$WS_URL -e NEXT_PUBLIC_WS_URL=$WS_URL"
   exit 0
 fi
@@ -50,7 +68,7 @@ if ! npx vercel whoami >/dev/null 2>&1; then
   exit 1
 fi
 
-cd "$ROOT/apps/dashboard"
+cd "$ROOT"
 npx vercel deploy --prod --yes \
   -b "NEXT_PUBLIC_WS_URL=$WS_URL" \
   -e "NEXT_PUBLIC_WS_URL=$WS_URL"
