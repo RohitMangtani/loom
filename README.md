@@ -63,7 +63,7 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 - **Node.js 20+** — [nodejs.org](https://nodejs.org)
 - **Xcode Command Line Tools** — provides `swiftc` for the `send-return` helper (`xcode-select --install`)
 - **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`)
-- **Hosted dashboard extras** (only if you want the Vercel path) — Homebrew for `cloudflared`, `python3`, and a Vercel account (`npx vercel login`)
+- **Hosted dashboard extras** (required for the standard `npm run launch` path) — Homebrew for `cloudflared`, `python3`, and a Vercel account (`npx vercel login`). If you only want localhost, use `npm run launch:local` instead.
 
 Claude and Codex can be mixed freely. Claude gets the richest hook-based telemetry. Codex still works out of the box through JSONL, CPU, and PTY detection.
 
@@ -73,10 +73,11 @@ Claude and Codex can be mixed freely. Claude gets the richest hook-based telemet
 git clone https://github.com/RohitMangtani/hive.git
 cd hive
 bash setup.sh
+npx vercel login
 npm run launch
 ```
 
-`npm run launch` is the simplest path. It starts the daemon and dashboard locally, opens `http://localhost:3000`, and leaves both processes running in one terminal.
+`npm run launch` is the standard path. It starts the local daemon, opens a Cloudflare quick tunnel for the WebSocket server, deploys or updates your own free Vercel dashboard, opens that hosted URL, and leaves the local daemon and tunnel running in one terminal.
 
 Then open 1-4 `Terminal.app` windows and run whichever supported CLI you installed:
 
@@ -121,22 +122,29 @@ Without this, auto-pilot will not work and agents will stall waiting for permiss
 
 ## Running
 
-You have two supported ways to run Hive:
+You have three supported ways to run Hive:
 
-**Fastest local launch** (recommended)
+**Standard hosted launch** (recommended)
 ```bash
 npm run launch
 ```
 
+This starts the local daemon on `3001/3002`, opens a free Cloudflare quick tunnel for the WebSocket server, deploys or updates the dashboard to your own Vercel account, opens the hosted dashboard URL, and keeps the daemon and tunnel running in one terminal. On a new machine, run `npx vercel login` once first.
+
+**Local-only fallback**
+```bash
+npm run launch:local
+```
+
 This starts the daemon and dashboard locally, opens `http://localhost:3000`, and keeps both running in one terminal.
 
-**Hosted dashboard on Vercel** (optional)
+**Manual hosted split** (same hosted behavior, separate steps)
 ```bash
 npm start
 npm run deploy:dashboard
 ```
 
-This starts the local daemon on ports `3001/3002`, creates a free Cloudflare quick tunnel for the WebSocket server, then deploys the dashboard to your own Vercel account with the correct `NEXT_PUBLIC_WS_URL`. The hosted path expects Homebrew (`cloudflared`), `python3`, and `npx vercel login`.
+This is the same hosted flow as `npm run launch`, but split into two commands.
 
 **Manual local split** (same local behavior, separate terminals)
 ```bash

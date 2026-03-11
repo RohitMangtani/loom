@@ -6,6 +6,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TUNNEL_FILE="$HOME/.hive/tunnel-url.txt"
+DASHBOARD_FILE="$HOME/.hive/dashboard-url.txt"
 DRY_RUN=0
 ROOT_VERCEL_DIR="$ROOT/.vercel"
 DASHBOARD_VERCEL_DIR="$ROOT/apps/dashboard/.vercel"
@@ -69,6 +70,15 @@ if ! npx vercel whoami >/dev/null 2>&1; then
 fi
 
 cd "$ROOT"
+DEPLOY_LOG="$(mktemp)"
 npx vercel deploy --prod --yes \
   -b "NEXT_PUBLIC_WS_URL=$WS_URL" \
-  -e "NEXT_PUBLIC_WS_URL=$WS_URL"
+  -e "NEXT_PUBLIC_WS_URL=$WS_URL" 2>&1 | tee "$DEPLOY_LOG"
+
+DEPLOY_URL="$(grep -Eo 'https://[[:alnum:].-]+\.vercel\.app' "$DEPLOY_LOG" | tail -n 1 || true)"
+rm -f "$DEPLOY_LOG"
+
+if [ -n "$DEPLOY_URL" ]; then
+  echo "$DEPLOY_URL" > "$DASHBOARD_FILE"
+  echo "Dashboard URL: $DEPLOY_URL"
+fi
