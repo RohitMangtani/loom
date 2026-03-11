@@ -50,6 +50,7 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 - **Auto-discovery** — start `claude` or `codex` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
 - **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
+- **Peer awareness** — every agent sees what the others are doing on each prompt. One-line peer summary injected automatically. No manual API calls needed.
 - **Coordination** — file locks, task queue, scratchpad, conflict detection. Multiple agents working on the same codebase without stepping on each other.
 - **Workflow handoff** — tag related tasks with a workflow ID. When Agent 1 finishes "Build the API," Agent 2 automatically receives a summary of what was built and which files changed before starting "Build the UI."
 - **Compound learning** — every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge instead of a blank slate.
@@ -147,6 +148,7 @@ This is how you run 4 agents unattended. You give them tasks and walk away. Auto
 
 ### Coordination
 Multiple agents can safely work on the same codebase:
+- **Peer awareness** — every prompt, each agent sees a one-line summary of what the other agents are doing (status, project, current action). Injected by the identity hook. Agents avoid overlap without manual checks.
 - **File locks** — acquire advisory locks before editing shared files (`POST /api/locks`)
 - **Conflict detection** — check if another agent recently modified a file (`GET /api/conflicts`)
 - **Scratchpad** — leave ephemeral notes for other agents (`POST /api/scratchpad`), auto-expires in 1 hour
@@ -267,7 +269,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 Each agent reads instructions from `~/.claude/CLAUDE.md` that tell it how to interact with the daemon. Here's what agents do automatically:
 
-1. **Identify themselves** — read `~/.hive/workers.json` on startup to find their quadrant
+1. **Identify themselves** — read `~/.hive/workers.json` on startup to find their quadrant. On every prompt, the identity hook also injects a peer summary showing what the other agents are doing.
 2. **Check learnings** — read `.claude/hive-learnings.md` before starting any task
 3. **Lock files** — acquire locks before editing files other agents might touch
 4. **Write learnings** — persist lessons after solving non-obvious problems
@@ -337,6 +339,7 @@ Dashboard (Next.js, port 3000 — installable as PWA)
 | `apps/daemon/src/ws-server.ts` | WebSocket server for dashboard |
 | `apps/daemon/src/watchdog.ts` | Stuck loop detection |
 | `apps/daemon/src/state-store.ts` | Snapshot persistence across restarts |
+| `~/.hive/identity.sh` | Identity hook: injects quadrant ID + peer summary on every prompt |
 | `~/.hive/sessions/` | Marker files mapping each TTY to its session ID (written by identity.sh) |
 | `apps/daemon/src/notifications.ts` | macOS push notifications on stuck |
 | `apps/daemon/src/task-queue.ts` | Global task queue |
