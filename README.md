@@ -48,7 +48,7 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 - **Stoplight dashboard** — 2x2 grid that mirrors your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor. The tile positions match your terminal positions.
 - **Multi-model** — run Claude and Codex agents side by side. Each tile shows which model is running. Spawn either from the dashboard.
 - **Auto-discovery** — start `claude` or `codex` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
-- **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Agents never sit idle waiting for a click.
+- **Auto-pilot** — permission prompts auto-approve after a 15-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
 - **Peer awareness** — every agent sees what the others are doing on each prompt. One-line peer summary injected automatically. No manual API calls needed.
 - **Coordination** — file locks, task queue, scratchpad, conflict detection. Multiple agents working on the same codebase without stepping on each other.
@@ -142,7 +142,7 @@ Multi-layer detection pipeline determines real-time status:
 4. **PTY output** — detects terminal output flow for agents actively generating text
 
 ### Auto-Pilot
-Auto-approves permission prompts so agents never sit idle waiting for you. The daemon detects when an agent is stuck on a prompt, waits a 3-second grace window (so you can override from the dashboard), then sends a Return keystroke via the `send-return` binary.
+Auto-approves permission prompts so agents never sit idle waiting for you. The daemon detects when an agent is stuck on a prompt, waits a 15-second grace window (so you can override from the dashboard), then sends a Return keystroke via the `send-return` binary.
 
 This is how you run 4 agents unattended. You give them tasks and walk away. Auto-pilot keeps them moving.
 

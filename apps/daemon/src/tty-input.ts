@@ -286,16 +286,33 @@ end tell
   return { ok: true };
 }
 
+// Mutex for async TTY sends. The two-step approach (do script + send-return)
+// requires Terminal focus to stay on the target window between steps. Without
+// serialization, concurrent sends fight over focus and send-return hits the
+// wrong terminal.
+let sendMutex: Promise<void> = Promise.resolve();
+
 /**
  * Async version of sendInputToTty — same two-step approach (do script + send-return)
  * but does NOT block the Node.js event loop. WebSocket messages, status updates,
  * and other requests continue flowing while the AppleScript executes.
+ *
+ * Sends are serialized via a promise chain so concurrent callers don't race
+ * over Terminal.app focus.
  */
-export async function sendInputToTtyAsync(tty: string, text: string): Promise<{ ok: boolean; error?: string }> {
-  const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
-
+export function sendInputToTtyAsync(tty: string, text: string): Promise<{ ok: boolean; error?: string }> {
   const cleaned = text.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
-  if (!cleaned) return { ok: false, error: "Empty message" };
+  if (!cleaned) return Promise.resolve({ ok: false, error: "Empty message" });
+
+  // Chain onto the mutex — each send waits for the previous to finish
+  const resultPromise = sendMutex.then(() => doSendAsync(tty, cleaned));
+  // Update the mutex to wait for this send (swallow errors so chain continues)
+  sendMutex = resultPromise.then(() => {}, () => {});
+  return resultPromise;
+}
+
+async function doSendAsync(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
+  const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
 
   const tmpFile = join(tmpdir(), `hive-input-${randomBytes(8).toString("hex")}.txt`);
   try {
@@ -304,8 +321,6 @@ export async function sendInputToTtyAsync(tty: string, text: string): Promise<{ 
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `Write tmp failed: ${msg.slice(0, 150)}` };
   }
-
-  const previousApp = await getFrontmostAppAsync();
 
   const script = `
 tell application "Terminal"
@@ -352,12 +367,8 @@ end tell
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (previousApp) restoreFrontmostAppAsync(previousApp);
     return { ok: false, error: `Enter failed: ${msg.slice(0, 180)}` };
   }
-
-  // Step 3: Restore focus (fire-and-forget, non-blocking)
-  if (previousApp) restoreFrontmostAppAsync(previousApp);
 
   return { ok: true };
 }

@@ -688,6 +688,15 @@ export class ProcessDiscovery {
     tty: string,
     auditCtx: Record<string, unknown>,
   ): void {
+    // Guard: if input was just sent, keep current (optimistic working) status.
+    // Codex can take seconds before CPU spikes — without this guard the first
+    // discovery tick after message send sees low CPU and flips to idle.
+    const lastInput = this.telemetry.getLastInputSent(id);
+    if (lastInput > 0 && Date.now() - lastInput < 15_000) {
+      this.checkTransition(id, tty, existing.status, `CPU-only: input-sent guard (${Math.round((Date.now() - lastInput) / 1000)}s ago, ${existing.model})`, auditCtx);
+      return;
+    }
+
     const cpuPct = this.getCpuForPid(existing.pid);
     const ptyDelta = this.getPtyOutputDelta(existing.pid);
     const ctx = { ...auditCtx, cpuPct, ptyDelta, model: existing.model };

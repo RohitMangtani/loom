@@ -1359,7 +1359,6 @@ export class TelemetryReceiver {
       if (queue.length === 0) continue;
       const worker = this.get(workerId);
       if (!worker || worker.status !== "idle") continue;
-      if (Date.now() - worker.lastActionAt < 15_000) continue;
 
       const msg = queue.shift()!;
       if (Date.now() - msg.queuedAt > 30 * 60 * 1000) {
