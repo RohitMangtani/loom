@@ -63,6 +63,7 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 - **Node.js 20+** — [nodejs.org](https://nodejs.org)
 - **Xcode Command Line Tools** — provides `swiftc` for the `send-return` helper (`xcode-select --install`)
 - **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`)
+- **Hosted dashboard extras** (only if you want the Vercel path) — Homebrew for `cloudflared`, `python3`, and a Vercel account (`npx vercel login`)
 
 Claude and Codex can be mixed freely. Claude gets the richest hook-based telemetry. Codex still works out of the box through JSONL, CPU, and PTY detection.
 
@@ -76,7 +77,7 @@ npm start
 npm run deploy:dashboard
 ```
 
-`npm start` runs the daemon and starts a free Cloudflare quick tunnel for the WebSocket server. `npm run deploy:dashboard` deploys the UI to your own Vercel account using that tunnel URL.
+`npm start` runs the daemon and starts a free Cloudflare quick tunnel for the WebSocket server. `npm run deploy:dashboard` deploys the UI to your own Vercel account using that tunnel URL. This hosted path expects Homebrew, `python3`, and a Vercel login. If you only want the local dashboard, use the local-only run path below instead.
 
 Then open 1-4 `Terminal.app` windows and run whichever supported CLI you installed:
 
@@ -129,7 +130,7 @@ npm start
 npm run deploy:dashboard
 ```
 
-This starts the local daemon on ports `3001/3002`, creates a free Cloudflare quick tunnel for the WebSocket server, then deploys the dashboard to your own Vercel account with the correct `NEXT_PUBLIC_WS_URL`.
+This starts the local daemon on ports `3001/3002`, creates a free Cloudflare quick tunnel for the WebSocket server, then deploys the dashboard to your own Vercel account with the correct `NEXT_PUBLIC_WS_URL`. The hosted path expects Homebrew (`cloudflared`), `python3`, and `npx vercel login`.
 
 **Local dashboard only** (no Vercel)
 ```bash
