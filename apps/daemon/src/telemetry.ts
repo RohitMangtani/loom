@@ -67,11 +67,6 @@ interface TelemetryStreamer {
   getSessionFile(id: string): string | null;
   setSessionFile(id: string, path: string): void;
   readHistory?(workerId: string): ChatEntry[];
-  addPendingEntry?(
-    workerId: string,
-    entry: ChatEntry,
-    options?: { echoText?: string; expectEcho?: boolean },
-  ): void;
 }
 
 export class TelemetryReceiver {
@@ -572,19 +567,6 @@ export class TelemetryReceiver {
     if (!worker.tty || content.length <= 400) return content;
     const bundlePath = this.writeContextBundle(worker, content);
     return `Read ${bundlePath} and follow it exactly. The full routed message and peer context are in that file.`;
-  }
-
-  recordPendingChat(
-    workerId: string,
-    displayText: string,
-    options: { echoText?: string; expectEcho?: boolean } = {},
-  ): void {
-    if (!displayText.trim()) return;
-    this.streamer?.addPendingEntry?.(
-      workerId,
-      { role: "user", text: displayText, timestamp: Date.now() },
-      options,
-    );
   }
 
   checkConflicts(
@@ -1186,11 +1168,6 @@ export class TelemetryReceiver {
       return { ok: false, error };
     }
 
-    this.recordPendingChat(workerId, content, {
-      echoText: payload,
-      expectEcho: true,
-    });
-
     worker.status = "working";
     worker.currentAction = "Thinking...";
     worker.lastAction = options.lastAction || "Received message";
@@ -1328,11 +1305,6 @@ export class TelemetryReceiver {
       // self-correct if the message truly didn't arrive.
       return { ok: false, error };
     }
-
-    this.recordPendingChat(workerId, content, {
-      echoText: payload,
-      expectEcho: true,
-    });
 
     return { ok: true };
   }

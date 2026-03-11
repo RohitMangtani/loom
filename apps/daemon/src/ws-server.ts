@@ -294,11 +294,6 @@ export class WsServer {
           selWorker.lastAction = "User approved from dashboard";
           selWorker.lastActionAt = Date.now();
           selWorker.stuckMessage = undefined;
-          this.telemetry.recordPendingChat(
-            msg.workerId,
-            `Selected option ${((msg.optionIndex || 0) + 1)} from dashboard`,
-            { expectEcho: false },
-          );
           this.telemetry.markDashboardInput(msg.workerId);
           this.telemetry.markInputSent(msg.workerId, "dashboard:selection");
           this.telemetry.notifyExternal(selWorker);

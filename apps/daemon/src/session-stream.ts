@@ -4,7 +4,6 @@ import type { ChatEntry } from "./types.js";
 import { describeAction, describeBashCommand, truncate } from "./utils.js";
 
 const MAX_HISTORY = 50;
-const MAX_PENDING = 200;
 const POLL_INTERVAL = 500; // fallback poll if fs.watch misses events
 const NUDGE_INTERVALS = [200, 500, 1_000, 2_000, 4_000]; // rapid polls after message send
 
@@ -18,20 +17,10 @@ interface Subscription {
   nudgeTimers: ReturnType<typeof setTimeout>[];
 }
 
-interface PendingChatEntry {
-  id: string;
-  entry: ChatEntry;
-  echoNorm: string | null;
-  expectEcho: boolean;
-  resolved: boolean;
-}
-
 export class SessionStreamer {
   private subscriptions = new Map<string, Subscription>();
   // worker_id → session file path (set by discovery)
   private sessionFiles = new Map<string, string>();
-  private pendingEntries = new Map<string, PendingChatEntry[]>();
-  private pendingSeq = 0;
 
   setSessionFile(workerId: string, filePath: string): void {
     this.sessionFiles.set(workerId, filePath);
@@ -78,39 +67,24 @@ export class SessionStreamer {
    * Read recent chat history from a session file.
    */
   readHistory(workerId: string): ChatEntry[] {
-    const fileEntries = this.readFileEntries(workerId);
-    const merged = this.mergePending(workerId, fileEntries);
-    return merged.slice(-MAX_HISTORY);
-  }
+    const filePath = this.sessionFiles.get(workerId);
+    if (!filePath) return [];
 
-  addPendingEntry(
-    workerId: string,
-    entry: ChatEntry,
-    options: { echoText?: string; expectEcho?: boolean } = {},
-  ): void {
-    const pending: PendingChatEntry = {
-      id: `p${++this.pendingSeq}`,
-      entry: {
-        ...entry,
-        timestamp: entry.timestamp ?? Date.now(),
-      },
-      echoNorm: options.expectEcho === false
-        ? null
-        : normalize(options.echoText ?? entry.text),
-      expectEcho: options.expectEcho !== false,
-      resolved: false,
-    };
+    try {
+      const buf = readFileSync(filePath);
+      const content = buf.toString("utf-8");
+      const lines = content.split("\n").filter(Boolean);
 
-    const list = this.pendingEntries.get(workerId) ?? [];
-    list.push(pending);
-    if (list.length > MAX_PENDING) {
-      list.splice(0, list.length - MAX_PENDING);
-    }
-    this.pendingEntries.set(workerId, list);
+      const entries: ChatEntry[] = [];
+      for (const line of lines) {
+        const parsed = parseLine(line);
+        if (parsed) entries.push(...parsed);
+      }
 
-    for (const sub of this.subscriptions.values()) {
-      if (sub.workerId !== workerId) continue;
-      sub.callback([pending.entry]);
+      // Return last MAX_HISTORY entries
+      return entries.slice(-MAX_HISTORY);
+    } catch {
+      return [];
     }
   }
 
@@ -123,24 +97,23 @@ export class SessionStreamer {
   subscribe(subKey: string, workerId: string, callback: (entries: ChatEntry[], full?: boolean) => void): void {
     this.unsubscribe(subKey);
 
-    const filePath = this.sessionFiles.get(workerId) || "";
-    let byteOffset = 0;
-    if (filePath) {
-      try {
-        byteOffset = statSync(filePath).size;
-      } catch {
-        byteOffset = 0;
-      }
+    const filePath = this.sessionFiles.get(workerId);
+    if (!filePath) return;
+
+    // Start from current end of file
+    let byteOffset: number;
+    try {
+      byteOffset = statSync(filePath).size;
+    } catch {
+      return;
     }
 
     // Use fs.watch for instant file change detection, with polling fallback
     let watcher: FSWatcher | null = null;
-    if (filePath) {
-      try {
-        watcher = watch(filePath, () => this.poll(subKey));
-      } catch {
-        // fs.watch can fail on some filesystems
-      }
+    try {
+      watcher = watch(filePath, () => this.poll(subKey));
+    } catch {
+      // fs.watch can fail on some filesystems
     }
 
     const sub: Subscription = {
@@ -190,7 +163,7 @@ export class SessionStreamer {
     // Discovery updates sessionFiles on every scan — if the file changed,
     // switch to the new one and send its full history as a full replace.
     let isFileChange = false;
-    const currentFile = this.sessionFiles.get(sub.workerId) || "";
+    const currentFile = this.sessionFiles.get(sub.workerId);
     if (currentFile && currentFile !== sub.filePath) {
       if (sub.watcher) sub.watcher.close();
       sub.filePath = currentFile;
@@ -200,8 +173,6 @@ export class SessionStreamer {
         sub.watcher = watch(currentFile, () => this.poll(subKey));
       } catch { sub.watcher = null; }
     }
-
-    if (!sub.filePath) return;
 
     try {
       const stat = statSync(sub.filePath);
@@ -218,102 +189,13 @@ export class SessionStreamer {
         if (parsed) entries.push(...parsed);
       }
 
-      if (entries.length === 0 && !isFileChange) return;
-
-      if (isFileChange) {
-        sub.callback(this.readHistory(sub.workerId), true);
-        return;
-      }
-
-      const visible = this.filterIncrementalEntries(sub.workerId, entries);
-      if (visible.length > 0) {
-        sub.callback(visible);
+      if (entries.length > 0) {
+        // File change = full replace (prevents duplicate entries after context compaction)
+        sub.callback(entries, isFileChange);
       }
     } catch {
       // File might have been deleted/rotated
     }
-  }
-
-  private readFileEntries(workerId: string): ChatEntry[] {
-    const filePath = this.sessionFiles.get(workerId);
-    if (!filePath) return [];
-
-    try {
-      const buf = readFileSync(filePath);
-      const content = buf.toString("utf-8");
-      const lines = content.split("\n").filter(Boolean);
-
-      const entries: ChatEntry[] = [];
-      for (const line of lines) {
-        const parsed = parseLine(line);
-        if (parsed) entries.push(...parsed);
-      }
-      return entries;
-    } catch {
-      return [];
-    }
-  }
-
-  private mergePending(workerId: string, fileEntries: ChatEntry[]): ChatEntry[] {
-    const pending = this.pendingEntries.get(workerId);
-    if (!pending || pending.length === 0) return fileEntries;
-
-    const consumed = new Set<string>();
-    const overlaid: ChatEntry[] = [];
-
-    for (const entry of fileEntries) {
-      if (entry.role === "user") {
-        const match = this.findPendingMatch(pending, normalize(entry.text), consumed);
-        if (match) {
-          match.resolved = true;
-          consumed.add(match.id);
-          overlaid.push(match.entry);
-          continue;
-        }
-      }
-      overlaid.push(entry);
-    }
-
-    const unresolved = pending
-      .filter((item) => !consumed.has(item.id) && (!item.expectEcho || !item.resolved))
-      .map((item) => item.entry);
-
-    return mergeByTimestamp(overlaid, unresolved);
-  }
-
-  private filterIncrementalEntries(workerId: string, entries: ChatEntry[]): ChatEntry[] {
-    const pending = this.pendingEntries.get(workerId);
-    if (!pending || pending.length === 0) return entries;
-
-    const consumed = new Set<string>();
-    const visible: ChatEntry[] = [];
-
-    for (const entry of entries) {
-      if (entry.role === "user") {
-        const match = this.findPendingMatch(pending, normalize(entry.text), consumed);
-        if (match) {
-          match.resolved = true;
-          consumed.add(match.id);
-          continue;
-        }
-      }
-      visible.push(entry);
-    }
-
-    return visible;
-  }
-
-  private findPendingMatch(
-    pending: PendingChatEntry[],
-    entryNorm: string,
-    consumed: Set<string>,
-  ): PendingChatEntry | null {
-    for (const item of pending) {
-      if (!item.expectEcho || !item.echoNorm) continue;
-      if (consumed.has(item.id)) continue;
-      if (item.echoNorm === entryNorm) return item;
-    }
-    return null;
   }
 }
 
@@ -322,12 +204,11 @@ function parseLine(line: string): ChatEntry[] | null {
   try {
     const obj = JSON.parse(line);
     const type = obj.type as string;
-    const timestamp = parseTimestamp(obj.timestamp);
 
     // ── Claude format ──
     if (type === "user") {
       const text = extractText(obj.message?.content);
-      if (text) return [{ role: "user", text, timestamp }];
+      if (text) return [{ role: "user", text }];
     }
 
     if (type === "assistant") {
@@ -337,14 +218,14 @@ function parseLine(line: string): ChatEntry[] | null {
       if (Array.isArray(content)) {
         for (const block of content) {
           if (block.type === "text" && block.text?.trim()) {
-            entries.push({ role: "agent", text: block.text.trim(), timestamp });
+            entries.push({ role: "agent", text: block.text.trim() });
           } else if (block.type === "tool_use") {
             const desc = describeAction(block.name, block.input);
-            entries.push({ role: "tool", text: desc, timestamp });
+            entries.push({ role: "tool", text: desc });
           }
         }
       } else if (typeof content === "string" && content.trim()) {
-        entries.push({ role: "agent", text: content.trim(), timestamp });
+        entries.push({ role: "agent", text: content.trim() });
       }
 
       return entries.length > 0 ? entries : null;
@@ -358,7 +239,7 @@ function parseLine(line: string): ChatEntry[] | null {
     // User message: {type:"event_msg", payload:{type:"user_message", message:"..."}}
     if (type === "event_msg" && p.type === "user_message" && p.message) {
       const text = typeof p.message === "string" ? p.message.trim() : null;
-      if (text) return [{ role: "user", text, timestamp }];
+      if (text) return [{ role: "user", text }];
     }
 
     if (type === "response_item") {
@@ -368,7 +249,7 @@ function parseLine(line: string): ChatEntry[] | null {
         if (Array.isArray(p.content)) {
           for (const block of p.content) {
             if (block.type === "output_text" && block.text?.trim()) {
-              entries.push({ role: "agent", text: block.text.trim(), timestamp });
+              entries.push({ role: "agent", text: block.text.trim() });
             }
           }
         }
@@ -380,7 +261,7 @@ function parseLine(line: string): ChatEntry[] | null {
         let input: Record<string, unknown> | undefined;
         try { input = JSON.parse(p.arguments || "{}"); } catch { /* ignore */ }
         const desc = describeCodexAction(p.name, input);
-        return [{ role: "tool", text: desc, timestamp }];
+        return [{ role: "tool", text: desc }];
       }
 
       // Tool result: {type:"response_item", payload:{type:"function_call_output", output:"..."}}
@@ -424,41 +305,3 @@ function extractText(content: unknown): string | null {
   return null;
 }
 
-function normalize(text: string): string {
-  return text.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function parseTimestamp(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Date.parse(value);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-  return undefined;
-}
-
-function mergeByTimestamp(base: ChatEntry[], extras: ChatEntry[]): ChatEntry[] {
-  if (extras.length === 0) return base;
-  if (base.length === 0) return extras;
-
-  const merged: ChatEntry[] = [];
-  let i = 0;
-  let j = 0;
-
-  while (i < base.length && j < extras.length) {
-    const baseTs = base[i]?.timestamp;
-    const extraTs = extras[j]?.timestamp;
-    if (baseTs == null || extraTs == null) break;
-    if (extraTs <= baseTs) {
-      merged.push(extras[j++]!);
-    } else {
-      merged.push(base[i++]!);
-    }
-  }
-
-  if (i < base.length || j < extras.length) {
-    merged.push(...base.slice(i), ...extras.slice(j));
-  }
-
-  return merged;
-}
