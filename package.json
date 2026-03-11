@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "launch": "bash scripts/launch-local.sh",
     "start": "bash apps/daemon/scripts/start.sh",
     "dev:daemon": "npm -w apps/daemon run dev",
     "dev:dashboard": "npm -w apps/dashboard run dev",

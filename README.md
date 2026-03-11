@@ -73,11 +73,10 @@ Claude and Codex can be mixed freely. Claude gets the richest hook-based telemet
 git clone https://github.com/RohitMangtani/hive.git
 cd hive
 bash setup.sh
-npm start
-npm run deploy:dashboard
+npm run launch
 ```
 
-`npm start` runs the daemon and starts a free Cloudflare quick tunnel for the WebSocket server. `npm run deploy:dashboard` deploys the UI to your own Vercel account using that tunnel URL. This hosted path expects Homebrew, `python3`, and a Vercel login. If you only want the local dashboard, use the local-only run path below instead.
+`npm run launch` is the simplest path. It starts the daemon and dashboard locally, opens `http://localhost:3000`, and leaves both processes running in one terminal.
 
 Then open 1-4 `Terminal.app` windows and run whichever supported CLI you installed:
 
@@ -91,7 +90,7 @@ or
 codex
 ```
 
-The daemon auto-discovers either CLI in about 3 seconds. Keep `npm start` running while you use the hosted dashboard.
+The daemon auto-discovers either CLI in about 3 seconds. Arrange the windows in the screen corners and the dashboard mirrors that layout automatically.
 
 ## Setup
 
@@ -124,7 +123,14 @@ Without this, auto-pilot will not work and agents will stall waiting for permiss
 
 You have two supported ways to run Hive:
 
-**Hosted dashboard on Vercel** (matches the public article flow)
+**Fastest local launch** (recommended)
+```bash
+npm run launch
+```
+
+This starts the daemon and dashboard locally, opens `http://localhost:3000`, and keeps both running in one terminal.
+
+**Hosted dashboard on Vercel** (optional)
 ```bash
 npm start
 npm run deploy:dashboard
@@ -132,7 +138,7 @@ npm run deploy:dashboard
 
 This starts the local daemon on ports `3001/3002`, creates a free Cloudflare quick tunnel for the WebSocket server, then deploys the dashboard to your own Vercel account with the correct `NEXT_PUBLIC_WS_URL`. The hosted path expects Homebrew (`cloudflared`), `python3`, and `npx vercel login`.
 
-**Local dashboard only** (no Vercel)
+**Manual local split** (same local behavior, separate terminals)
 ```bash
 npm run dev:daemon
 npm run dev:dashboard
