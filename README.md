@@ -72,9 +72,11 @@ Claude and Codex can be mixed freely. Claude gets the richest hook-based telemet
 git clone https://github.com/RohitMangtani/hive.git
 cd hive
 bash setup.sh
-npm run dev:daemon
-npm run dev:dashboard
+npm start
+npm run deploy:dashboard
 ```
+
+`npm start` runs the daemon and starts a free Cloudflare quick tunnel for the WebSocket server. `npm run deploy:dashboard` deploys the UI to your own Vercel account using that tunnel URL.
 
 Then open 1-4 `Terminal.app` windows and run whichever supported CLI you installed:
 
@@ -88,7 +90,7 @@ or
 codex
 ```
 
-The daemon auto-discovers either CLI in about 3 seconds.
+The daemon auto-discovers either CLI in about 3 seconds. Keep `npm start` running while you use the hosted dashboard.
 
 ## Setup
 
@@ -119,21 +121,25 @@ Without this, auto-pilot will not work and agents will stall waiting for permiss
 
 ## Running
 
-You need 3 things running:
+You have two supported ways to run Hive:
 
-**1. Daemon** (coordinates everything)
+**Hosted dashboard on Vercel** (matches the public article flow)
+```bash
+npm start
+npm run deploy:dashboard
+```
+
+This starts the local daemon on ports `3001/3002`, creates a free Cloudflare quick tunnel for the WebSocket server, then deploys the dashboard to your own Vercel account with the correct `NEXT_PUBLIC_WS_URL`.
+
+**Local dashboard only** (no Vercel)
 ```bash
 npm run dev:daemon
-```
-Starts on port 3001 (HTTP API) and port 3002 (WebSocket).
-
-**2. Dashboard** (in a new terminal)
-```bash
 npm run dev:dashboard
 ```
-Opens at `localhost:3000`.
 
-**3. Agents** (open Terminal.app windows and run any supported CLI you installed)
+This opens the dashboard at `localhost:3000`.
+
+**Agents** (open Terminal.app windows and run any supported CLI you installed)
 ```bash
 claude
 ```
@@ -434,20 +440,13 @@ The app caches itself via service worker, so repeat opens are instant. It works 
 
 ## Deploy Your Own Dashboard
 
-The local setup (`localhost:3000`) works out of the box. If you want the dashboard accessible from your phone or another device, deploy it to your own Vercel account:
+For a hosted dashboard, use the current Hive architecture:
 
-```bash
-cd apps/dashboard
-npx vercel
-```
+1. `npm start` to run the daemon and create a free Cloudflare quick tunnel for `ws://localhost:3002`
+2. `npm run deploy:dashboard` to deploy `apps/dashboard` to your own Vercel account using that tunnel URL
+3. Keep `npm start` running while you use the deployed dashboard
 
-Follow the prompts to link your Vercel account. Set one environment variable in the Vercel dashboard:
-
-| Variable | Value |
-|----------|-------|
-| `NEXT_PUBLIC_WS_URL` | `ws://YOUR_COMPUTER_IP:3002` |
-
-Replace `YOUR_COMPUTER_IP` with your machine's local IP (find it with `ipconfig getifaddr en0`). This lets the deployed dashboard connect back to your running daemon.
+`npm run deploy:dashboard` reads the current tunnel URL from `~/.hive/tunnel-url.txt`, converts it to `wss://...`, and passes it to Vercel as `NEXT_PUBLIC_WS_URL` for that deployment.
 
 Every clone is a completely independent instance. Setup generates a unique auth token at `~/.hive/token`. Your daemon, your agents, your dashboard, your data. Nothing connects to anyone else's setup. Two people can run Hive on the same network without any interference.
 

@@ -22,4 +22,11 @@ Opens at `localhost:3000`. Requires the daemon running on port 3001/3002.
 
 ## Remote Access
 
-Deploy to Vercel and use a cloudflared tunnel to connect the dashboard to your local daemon's WebSocket. Set `NEXT_PUBLIC_WS_URL` to your tunnel URL.
+The supported hosted flow is:
+
+```bash
+npm start
+npm run deploy:dashboard
+```
+
+`npm start` creates a Cloudflare quick tunnel for the local WebSocket server and writes the public URL to `~/.hive/tunnel-url.txt`. `npm run deploy:dashboard` deploys this app to your Vercel account with that tunnel URL as `NEXT_PUBLIC_WS_URL`.
