@@ -17,9 +17,11 @@ const DOT_BG: Record<DotColor, string> = {
 };
 
 function statusLabel(w: WorkerState): string {
-  if (w.status === "stuck") return w.currentAction || "Needs input";
-  if (w.status === "working") return w.currentAction || "Working...";
-  return w.lastAction || "Idle";
+  const primary = primarySummary(w);
+  if (primary) return primary;
+  if (w.status === "stuck") return "Needs input";
+  if (w.status === "working") return "Working...";
+  return "Idle";
 }
 
 function statusWord(w: WorkerState): string {
@@ -35,6 +37,66 @@ function badgeStyle(color: DotColor) {
     red: { background: "rgba(220,38,38,0.12)", color: "#f87171" },
   };
   return map[color];
+}
+
+function truncateText(text: string, max = 72): string {
+  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
+function stripIdentityPrefix(text: string): string {
+  return text.replace(/^\[[^\]]+\]\s*/, "").trim();
+}
+
+function normalizeSummary(text: string | null | undefined): string | null {
+  if (!text) return null;
+
+  let value = stripIdentityPrefix(text)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!value) return null;
+
+  if (/^read\s+\/Users\/.*\/\.hive\/context-messages\/msg-[^/\s]+\.md/i.test(value) ||
+      /^reading\s+msg-[^/\s]+\.md$/i.test(value)) {
+    return "Reviewing routed task";
+  }
+
+  if (/^read\s+\/Users\/.*~?\/?\.hive\/workers\.json/i.test(value) ||
+      /^cat\s+~\/\.hive\/workers\.json/i.test(value)) {
+    return "Checking worker status";
+  }
+
+  value = value
+    .replace(/\/Users\/[^/\s]+\/\.hive\/context-messages\/msg-[^/\s]+\.md/g, "routed task")
+    .replace(/\/Users\/[^/\s]+\/factory\/projects\/([^/\s]+)\/([^\s]+)/g, "$2")
+    .replace(/\/Users\/[^/\s]+\/([^/\s]+)/g, "$1");
+
+  if (/^thinking\.\.\.$/i.test(value) || /^working\.\.\.$/i.test(value)) return null;
+  if (/^received prompt$/i.test(value)) return null;
+  if (/^running command$/i.test(value)) return null;
+
+  return truncateText(value);
+}
+
+function primarySummary(w: WorkerState): string | null {
+  const action = normalizeSummary(w.status === "working" ? w.currentAction : w.lastAction);
+  const direction = normalizeSummary(w.lastDirection);
+
+  if (w.status === "stuck") return action || direction;
+  if (w.status === "working") return action || direction;
+  return action || direction;
+}
+
+function secondarySummary(w: WorkerState): string | null {
+  if (w.status === "stuck") return null;
+
+  const primary = primarySummary(w);
+  const action = normalizeSummary(w.status === "working" ? w.currentAction : w.lastAction);
+  const direction = normalizeSummary(w.lastDirection);
+
+  if (direction && direction !== primary) return direction;
+  if (w.status === "working" && action && action !== primary) return action;
+  return null;
 }
 
 /** Whether this stuck state needs selection keystrokes vs text input */
@@ -164,6 +226,7 @@ export function AgentCard({
   const stuck = color === "yellow";
   const buttons = stuck ? quickButtons(worker) : [];
   const idle = color === "red";
+  const secondary = secondarySummary(worker);
 
   return (
     <div
@@ -204,9 +267,9 @@ export function AgentCard({
           : statusLabel(worker)}
       </p>
 
-      {!stuck && worker.lastDirection && (
+      {!stuck && secondary && (
         <p className="text-[10px] leading-tight text-[var(--text-muted)] line-clamp-2 opacity-50 mt-0.5">
-          {worker.lastDirection}
+          {secondary}
         </p>
       )}
 
