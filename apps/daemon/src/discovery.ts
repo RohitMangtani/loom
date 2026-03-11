@@ -804,7 +804,7 @@ export class ProcessDiscovery {
   /** Patterns to match AI agent processes in `ps` output. Order matters — first match wins. */
   private static readonly AGENT_PATTERNS: { regex: RegExp; model: string }[] = [
     { regex: /claude\s*$/, model: "claude" },
-    { regex: /codex\s*$/, model: "codex" },
+    { regex: /\/codex(?:\s+(?!app-server)|$)/, model: "codex" },
   ];
 
   private findClaudeProcesses(): ProcessInfo[] {
@@ -877,9 +877,9 @@ export class ProcessDiscovery {
         }
 
         const effectiveTty = info.tty || psTty;
-        if (effectiveTty && effectiveTty !== "??" && effectiveTty.startsWith("ttys")) {
-          seenTtys.add(effectiveTty);
-        }
+        // Skip processes with no usable TTY (background subprocesses, app servers)
+        if (!effectiveTty || effectiveTty === "??" || !effectiveTty.startsWith("ttys")) continue;
+        seenTtys.add(effectiveTty);
         results.push({ pid, cpuPercent, startedAt, ...info, model: matched.model });
       }
 
