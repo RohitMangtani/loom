@@ -22,11 +22,38 @@ if [ "$NODE_MAJOR" -lt 20 ]; then
 fi
 echo "  ✓ Node.js $(node -v)"
 
-if ! command -v claude &>/dev/null; then
-  echo "  ✗ Claude Code not found. Install it: npm install -g @anthropic-ai/claude-code"
+HAS_CLAUDE=0
+HAS_CODEX=0
+
+if command -v claude &>/dev/null; then
+  HAS_CLAUDE=1
+fi
+
+if command -v codex &>/dev/null; then
+  HAS_CODEX=1
+fi
+
+if [ "$HAS_CLAUDE" -eq 0 ] && [ "$HAS_CODEX" -eq 0 ]; then
+  echo "  ✗ No supported CLI found."
+  echo "    Install at least one:"
+  echo "      Claude Code: npm install -g @anthropic-ai/claude-code"
+  echo "      Codex:       npm install -g @openai/codex"
   exit 1
 fi
-echo "  ✓ Claude Code"
+
+if [ "$HAS_CLAUDE" -eq 1 ]; then
+  echo "  ✓ Claude Code"
+fi
+
+if [ "$HAS_CODEX" -eq 1 ]; then
+  echo "  ✓ Codex"
+fi
+
+if ! command -v swiftc &>/dev/null; then
+  echo "  ✗ swiftc not found. Install Xcode Command Line Tools: xcode-select --install"
+  exit 1
+fi
+echo "  ✓ Swift compiler"
 
 # ── Install dependencies ─────────────────────────────────────────────
 
@@ -52,21 +79,43 @@ else
   echo "  ✓ ~/send-return already exists"
 fi
 
-# ── Set up Claude Code hooks ─────────────────────────────────────────
+# ── Create Hive auth token ───────────────────────────────────────────
 
-SETTINGS="$HOME/.claude/settings.json"
+echo ""
+echo "  Preparing Hive auth..."
+node <<'NODE'
+const { randomBytes, createHash } = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
-if [ ! -f "$SETTINGS" ]; then
-  mkdir -p "$HOME/.claude"
-  echo '{}' > "$SETTINGS"
-fi
+const dir = path.join(process.env.HOME, '.hive');
+const tokenPath = path.join(dir, 'token');
+const viewerPath = path.join(dir, 'viewer-token');
 
-if grep -q '"hooks"' "$SETTINGS" 2>/dev/null; then
-  echo "  ⚠  Hooks already exist in $SETTINGS"
-  echo "     Run: bash setup-hooks.sh to see merge instructions."
-else
+fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+
+let token = '';
+if (fs.existsSync(tokenPath)) {
+  token = fs.readFileSync(tokenPath, 'utf-8').trim();
+}
+
+if (!/^[a-f0-9]{64}$/.test(token)) {
+  token = randomBytes(32).toString('hex');
+  fs.writeFileSync(tokenPath, token + '\n', { mode: 0o600 });
+}
+
+const viewer = createHash('sha256').update(token + ':viewer').digest('hex');
+fs.writeFileSync(viewerPath, viewer + '\n', { mode: 0o600 });
+NODE
+echo "  ✓ ~/.hive/token ready"
+
+# ── Set up Claude Code hooks (if Claude is installed) ───────────────
+
+if [ "$HAS_CLAUDE" -eq 1 ]; then
   bash setup-hooks.sh
   echo "  ✓ Claude Code hooks configured"
+else
+  echo "  • Claude Code not installed — skipping Claude hook setup"
 fi
 
 # ── Create .env from template ────────────────────────────────────────
@@ -90,8 +139,8 @@ echo "  │                                         │"
 echo "  │  Start the dashboard (new terminal):    │"
 echo "  │    npm run dev:dashboard                │"
 echo "  │                                         │"
-echo "  │  Then open 4 Terminal tabs and run       │"
-echo "  │  'claude' in each one. The daemon       │"
-echo "  │  auto-discovers them in ~3 seconds.     │"
+echo "  │  Then open 1-4 Terminal windows and run │"
+echo "  │  'claude' and/or 'codex'. The daemon    │"
+echo "  │  auto-discovers supported CLIs in ~3s.  │"
 echo "  └─────────────────────────────────────────┘"
 echo ""

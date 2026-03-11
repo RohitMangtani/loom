@@ -50,7 +50,7 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 - **Auto-discovery** — start `claude` or `codex` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
 - **Auto-pilot** — permission prompts auto-approve after a 15-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
-- **Peer awareness** — every agent sees what the others are doing on each prompt. One-line peer summary injected automatically. No manual API calls needed.
+- **Peer awareness** — Claude agents get a one-line peer summary on every prompt, and all workers share the same dashboard/API state. No manual registration.
 - **Coordination** — file locks, task queue, scratchpad, conflict detection. Multiple agents working on the same codebase without stepping on each other.
 - **Workflow handoff** — tag related tasks with a workflow ID. When Agent 1 finishes "Build the API," Agent 2 automatically receives a summary of what was built and which files changed before starting "Build the UI."
 - **Compound learning** — every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge instead of a blank slate.
@@ -61,8 +61,34 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 
 - **macOS** (uses AppleScript + CGEvent for terminal interaction)
 - **Node.js 20+** — [nodejs.org](https://nodejs.org)
-- **Claude Code** — `npm install -g @anthropic-ai/claude-code`
-- **Codex** (optional) — `npm install -g @openai/codex` if you want to run Codex agents alongside Claude
+- **Xcode Command Line Tools** — provides `swiftc` for the `send-return` helper (`xcode-select --install`)
+- **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`)
+
+Claude and Codex can be mixed freely. Claude gets the richest hook-based telemetry. Codex still works out of the box through JSONL, CPU, and PTY detection.
+
+## Quick Start
+
+```bash
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
+bash setup.sh
+npm run dev:daemon
+npm run dev:dashboard
+```
+
+Then open 1-4 `Terminal.app` windows and run whichever supported CLI you installed:
+
+```bash
+claude
+```
+
+or
+
+```bash
+codex
+```
+
+The daemon auto-discovers either CLI in about 3 seconds.
 
 ## Setup
 
@@ -72,12 +98,13 @@ cd hive
 bash setup.sh
 ```
 
-The setup script does 5 things:
-1. Checks Node.js 20+ and Claude Code CLI are installed
+The setup script does 6 things:
+1. Checks Node.js 20+, `swiftc`, and at least one supported CLI
 2. Installs all npm dependencies (monorepo workspaces)
-3. Compiles the `send-return` Swift binary for auto-pilot keystroke injection
-4. Configures Claude Code hooks so every agent reports live events to the daemon
-5. Creates `.env` from the template
+3. Generates `~/.hive/token` and `~/.hive/viewer-token`
+4. Compiles the `send-return` Swift binary for auto-pilot keystroke injection
+5. Installs or updates Claude Code hooks if Claude is present
+6. Creates `.env` from the template
 
 ### Accessibility Permission (required)
 
@@ -106,7 +133,7 @@ npm run dev:dashboard
 ```
 Opens at `localhost:3000`.
 
-**3. Agents** (open Terminal.app windows, run `claude` or `codex` in each)
+**3. Agents** (open Terminal.app windows and run any supported CLI you installed)
 ```bash
 claude
 ```
@@ -115,7 +142,7 @@ or
 codex
 ```
 
-Arrange your terminal windows in a 2x2 grid on screen. The daemon detects their positions and maps each one to the matching tile on the dashboard. You can also spawn agents directly from the dashboard by tapping an empty "OFFLINE" tile.
+Arrange your terminal windows in a 2x2 grid on screen. The daemon detects their positions and maps each one to the matching tile on the dashboard. Mix `claude` and `codex` however you want. You can also spawn agents directly from the dashboard by tapping an empty "OFFLINE" tile.
 
 **4. Install the app on your phone** (optional, recommended)
 
@@ -148,7 +175,7 @@ This is how you run 4 agents unattended. You give them tasks and walk away. Auto
 
 ### Coordination
 Multiple agents can safely work on the same codebase:
-- **Peer awareness** — every prompt, each agent sees a one-line summary of what the other agents are doing (status, project, current action). Injected by the identity hook. Agents avoid overlap without manual checks.
+- **Peer awareness** — Claude agents get a one-line summary of what the other agents are doing (status, project, current action) via the identity hook. Codex workers still share the same fleet state through the dashboard, scratchpad, and REST API.
 - **File locks** — acquire advisory locks before editing shared files (`POST /api/locks`)
 - **Conflict detection** — check if another agent recently modified a file (`GET /api/conflicts`)
 - **Scratchpad** — leave ephemeral notes for other agents (`POST /api/scratchpad`), auto-expires in 1 hour
@@ -177,11 +204,11 @@ Every solved problem gets written to a per-project knowledge file (`.claude/hive
 The daemon writes `~/.hive/daemon-state.json` every 30 seconds and on shutdown. If the daemon restarts, it rehydrates workers, message queues, locks, and workflow handoffs from the snapshot (discarded if older than 10 minutes). Discovery reconciles actual processes within 3 seconds. You do not configure this. It just works.
 
 ### Session Routing (Restart Resilience)
-When you open 4 terminals within seconds of each other, their session log files are created nearly simultaneously. The daemon needs to know which log file belongs to which terminal. It solves this with marker files:
+When you open 4 terminals within seconds of each other, their session log files are created nearly simultaneously. The daemon needs to know which log file belongs to which terminal. It solves this with marker files for Claude and rollout-log matching for Codex:
 
-1. Each terminal writes `~/.hive/sessions/{tty}` with its session ID on every prompt (via the `identity.sh` hook)
-2. The daemon reads these marker files on startup and maps each terminal to the correct log file
-3. Marker files persist across computer restarts, so the mapping is durable
+1. Claude terminals write `~/.hive/sessions/{tty}` with their session ID on every prompt (via the `identity.sh` hook)
+2. The daemon reads those marker files on startup and uses them as ground truth, while Codex workers are re-associated from their rollout JSONL files
+3. Marker files persist across computer restarts, so Claude mappings are durable too
 
 On a fresh computer restart, the old marker files are overwritten the moment you type your first prompt in each terminal. The daemon picks up the correct mapping within 3 seconds. This means routing is accurate after one prompt per terminal, which is invisible to you since you would be typing anyway.
 
@@ -267,7 +294,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ## How Agents Use Hive
 
-Each agent reads instructions from `~/.claude/CLAUDE.md` that tell it how to interact with the daemon. Here's what agents do automatically:
+Claude agents read instructions from `~/.claude/CLAUDE.md` that tell them how to interact with the daemon. Here's what that hook-driven path does automatically:
 
 1. **Identify themselves** — read `~/.hive/workers.json` on startup to find their quadrant. On every prompt, the identity hook also injects a peer summary showing what the other agents are doing.
 2. **Check learnings** — read `.claude/hive-learnings.md` before starting any task
@@ -276,7 +303,7 @@ Each agent reads instructions from `~/.claude/CLAUDE.md` that tell it how to int
 5. **Dispatch work** — send tasks to other agents when the work involves a different project or needs a fresh perspective
 6. **Use scratchpad** — leave notes about in-progress work for other agents
 
-These behaviors are configured through the CLAUDE.md instructions, not hardcoded. You can customize how agents coordinate by editing the instructions.
+These behaviors are configured through the CLAUDE.md instructions, not hardcoded. Codex workers still participate in discovery, messaging, queueing, and shared state, but they do not use the Claude hook path.
 
 ## Configuration
 
@@ -290,13 +317,14 @@ These behaviors are configured through the CLAUDE.md instructions, not hardcoded
 
 ### Claude Code Hooks
 
-Setup configures 4 hooks in `~/.claude/settings.json`:
+If Claude Code is installed, setup installs or updates these hooks in `~/.claude/settings.json`:
+- **UserPromptSubmit** — registers the TTY/session mapping and injects identity + peer summary
 - **PreToolUse** — fires before every tool call, reports tool name to daemon
 - **PostToolUse** — fires after every tool call, reports result
 - **Notification** — fires on agent notifications (errors, completions)
 - **Stop** — fires when an agent session ends
 
-If you already have hooks configured, run `bash setup-hooks.sh` to see the JSON to merge manually.
+`bash setup-hooks.sh` is idempotent. It merges Hive hooks into existing settings instead of replacing them.
 
 ### Authentication
 
@@ -307,7 +335,7 @@ Setup generates a random token at `~/.hive/token`. All API requests require this
 ```
 Daemon (Node.js, port 3001 + 3002)
 ├── Discovery     — finds Claude + Codex processes via ps + lsof every 3s
-├── Telemetry     — receives hook events, maintains worker state
+├── Telemetry     — receives hook events and inferred signals, maintains worker state
 ├── Auto-pilot    — detects stuck prompts, auto-approves via send-return
 ├── Arrange       — detects terminal positions, assigns quadrants by screen location
 ├── Watchdog      — detects stuck loops, escalates to dashboard
@@ -339,8 +367,8 @@ Dashboard (Next.js, port 3000 — installable as PWA)
 | `apps/daemon/src/ws-server.ts` | WebSocket server for dashboard |
 | `apps/daemon/src/watchdog.ts` | Stuck loop detection |
 | `apps/daemon/src/state-store.ts` | Snapshot persistence across restarts |
-| `~/.hive/identity.sh` | Identity hook: injects quadrant ID + peer summary on every prompt |
-| `~/.hive/sessions/` | Marker files mapping each TTY to its session ID (written by identity.sh) |
+| `~/.hive/identity.sh` | Claude hook: injects quadrant ID + peer summary on every prompt |
+| `~/.hive/sessions/` | Claude TTY→session marker files written by `identity.sh` |
 | `apps/daemon/src/notifications.ts` | macOS push notifications on stuck |
 | `apps/daemon/src/task-queue.ts` | Global task queue |
 | `apps/daemon/src/lock-manager.ts` | File lock coordination |
@@ -353,7 +381,8 @@ Dashboard (Next.js, port 3000 — installable as PWA)
 
 **Agents not showing up on dashboard**
 - Make sure the daemon is running (`npm run dev:daemon`)
-- Check that hooks are configured: `cat ~/.claude/settings.json | grep hooks`
+- If you're running Claude, check that hooks are configured: `cat ~/.claude/settings.json | grep hooks`
+- If you're running Codex only, missing Claude hooks is expected
 - The daemon discovers agents every 3 seconds. Wait a moment.
 
 **Auto-pilot not working (agents stuck on prompts)**
@@ -376,8 +405,9 @@ Dashboard (Next.js, port 3000 — installable as PWA)
 - Force re-mapping: restart the daemon (`npm run dev:daemon`)
 
 **Hooks not reporting events**
+- This applies to Claude Code only
 - Verify hooks exist: `cat ~/.claude/settings.json | jq .hooks`
-- If you had existing hooks, they may need manual merging. Run `bash setup-hooks.sh` for instructions.
+- Re-run `bash setup-hooks.sh` to repair or update the Hive hook entries.
 - Test a hook manually: start `claude`, use any tool, check daemon logs for `[telemetry]` events.
 
 **Build errors**
