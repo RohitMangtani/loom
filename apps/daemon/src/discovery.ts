@@ -140,14 +140,15 @@ export class ProcessDiscovery {
     const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
     const script = `
 tell application "Terminal"
+  set theText to ""
   repeat with w in windows
     repeat with t in tabs of w
       if tty of t is "${device}" then
-        return contents of t
+        set theText to contents of t
       end if
     end repeat
   end repeat
-  return ""
+  return theText
 end tell
 `;
     try {
