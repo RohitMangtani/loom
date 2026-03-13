@@ -1704,6 +1704,28 @@ export class TelemetryReceiver {
     return false;
   }
 
+  /**
+   * Extract the effective working directory from a bash command.
+   * Handles patterns like `cd /path/to/repo && git push`.
+   */
+  private extractCommandCwd(command: string, fallback: string): string {
+    // Match: cd /path && ..., cd "/path" && ..., cd '/path' && ...
+    const cdMatch = command.match(/\bcd\s+["']?([^"'&;|\n]+?)["']?\s*(?:&&|;)/);
+    if (cdMatch) {
+      let dir = cdMatch[1].trim();
+      // Expand ~ to home
+      if (dir.startsWith("~/") || dir === "~") {
+        const home = process.env.HOME || `/Users/${process.env.USER}`;
+        dir = dir.replace(/^~/, home);
+      }
+      try {
+        const { statSync } = require("fs");
+        if (statSync(dir).isDirectory()) return dir;
+      } catch { /* path doesn't exist, use fallback */ }
+    }
+    return fallback;
+  }
+
   /** Auto-detect reviewable actions from Bash tool_input */
   private autoDetectReview(
     workerId: string,
@@ -1715,9 +1737,16 @@ export class TelemetryReceiver {
 
     const cmdLower = command.toLowerCase();
 
-    const gitUrl = this.resolveGitUrl(worker);
-    const branch = this.resolveGitBranch(worker);
-    const repoName = this.resolveGitRepoName(worker);
+    // Resolve git context from the actual command cwd, not the worker's launch directory.
+    // Agents often run `cd /other/repo && git push` from a different project.
+    const effectiveCwd = this.extractCommandCwd(command, worker.project);
+    const effectiveWorker = effectiveCwd !== worker.project
+      ? { ...worker, project: effectiveCwd }
+      : worker;
+
+    const gitUrl = this.resolveGitUrl(effectiveWorker);
+    const branch = this.resolveGitBranch(effectiveWorker);
+    const repoName = this.resolveGitRepoName(effectiveWorker);
     const artifacts = this.getReviewArtifacts(workerId);
 
     // npm run build + git push in same command chain (check before individual patterns)
