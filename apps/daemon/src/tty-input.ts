@@ -446,6 +446,9 @@ export function sendEnterToTty(tty: string): { ok: boolean; error?: string } {
 
   const previousApp = getFrontmostApp();
 
+  // Activate the correct terminal tab and send Return keystroke in one
+  // AppleScript — uses key code 36 (Return) via System Events.
+  // Falls back to CGEvent via send-return if System Events fails (-1743).
   const script = `
 tell application "Terminal"
   set targetTTY to "${device}"
@@ -466,30 +469,49 @@ tell application "Terminal"
   set index of targetWin to 1
   activate
 end tell
+delay 0.5
+try
+  tell application "System Events"
+    tell process "Terminal"
+      key code 36
+    end tell
+  end tell
+  return "system_events"
+on error
+  return "need_cgevent"
+end try
 `;
 
+  let needCGEvent = false;
   try {
-    execFileSync("/usr/bin/osascript", ["-e", script], {
-      timeout: 5000,
+    const result = execFileSync("/usr/bin/osascript", ["-e", script], {
+      timeout: 8000,
       encoding: "utf-8",
     });
+    needCGEvent = (result as string).trim() === "need_cgevent";
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `Activate tab failed: ${msg.slice(0, 180)}` };
   }
 
-  // Brief delay for Terminal.app to finish bringing the tab to front
-  execFileSync("/bin/sleep", ["0.3"]);
-
-  try {
-    execFileSync(SEND_RETURN_BIN, [], {
-      timeout: 3000,
-      encoding: "utf-8",
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (previousApp) restoreFrontmostApp(previousApp);
-    return { ok: false, error: `Enter failed: ${msg.slice(0, 180)}` };
+  if (needCGEvent) {
+    // System Events blocked (-1743) — fall back to CGEvent via send-return
+    execFileSync("/bin/sleep", ["0.5"]);
+    try {
+      execFileSync(SEND_RETURN_BIN, [], {
+        timeout: 3000,
+        encoding: "utf-8",
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (previousApp) restoreFrontmostApp(previousApp);
+      return { ok: false, error: `Enter failed: ${msg.slice(0, 180)}` };
+    }
+    // Send a second time after a brief delay (ink UI can miss the first)
+    execFileSync("/bin/sleep", ["0.3"]);
+    try {
+      execFileSync(SEND_RETURN_BIN, [], { timeout: 3000, encoding: "utf-8" });
+    } catch { /* best effort */ }
   }
 
   if (previousApp) restoreFrontmostApp(previousApp);
