@@ -46,8 +46,8 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 ## What You Get
 
 - **Stoplight dashboard** — 2x2 grid that mirrors your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor. The tile positions match your terminal positions.
-- **Multi-model** — run Claude and Codex agents side by side. Each tile shows which model is running. Spawn either from the dashboard.
-- **Auto-discovery** — start `claude` or `codex` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
+- **Multi-model** — run Claude, Codex, and OpenClaw agents side by side. Each tile shows which model is running. Spawn any from the dashboard.
+- **Auto-discovery** — start `claude`, `codex`, or `openclaw tui` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
 - **Auto-pilot** — permission prompts auto-approve after a 15-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
 - **Peer awareness** — Claude agents get a one-line peer summary on every prompt, and all workers share the same dashboard/API state. No manual registration.
@@ -62,10 +62,10 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 - **macOS** (uses AppleScript + CGEvent for terminal interaction)
 - **Node.js 20+** — [nodejs.org](https://nodejs.org)
 - **Xcode Command Line Tools** — provides `swiftc` for the `send-return` helper (`xcode-select --install`)
-- **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`)
+- **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`) and/or OpenClaw (`npm install -g openclaw`)
 - **Hosted dashboard extras** (required for the standard `npm run launch` path) — Homebrew for `cloudflared`, `python3`, and a Vercel account (`npx vercel login`). If you only want localhost, use `npm run launch:local` instead.
 
-Claude and Codex can be mixed freely. Claude gets the richest hook-based telemetry. Codex still works out of the box through JSONL, CPU, and PTY detection.
+Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection.
 
 ## Quick Start
 
@@ -91,7 +91,13 @@ or
 codex
 ```
 
-The daemon auto-discovers either CLI in about 3 seconds. Arrange the windows in the screen corners and the dashboard mirrors that layout automatically.
+or
+
+```bash
+openclaw tui
+```
+
+The daemon auto-discovers any supported CLI in about 3 seconds. Arrange the windows in the screen corners and the dashboard mirrors that layout automatically.
 
 ## Setup
 
@@ -162,8 +168,12 @@ or
 ```bash
 codex
 ```
+or
+```bash
+openclaw tui
+```
 
-Arrange your terminal windows in a 2x2 grid on screen. The daemon detects their positions and maps each one to the matching tile on the dashboard. Mix `claude` and `codex` however you want. You can also spawn agents directly from the dashboard by tapping an empty "OFFLINE" tile.
+Arrange your terminal windows in a 2x2 grid on screen. The daemon detects their positions and maps each one to the matching tile on the dashboard. Mix `claude`, `codex`, and `openclaw` however you want. You can also spawn agents directly from the dashboard by tapping an empty "OFFLINE" tile.
 
 **4. Install the app on your phone** (optional, recommended)
 
@@ -180,7 +190,7 @@ Open the dashboard URL on your phone and add it to your home screen. It runs ful
 ## How It Works
 
 ### Auto-Discovery
-Detects Claude and Codex processes within 3 seconds via `ps` + `lsof`. No configuration needed. Start `claude` or `codex` in any terminal and the daemon finds it. The daemon reads the physical position of each Terminal window on your screen every 10 seconds and assigns quadrants to match. If you drag a terminal from top-left to bottom-right, it becomes Q4 on the dashboard within 10 seconds. Tab titles update automatically to show which quadrant each terminal is.
+Detects Claude, Codex, and OpenClaw processes within 3 seconds via `ps` + `lsof`. No configuration needed. Start `claude`, `codex`, or `openclaw tui` in any terminal and the daemon finds it. The daemon reads the physical position of each Terminal window on your screen every 10 seconds and assigns quadrants to match. If you drag a terminal from top-left to bottom-right, it becomes Q4 on the dashboard within 10 seconds. Tab titles update automatically to show which quadrant each terminal is.
 
 ### Status Tracking
 Multi-layer detection pipeline determines real-time status:
@@ -355,7 +365,7 @@ Setup generates a random token at `~/.hive/token`. All API requests require this
 
 ```
 Daemon (Node.js, port 3001 + 3002)
-├── Discovery     — finds Claude + Codex processes via ps + lsof every 3s
+├── Discovery     — finds Claude + Codex + OpenClaw processes via ps + lsof every 3s
 ├── Telemetry     — receives hook events and inferred signals, maintains worker state
 ├── Auto-pilot    — detects stuck prompts, auto-approves via send-return
 ├── Arrange       — detects terminal positions, assigns quadrants by screen location

@@ -327,16 +327,19 @@ end tell
  *
  * - claude: types `claude` then sends keystroke "1" (to select option 1 from the menu)
  * - codex: types `codex`
+ * - openclaw: types `openclaw tui`
  */
 export function spawnTerminalWindow(
   project: string,
-  model: "claude" | "codex",
+  model: "claude" | "codex" | "openclaw",
   targetQuadrant?: number,
 ): { ok: boolean; error?: string } {
   const cdCmd = `cd "${project}"`;
   const launchCmd = model === "claude"
     ? `${cdCmd} && claude`
-    : `${cdCmd} && codex`;
+    : model === "openclaw"
+      ? `${cdCmd} && openclaw tui`
+      : `${cdCmd} && codex`;
 
   // If a target quadrant is given, spawn and position in one AppleScript call
   const pos = targetQuadrant ? QUADRANT_POSITIONS[targetQuadrant] : undefined;

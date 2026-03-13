@@ -84,6 +84,8 @@ export class ProcessDiscovery {
   // Codex session file cache — persists across ticks. Only re-scanned if
   // not found yet (null) or every 30s for staleness.
   private codexSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
+  // OpenClaw session file cache — same semantics as Codex cache.
+  private openclawSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
 
   constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
     this.telemetry = telemetry;
@@ -196,11 +198,11 @@ export class ProcessDiscovery {
       } else {
         // Priority 0: content-based match (ground truth from identity hook in JSONL).
         // Overrides all heuristics because it matches TTY↔file using actual content.
-        // Skip for Codex workers: markers in ~/.hive/sessions/ are written by Claude's
-        // identity.sh hook, which never fires for Codex. Any marker found for a Codex
-        // worker's TTY is stale from a previous Claude session — using it would map
-        // the wrong chat history (the old Claude session instead of the current Codex one).
-        if (proc.tty && proc.model !== "codex") {
+        // Skip for non-Claude workers: markers in ~/.hive/sessions/ are written by Claude's
+        // identity.sh hook, which never fires for Codex or OpenClaw. Any marker found for
+        // a non-Claude worker's TTY is stale from a previous Claude session — using it
+        // would map the wrong chat history (the old Claude session instead of the current one).
+        if (proc.tty && proc.model === "claude") {
           const contentMatch = ttyToFile.get(proc.tty);
           if (contentMatch && !claimedFiles.has(contentMatch)) {
             sessionFile = contentMatch;
@@ -214,14 +216,15 @@ export class ProcessDiscovery {
           // share the same cwd (e.g. home dir), it picks the wrong worker's file.
           sessionFile = proc.jsonlFile; // Direct from lsof — most reliable
 
-          // For Codex workers, search ~/.codex/sessions/ BEFORE Claude heuristics.
-          // Codex uses appendFileSync (open+close instantly) so lsof rarely catches
-          // the JSONL handle. Without this, Claude heuristics (findSessionFile,
-          // findBestJsonlFile, findSessionFileByStartTime) search .claude/projects/
-          // and can grab a stale Claude JSONL whose birthtime is close to the Codex
-          // process start — causing cross-contamination of chat history.
+          // For non-Claude workers, search their native session dirs BEFORE Claude
+          // heuristics. These agents use appendFileSync (open+close instantly) so lsof
+          // rarely catches the JSONL handle. Without this, Claude heuristics search
+          // .claude/projects/ and can grab a stale JSONL — causing cross-contamination.
           if (!sessionFile && proc.model === "codex") {
             sessionFile = this.findCodexSessionFile(proc.pid, proc.startedAt);
+          }
+          if (!sessionFile && proc.model === "openclaw") {
+            sessionFile = this.findOpenClawSessionFile(proc.pid, proc.startedAt);
           }
 
           if (!sessionFile && proc.sessionIds.length > 0) {
@@ -455,11 +458,12 @@ export class ProcessDiscovery {
     auditCtx: Record<string, unknown>,
   ): void {
     if (!cachedPath) {
-      // No cached JSONL path. For non-Claude workers (Codex), try finding their
-      // session file before falling back to CPU-only. Codex stores JSONL at
-      // ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl — lsof may have missed it.
+      // No cached JSONL path. For non-Claude workers (Codex, OpenClaw), try finding
+      // their session file before falling back to CPU-only.
       if (existing.model && existing.model !== "claude") {
-        const codexFile = this.findCodexSessionFile(existing.pid, existing.startedAt);
+        const codexFile = existing.model === "openclaw"
+          ? this.findOpenClawSessionFile(existing.pid, existing.startedAt)
+          : this.findCodexSessionFile(existing.pid, existing.startedAt);
         if (codexFile) {
           this.streamer.setSessionFile(id, codexFile);
           // Fall through to normal JSONL analysis with the found file
@@ -885,10 +889,59 @@ export class ProcessDiscovery {
     }
   }
 
+  /**
+   * Find the most recent OpenClaw session JSONL file for a given process.
+   * OpenClaw stores sessions at ~/.openclaw/agents/<agentId>/sessions/<session-id>.jsonl
+   */
+  private findOpenClawSessionFile(pid: number, startedAt: number): string | null {
+    const cached = this.openclawSessionCache.get(pid);
+    if (cached) {
+      if (cached.file) return cached.file;
+      if (Date.now() - cached.checkedAt < 30_000) return null;
+    }
+
+    const agentsDir = join(HOME, ".openclaw", "agents");
+    try {
+      let bestFile: string | null = null;
+      let bestMtime = 0;
+      let bestBirthtimeDiff = Infinity;
+
+      for (const agentId of readdirSync(agentsDir)) {
+        const sessionsDir = join(agentsDir, agentId, "sessions");
+        try {
+          for (const file of readdirSync(sessionsDir)) {
+            if (!file.endsWith(".jsonl")) continue;
+            const fullPath = join(sessionsDir, file);
+            try {
+              const stat = statSync(fullPath);
+              const birthtimeDiff = Math.abs(stat.birthtimeMs - startedAt);
+              if (birthtimeDiff < 120_000 && birthtimeDiff < bestBirthtimeDiff) {
+                bestBirthtimeDiff = birthtimeDiff;
+                bestFile = fullPath;
+                bestMtime = stat.mtimeMs;
+              }
+              if (!bestFile && stat.mtimeMs > bestMtime) {
+                bestMtime = stat.mtimeMs;
+                bestFile = fullPath;
+              }
+            } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+      }
+
+      this.openclawSessionCache.set(pid, { file: bestFile, checkedAt: Date.now() });
+      return bestFile;
+    } catch {
+      this.openclawSessionCache.set(pid, { file: null, checkedAt: Date.now() });
+      return null;
+    }
+  }
+
   /** Patterns to match AI agent processes in `ps` output. Order matters — first match wins. */
   private static readonly AGENT_PATTERNS: { regex: RegExp; model: string }[] = [
     { regex: /claude\s*$/, model: "claude" },
     { regex: /\/codex(?:\s+(?!app-server)|$)/, model: "codex" },
+    { regex: /openclaw(?:\s+tui)?(?:\s|$)/, model: "openclaw" },
   ];
 
   private findClaudeProcesses(): ProcessInfo[] {

@@ -20,6 +20,7 @@ const PROJECTS = [
 const MODELS = [
   { id: "claude", label: "Claude" },
   { id: "codex", label: "Codex" },
+  { id: "openclaw", label: "OpenClaw" },
 ];
 
 export function SpawnDialog({ onSpawn, onClose }: SpawnDialogProps) {

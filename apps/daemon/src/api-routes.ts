@@ -311,7 +311,7 @@ export function registerApiRoutes(
       return;
     }
 
-    const model = (rawModel === "codex" ? "codex" : "claude") as "claude" | "codex";
+    const model = (rawModel === "codex" ? "codex" : rawModel === "openclaw" ? "openclaw" : "claude") as "claude" | "codex" | "openclaw";
     const openQ = receiver.getFirstOpenQuadrant();
     const result = spawnTerminalWindow(realPath, model, openQ);
     if (!result.ok) {

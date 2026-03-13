@@ -206,9 +206,10 @@ function idleSuggestions(w: WorkerState): { label: string; message: string }[] {
   ];
 }
 
-/** Display name for the worker's model (e.g. "Claude", "Codex"). */
+/** Display name for the worker's model (e.g. "Claude", "Codex", "OpenClaw"). */
 function modelLabel(w: WorkerState): string {
   const m = (w.model || "claude").toLowerCase();
+  if (m === "openclaw") return "OpenClaw";
   return m.charAt(0).toUpperCase() + m.slice(1);
 }
 

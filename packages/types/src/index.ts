@@ -21,7 +21,7 @@ export interface WorkerState {
   stuckMessage?: string;
   lastDirection?: string;
   suggestions?: Suggestion[];
-  /** Which AI tool this worker is running (e.g. "claude", "codex"). Defaults to "claude". */
+  /** Which AI tool this worker is running (e.g. "claude", "codex", "openclaw"). Defaults to "claude". */
   model?: string;
   /** Server-assigned quadrant (1-4). Dashboard should use this for slot ordering. */
   quadrant?: number;
@@ -49,7 +49,7 @@ export interface DaemonMessage {
   project?: string;
   task?: string;
   content?: string;
-  /** Model to spawn: "claude" or "codex". Defaults to "claude". */
+  /** Model to spawn: "claude", "codex", or "openclaw". Defaults to "claude". */
   model?: string;
   optionIndex?: number;
   /** Phase 4: which suggestion label was applied */
