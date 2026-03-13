@@ -307,7 +307,10 @@ export function AgentCard({
               </button>
             </div>
           )}
-          {!hasPrompt && worker.terminalPreview && (
+          {!hasPrompt && worker.terminalPreview && idle && (
+            <p className="text-[10px] text-[var(--text-muted)] mt-1">Ready — click to send a message</p>
+          )}
+          {!hasPrompt && worker.terminalPreview && !idle && (
             <p className="text-[10px] text-[var(--text-muted)] mt-1">Waiting for session to start...</p>
           )}
         </>

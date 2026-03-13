@@ -370,7 +370,7 @@ export function spawnTerminalWindow(
   targetQuadrant?: number,
   initialMessage?: string,
   currentAgentCount?: number,
-): { ok: boolean; error?: string } {
+): { ok: boolean; error?: string; tty?: string } {
   const cdCmd = `cd "${project}"`;
   let cliCmd: string;
   if (model === "claude") cliCmd = "claude";
@@ -406,32 +406,30 @@ set cellH to (screenH - screenY - menuBarH) / ${formation.rows}
     ? `set bounds of window of newTab to {screenX + ${pos.x} * cellW, screenY + ${pos.y} * cellH + menuBarH, screenX + ${pos.x} * cellW + cellW, screenY + ${pos.y} * cellH + cellH + menuBarH}`
     : "";
 
+  // Return the TTY of the new tab so the caller can create an immediate
+  // worker entry before discovery's 3-second scan picks it up.
   const script = `
 ${positionBlock}
 tell application "Terminal"
   set newTab to do script "${launchCmd.replace(/"/g, '\\"')}"
   activate
   ${setBoundsLine}
+  set newTty to tty of newTab
+  return newTty
 end tell
 `;
 
   try {
-    execFileSync("/usr/bin/osascript", ["-e", script], {
+    const result = execFileSync("/usr/bin/osascript", ["-e", script], {
       timeout: 10000,
       encoding: "utf-8",
     });
+    const tty = (result as string).trim() || undefined;
+    return { ok: true, tty };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `Spawn terminal failed: ${msg.slice(0, 150)}` };
   }
-
-  // Pre-session prompts (trust folder, sandbox) are now surfaced on the
-  // dashboard for user approval. No auto-bypass — the user approves from
-  // the dashboard UI, which sends Enter via CGEvent (sendEnterToTty).
-  // After the prompts are approved, the initial message can be sent via
-  // the normal sendInputToTty flow from the dashboard chat panel.
-
-  return { ok: true };
 }
 
 /**

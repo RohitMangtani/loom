@@ -136,7 +136,7 @@ export class ProcessDiscovery {
    * Read the visible text of a Terminal.app tab by TTY device.
    * Returns the tab contents or null on failure.
    */
-  private readTerminalContent(tty: string): string | null {
+  readTerminalContent(tty: string): string | null {
     const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
     const script = `
 tell application "Terminal"
@@ -571,6 +571,25 @@ end tell
       this.telemetry.registerDiscovered(id, worker);
       this.discoveredPids.add(proc.pid);
 
+      // Clean up any spawn placeholder for this TTY — the real worker takes over.
+      if (proc.tty) {
+        const placeholderId = `spawning_${proc.tty.replace(/\//g, "_")}`;
+        const placeholder = this.telemetry.get(placeholderId);
+        if (placeholder) {
+          // Transfer prompt/preview state from placeholder to real worker
+          if (placeholder.promptType && !worker.promptType) {
+            worker.promptType = placeholder.promptType;
+            worker.promptMessage = placeholder.promptMessage;
+            worker.terminalPreview = placeholder.terminalPreview;
+            worker.status = "waiting";
+            worker.currentAction = placeholder.currentAction;
+          } else if (placeholder.terminalPreview && !worker.terminalPreview) {
+            worker.terminalPreview = placeholder.terminalPreview;
+          }
+          this.telemetry.removeWorker(placeholderId);
+        }
+      }
+
       // If the worker is idle at discovery (e.g. daemon restart while agents
       // are waiting for input, or freshly spawned), set idleConfirmed so the
       // 120s grace period in runJsonlAnalysis doesn't phantom-green them.
@@ -593,6 +612,13 @@ end tell
           const preview = this.readTerminalPreview(proc.tty);
           if (preview) worker.terminalPreview = preview;
         }
+      } else if (proc.tty && sessionFile && processAge < 120_000 && initialStatus === "idle") {
+        // Agent has a session but is young and idle — read terminal content
+        // so the dashboard tile shows something useful instead of just "READY".
+        // This catches manually-opened agents that get a session file before
+        // the first discovery scan.
+        const preview = this.readTerminalPreview(proc.tty);
+        if (preview) worker.terminalPreview = preview;
       }
     }
 

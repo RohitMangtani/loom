@@ -258,13 +258,84 @@ export class WsServer {
           return;
         }
 
-        // Discovery will detect the new process on its next scan cycle.
-        // Send current workers back; the new one will appear after discovery runs.
+        // Create an immediate placeholder worker so the dashboard tile
+        // shows content before the 3-second discovery scan picks it up.
+        if (termResult.tty) {
+          const spawnTty = termResult.tty;
+          const projectName = real.split("/").pop() || real;
+          const placeholderId = `spawning_${spawnTty.replace(/\//g, "_")}`;
+          const placeholder = {
+            id: placeholderId,
+            pid: 0,
+            project: real,
+            projectName,
+            status: "waiting" as const,
+            currentAction: "Starting...",
+            lastAction: "Spawning terminal",
+            lastActionAt: Date.now(),
+            errorCount: 0,
+            startedAt: Date.now(),
+            task: null,
+            managed: false,
+            tty: spawnTty,
+            model,
+            terminalPreview: `Starting ${model}...`,
+          };
+          this.telemetry.registerDiscovered(placeholderId, placeholder);
+
+          // Poll terminal content every 1.5s until discovery replaces the
+          // placeholder or 20s elapse — whichever comes first.
+          let polls = 0;
+          const maxPolls = 13; // ~20 seconds
+          const pollTimer = setInterval(() => {
+            polls++;
+            // Stop if discovery has replaced the placeholder (worker with
+            // this TTY now has a real PID)
+            const current = this.telemetry.get(placeholderId);
+            if (!current) {
+              clearInterval(pollTimer);
+              return;
+            }
+
+            // Read terminal content and update the placeholder
+            if (this.discovery) {
+              const content = this.discovery.readTerminalContent(spawnTty);
+              if (content) {
+                const lines = content.split("\n").filter((l: string) => l.trim());
+                const preview = lines.slice(-15).join("\n").trim().slice(0, 500);
+                if (preview) {
+                  current.terminalPreview = preview;
+
+                  // Also check for prompts
+                  const prompt = this.discovery.detectPrompt(spawnTty);
+                  if (prompt) {
+                    current.status = "waiting";
+                    current.promptType = prompt.type;
+                    current.promptMessage = prompt.message;
+                    current.currentAction = prompt.message;
+                  }
+
+                  this.telemetry.notifyExternal(current);
+                }
+              }
+            }
+
+            if (polls >= maxPolls) {
+              clearInterval(pollTimer);
+              // If still a placeholder after 20s, remove it (something went wrong)
+              const stillPlaceholder = this.telemetry.get(placeholderId);
+              if (stillPlaceholder && stillPlaceholder.pid === 0) {
+                this.telemetry.removeWorker(placeholderId);
+              }
+            }
+          }, 1500);
+        }
+
         this.send(ws, {
           type: "workers",
           workers: this.telemetry.getAll(),
         });
-        console.log(`Spawned ${model} terminal for ${msg.project}`);
+        console.log(`Spawned ${model} terminal for ${msg.project} (tty=${termResult.tty})`);
         break;
       }
 
