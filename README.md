@@ -37,7 +37,7 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 ## What You Get
 
 - **Stoplight dashboard** — vertical stack that mirrors your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor. The tile order matches your terminal order top to bottom. Supports 1-8 agents.
-- **Multi-model** — run Claude, Codex, and OpenClaw agents side by side. Each tile shows which model is running. Spawn any from the dashboard.
+- **Multi-model** — run Claude, Codex, and OpenClaw agents side by side. Each tile shows which model is running. Spawn any from the dashboard with the "+ Agent" button. Add custom agents via `~/.hive/agents.json` and they appear in the spawn dialog automatically.
 - **Auto-discovery** — start `claude`, `codex`, or `openclaw tui` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
 - **Auto-pilot** — permission prompts auto-approve after a 15-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
@@ -47,6 +47,7 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 - **Compound learning** — every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge instead of a blank slate.
 - **State persistence** — daemon snapshots state every 30 seconds. Restart your computer, reopen terminals, and routing restores after one prompt per terminal.
 - **Review queue** — a slide-out drawer on the dashboard showing recent pushes, deploys, and PRs across all agents. The daemon auto-detects reviewable actions from hook events, and agents can self-report with richer summaries. Tap the three-line icon in the header to see what changed and where.
+- **Prompt approval** — when a freshly spawned agent hits a trust or sandbox prompt, the tile shows the prompt text with an approval button. Tap to approve from the dashboard without switching to the terminal.
 - **Push notifications** — when an agent goes yellow, macOS sends a native notification with the project name and what it needs.
 
 ## Prerequisites
@@ -165,7 +166,7 @@ or
 openclaw tui
 ```
 
-Stack your terminal windows vertically on screen. The daemon detects their positions and maps each one to the matching tile in the dashboard stack. Mix `claude`, `codex`, and `openclaw` however you want. You can also spawn agents directly from the dashboard by tapping an empty "OFFLINE" tile.
+Stack your terminal windows vertically on screen. The daemon detects their positions and maps each one to the matching tile in the dashboard stack. Mix `claude`, `codex`, and `openclaw` however you want. You can also spawn agents from the dashboard: tap "+ Agent", pick a model, optionally add a task, and hit Spawn. If the CLI isn't installed, the tile shows a clear error instead of silently failing.
 
 **4. Install the app on your phone** (optional, recommended)
 
