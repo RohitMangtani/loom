@@ -187,12 +187,37 @@ export default function Home() {
   const rawEntries = selectedEntry ? chatEntries.get(selectedEntry.worker.id) : undefined;
   const memoEntries = useMemo(() => (rawEntries ?? []).slice(-200), [rawEntries]);
 
+  // When selected worker disappears (placeholder→discovered transition),
+  // find the replacement by matching TTY or quadrant and auto-reselect.
+  const prevSelectedRef = useRef<WorkerState | null>(null);
   useEffect(() => {
     if (selectedId && !selectedEntry) {
+      const prev = prevSelectedRef.current;
+      if (prev) {
+        // Find a new worker on the same TTY or same quadrant
+        const replacement = numbered.find(({ worker: w }) =>
+          w.id !== selectedId && (
+            (prev.tty && w.tty === prev.tty) ||
+            (prev.quadrant && w.quadrant === prev.quadrant)
+          )
+        );
+        if (replacement) {
+          setSelectedId(replacement.worker.id);
+          subscribeTo(replacement.worker.id);
+          return;
+        }
+      }
       setSelectedId(null);
       subscribeTo(null);
     }
-  }, [selectedId, selectedEntry, subscribeTo]);
+  }, [selectedId, selectedEntry, numbered, subscribeTo]);
+
+  // Track the last selected worker for transition matching
+  useEffect(() => {
+    if (selectedEntry) {
+      prevSelectedRef.current = selectedEntry.worker;
+    }
+  }, [selectedEntry]);
 
   // Auto-exit manage mode when no agents remain
   useEffect(() => {
