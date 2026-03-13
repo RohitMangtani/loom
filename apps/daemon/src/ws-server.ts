@@ -5,9 +5,10 @@ import { realpathSync } from "fs";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { ProcessManager } from "./process-mgr.js";
 import type { SessionStreamer } from "./session-stream.js";
-import { sendSelectionToTty } from "./tty-input.js";
+import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
 import { spawnTerminalWindow } from "./arrange-windows.js";
 import { validateToken } from "./auth.js";
+import type { ProcessDiscovery } from "./discovery.js";
 import type { DaemonMessage, DaemonResponse } from "./types.js";
 
 export class WsServer {
@@ -15,6 +16,7 @@ export class WsServer {
   private telemetry: TelemetryReceiver;
   private procMgr: ProcessManager;
   private streamer: SessionStreamer;
+  private discovery: ProcessDiscovery | null = null;
   private port: number;
   private token: string;
   private viewerToken: string;
@@ -70,6 +72,11 @@ export class WsServer {
         content: data,
       });
     });
+  }
+
+  /** Set the discovery instance (for prompt cache management) */
+  setDiscovery(discovery: ProcessDiscovery): void {
+    this.discovery = discovery;
   }
 
   /** Push full worker list to all clients. Call from the main tick loop
@@ -375,6 +382,41 @@ export class WsServer {
       case "review_clear_all": {
         this.telemetry.clearAllReviews();
         this.broadcast({ type: "reviews", reviews: [] });
+        break;
+      }
+
+      case "approve_prompt": {
+        if (!msg.workerId) {
+          this.send(ws, { type: "error", error: "Missing workerId" });
+          return;
+        }
+        const promptWorker = this.telemetry.get(msg.workerId);
+        if (!promptWorker?.tty) {
+          this.send(ws, { type: "error", error: `Worker ${msg.workerId} not found or no TTY` });
+          return;
+        }
+        if (!promptWorker.promptType) {
+          this.send(ws, { type: "error", error: "No pending prompt" });
+          return;
+        }
+
+        // Send Enter keystroke to approve the prompt (default option is pre-selected)
+        const approveResult = sendEnterToTty(promptWorker.tty);
+        if (approveResult.ok) {
+          promptWorker.promptType = null;
+          promptWorker.promptMessage = undefined;
+          promptWorker.status = "idle";
+          promptWorker.currentAction = "Starting...";
+          promptWorker.lastAction = "Prompt approved from dashboard";
+          promptWorker.lastActionAt = Date.now();
+          if (this.discovery) {
+            this.discovery.clearPromptCache(promptWorker.tty);
+          }
+          this.telemetry.notifyExternal(promptWorker);
+          console.log(`Prompt approved for ${promptWorker.tty}`);
+        } else {
+          this.send(ws, { type: "error", error: approveResult.error || "Failed to approve prompt" });
+        }
         break;
       }
 

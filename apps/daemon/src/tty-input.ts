@@ -431,6 +431,72 @@ end tell
   }
 }
 
+/**
+ * Send just an Enter keystroke to a Terminal.app tab identified by TTY.
+ *
+ * Used for pre-session prompts (trust folder, sandbox) where the default
+ * option is already selected and only Enter is needed.
+ *
+ * Two-step approach:
+ * 1. AppleScript brings the correct tab to the front (Terminal.app API — works from launchd)
+ * 2. CGEvent Return keystroke via ~/send-return (HID-level — works without System Events)
+ */
+export function sendEnterToTty(tty: string): { ok: boolean; error?: string } {
+  const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+
+  const previousApp = getFrontmostApp();
+
+  const script = `
+tell application "Terminal"
+  set targetTTY to "${device}"
+  set targetTab to missing value
+  set targetWin to missing value
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is targetTTY then
+        set targetTab to t
+        set targetWin to w
+        exit repeat
+      end if
+    end repeat
+    if targetTab is not missing value then exit repeat
+  end repeat
+  if targetTab is missing value then error "TTY not found in Terminal.app"
+  set selected of targetTab to true
+  set index of targetWin to 1
+  activate
+end tell
+`;
+
+  try {
+    execFileSync("/usr/bin/osascript", ["-e", script], {
+      timeout: 5000,
+      encoding: "utf-8",
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `Activate tab failed: ${msg.slice(0, 180)}` };
+  }
+
+  // Brief delay for Terminal.app to finish bringing the tab to front
+  execFileSync("/bin/sleep", ["0.3"]);
+
+  try {
+    execFileSync(SEND_RETURN_BIN, [], {
+      timeout: 3000,
+      encoding: "utf-8",
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (previousApp) restoreFrontmostApp(previousApp);
+    return { ok: false, error: `Enter failed: ${msg.slice(0, 180)}` };
+  }
+
+  if (previousApp) restoreFrontmostApp(previousApp);
+
+  return { ok: true };
+}
+
 function cleanup(path: string): void {
   try { unlinkSync(path); } catch { /* ignore */ }
 }

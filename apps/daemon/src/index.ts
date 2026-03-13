@@ -20,6 +20,7 @@ const procMgr = new ProcessManager(telemetry);
 const streamer = new SessionStreamer();
 const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken);
 const discovery = new ProcessDiscovery(telemetry, streamer);
+ws.setDiscovery(discovery);
 const autoPilot = new AutoPilot(telemetry, streamer);
 const watchdog = new Watchdog(telemetry);
 const collector = new Collector();

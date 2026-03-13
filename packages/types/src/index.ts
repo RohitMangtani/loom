@@ -25,6 +25,10 @@ export interface WorkerState {
   model?: string;
   /** Server-assigned slot (1-8). Dashboard should use this for grid ordering. */
   quadrant?: number;
+  /** Pre-session prompt awaiting user approval (trust folder, sandbox, etc.). */
+  promptType?: "trust" | "sandbox" | null;
+  /** Human-readable prompt message to display on the dashboard. */
+  promptMessage?: string;
 }
 
 export interface TelemetryEvent {
@@ -44,7 +48,7 @@ export interface TelemetryEvent {
 }
 
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt";
   workerId?: string;
   project?: string;
   task?: string;

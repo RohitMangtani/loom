@@ -124,9 +124,84 @@ export class ProcessDiscovery {
     return ProcessDiscovery.customAgents;
   }
 
+  // Track TTYs we've already detected prompts for (avoid repeated AppleScript calls)
+  private promptCheckedTtys = new Map<string, { checkedAt: number; result: "trust" | "sandbox" | null }>();
+
   constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
     this.telemetry = telemetry;
     this.streamer = streamer;
+  }
+
+  /**
+   * Read the visible text of a Terminal.app tab by TTY device.
+   * Returns the tab contents or null on failure.
+   */
+  private readTerminalContent(tty: string): string | null {
+    const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+    const script = `
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${device}" then
+        return contents of t
+      end if
+    end repeat
+  end repeat
+  return ""
+end tell
+`;
+    try {
+      const result = execFileSync("/usr/bin/osascript", ["-e", script], {
+        timeout: 5000,
+        encoding: "utf-8",
+      });
+      return (result as string).trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Detect pre-session prompts (trust folder, sandbox) from terminal content.
+   * Returns the prompt type and a human-readable message, or null if no prompt detected.
+   */
+  detectPrompt(tty: string): { type: "trust" | "sandbox"; message: string } | null {
+    // Rate-limit: don't re-check the same TTY within 5 seconds
+    const cached = this.promptCheckedTtys.get(tty);
+    if (cached && Date.now() - cached.checkedAt < 5000) {
+      if (!cached.result) return null;
+      return { type: cached.result, message: cached.result === "trust" ? "Trust this folder?" : "Allow sandbox?" };
+    }
+
+    const content = this.readTerminalContent(tty);
+    if (!content) {
+      this.promptCheckedTtys.set(tty, { checkedAt: Date.now(), result: null });
+      return null;
+    }
+
+    // Claude CLI trust prompt patterns
+    if (content.includes("trust this folder") ||
+        content.includes("Is this a project you created") ||
+        content.includes("Yes, I trust") ||
+        content.includes("safety check")) {
+      this.promptCheckedTtys.set(tty, { checkedAt: Date.now(), result: "trust" });
+      return { type: "trust", message: "Trust this project folder?" };
+    }
+
+    // Claude CLI sandbox prompt patterns
+    if (content.includes("sandboxed") ||
+        content.includes("sandbox") && content.includes("bash")) {
+      this.promptCheckedTtys.set(tty, { checkedAt: Date.now(), result: "sandbox" });
+      return { type: "sandbox", message: "Allow bash commands?" };
+    }
+
+    this.promptCheckedTtys.set(tty, { checkedAt: Date.now(), result: null });
+    return null;
+  }
+
+  /** Clear prompt detection cache for a TTY (call after approving) */
+  clearPromptCache(tty: string): void {
+    this.promptCheckedTtys.delete(tty);
   }
 
   /** Record a status transition with full decision context */
@@ -329,10 +404,32 @@ export class ProcessDiscovery {
             existing.projectName = proc.projectName;
           }
 
+          // Check for pre-session prompts on workers with no session file yet.
+          // Once a session file appears, clear the prompt state — the CLI has
+          // passed the trust/sandbox prompts and started a real session.
+          const cachedSessionFile = this.streamer.getSessionFile(id);
+          if (existing.promptType && cachedSessionFile) {
+            // Session started — prompt was approved (either from dashboard or terminal)
+            existing.promptType = null;
+            existing.promptMessage = undefined;
+            this.clearPromptCache(proc.tty);
+          } else if (!cachedSessionFile && proc.tty && Date.now() - proc.startedAt < 120_000) {
+            // Still no session — re-check for prompts
+            const prompt = this.detectPrompt(proc.tty);
+            if (prompt) {
+              existing.status = "waiting";
+              existing.promptType = prompt.type;
+              existing.promptMessage = prompt.message;
+              existing.currentAction = prompt.message;
+              this.telemetry.notifyExternal(existing);
+              continue;
+            }
+          }
+
           // Use streamer's cached session file — guaranteed to be THIS worker's
           // file. Never use findBestJsonlFile for status detection; its cwd
           // fallback can pick another worker's file (cross-contamination).
-          const cachedPath = this.streamer.getSessionFile(id);
+          const cachedPath = cachedSessionFile;
           let cachedMtime = 0;
           if (cachedPath) {
             try { cachedMtime = statSync(cachedPath).mtimeMs; } catch { /* file gone */ }
@@ -455,6 +552,18 @@ export class ProcessDiscovery {
       // 120s grace period in runJsonlAnalysis doesn't phantom-green them.
       if (initialStatus === "idle") {
         this.telemetry.setIdleConfirmed(id, true);
+      }
+
+      // Check for pre-session prompts (trust folder, sandbox) on new workers
+      // that have a TTY but no session file yet (prompt happens before JSONL starts).
+      if (proc.tty && !sessionFile && processAge < 60_000) {
+        const prompt = this.detectPrompt(proc.tty);
+        if (prompt) {
+          worker.status = "waiting";
+          worker.promptType = prompt.type;
+          worker.promptMessage = prompt.message;
+          worker.currentAction = prompt.message;
+        }
       }
     }
 

@@ -425,80 +425,11 @@ end tell
     return { ok: false, error: `Spawn terminal failed: ${msg.slice(0, 150)}` };
   }
 
-  // Both Claude and Codex show a startup menu that needs auto-bypass.
-  // Claude: press "1" + Enter to select first project option.
-  // Codex: press "1" + Enter to accept/select first option.
-  // After the menu is cleared, type the initial message.
-  const needsMenuBypass = model === "claude" || model === "codex";
-
-  if (needsMenuBypass) {
-    setTimeout(() => {
-      try {
-        const selectScript = `
-tell application "System Events"
-  tell process "Terminal"
-    keystroke "1"
-    delay 0.3
-    key code 36
-  end tell
-end tell
-`;
-        execFileSync("/usr/bin/osascript", ["-e", selectScript], {
-          timeout: 5000,
-          encoding: "utf-8",
-        });
-      } catch {
-        console.log(`[arrange] Failed to auto-press 1 for ${model} CLI menu`);
-      }
-
-      if (initialMessage) {
-        setTimeout(() => {
-          try {
-            const escaped = initialMessage.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-            const msgScript = `
-tell application "System Events"
-  tell process "Terminal"
-    keystroke "${escaped}"
-    delay 0.2
-    key code 36
-  end tell
-end tell
-`;
-            execFileSync("/usr/bin/osascript", ["-e", msgScript], {
-              timeout: 5000,
-              encoding: "utf-8",
-            });
-          } catch {
-            console.log(`[arrange] Failed to type initial message for ${model}`);
-          }
-        }, 4000);
-      }
-    }, 3000);
-  } else {
-    // For openclaw / custom: just wait for CLI to start, then type the message
-    if (initialMessage) {
-      setTimeout(() => {
-        try {
-          const escaped = initialMessage.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-          const msgScript = `
-tell application "System Events"
-  tell process "Terminal"
-    keystroke "${escaped}"
-    delay 0.2
-    key code 36
-  end tell
-end tell
-`;
-          execFileSync("/usr/bin/osascript", ["-e", msgScript], {
-            timeout: 5000,
-            encoding: "utf-8",
-          });
-        } catch {
-          console.log(`[arrange] Failed to type initial message for ${model}`);
-        }
-      }, 5000);
-    }
-  }
+  // Pre-session prompts (trust folder, sandbox) are now surfaced on the
+  // dashboard for user approval. No auto-bypass — the user approves from
+  // the dashboard UI, which sends Enter via CGEvent (sendEnterToTty).
+  // After the prompts are approved, the initial message can be sent via
+  // the normal sendInputToTty flow from the dashboard chat panel.
 
   return { ok: true };
 }

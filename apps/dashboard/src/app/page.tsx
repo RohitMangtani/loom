@@ -95,6 +95,7 @@ export default function Home() {
   const [flaggedIds, setFlaggedIds] = useState<Set<string>>(new Set());
   const previewUrlsRef = useRef<Map<string, string>>(new Map());
   const [showReviews, setShowReviews] = useState(false);
+  const [managing, setManaging] = useState(false);
 
   useEffect(() => {
     try {
@@ -190,6 +191,11 @@ export default function Home() {
       subscribeTo(null);
     }
   }, [selectedId, selectedEntry, subscribeTo]);
+
+  // Auto-exit manage mode when no agents remain
+  useEffect(() => {
+    if (managing && numbered.length === 0) setManaging(false);
+  }, [managing, numbered.length]);
 
   const toggleSelect = useCallback((id: string) => {
     const nextId = selectedId === id ? null : id;
@@ -303,22 +309,43 @@ export default function Home() {
           {activeCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-active)]" />{activeCount} active</span>}
           {stuckCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-needs)]" />{stuckCount} waiting</span>}
           {idleCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-offline)]" />{idleCount} idle</span>}
-          {!isViewer && numbered.length < MAX_SLOTS && (
+          {!isViewer && managing ? (
+            <button
+              type="button"
+              onClick={() => setManaging(false)}
+              className="px-2 py-0.5 rounded border border-[var(--text-light)] text-[var(--text)] transition-colors cursor-pointer"
+            >
+              Done
+            </button>
+          ) : !isViewer && (
             <>
-              <button
-                type="button"
-                onClick={() => send({ type: "spawn", project: "~", model: "claude" })}
-                className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
-              >
-                + Claude
-              </button>
-              <button
-                type="button"
-                onClick={() => send({ type: "spawn", project: "~", model: "codex" })}
-                className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
-              >
-                + Codex
-              </button>
+              {numbered.length < MAX_SLOTS && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => send({ type: "spawn", project: "~", model: "claude" })}
+                    className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+                  >
+                    + Claude
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => send({ type: "spawn", project: "~", model: "codex" })}
+                    className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+                  >
+                    + Codex
+                  </button>
+                </>
+              )}
+              {numbered.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setManaging(true)}
+                  className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+                >
+                  Manage
+                </button>
+              )}
             </>
           )}
         </div>
@@ -337,12 +364,18 @@ export default function Home() {
               num={num}
               selected={!isViewer && selectedId === w.id}
               flagged={flaggedIds.has(w.id)}
+              managing={managing}
               onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
               onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
               onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
               onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
               onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
               onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
+              onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
+              onKill={!isViewer && managing ? () => {
+                send({ type: "kill", workerId: w.id });
+                if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
+              } : undefined}
             />
           ))}
         </div>

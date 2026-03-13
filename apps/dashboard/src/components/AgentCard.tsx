@@ -219,24 +219,42 @@ export type { DotColor };
 const FLAG_COLOR = "#f97316";
 
 export function AgentCard({
-  worker, num, selected, flagged, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply,
+  worker, num, selected, flagged, managing, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill,
 }: {
-  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void;
+  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void;
 }) {
   const color = dotColor(worker);
   const stuck = color === "yellow";
-  const buttons = stuck ? quickButtons(worker) : [];
+  const buttons = stuck && !worker.promptType ? quickButtons(worker) : [];
   const idle = color === "red";
+  const hasPrompt = !!worker.promptType;
   const secondary = secondarySummary(worker);
 
   return (
     <div
-      onClick={onClick}
-      onPointerDown={onPointerDown}
-      className={`card relative ${stuck ? "card-stuck" : ""} ${selected ? "card-selected" : ""}`}
-      style={{ borderLeftColor: flagged ? FLAG_COLOR : DOT_BG[color] }}
+      onClick={managing ? undefined : onClick}
+      onPointerDown={managing ? undefined : onPointerDown}
+      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""}`}
+      style={{ borderLeftColor: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
-      {onFlag && (
+      {managing && onKill && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onKill(); }}
+          className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full transition-all duration-200 cursor-pointer hover:scale-110 z-20"
+          style={{
+            background: "rgba(239,68,68,0.15)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            color: "#f87171",
+          }}
+          title={`Close Q${num}`}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
+      )}
+      {!managing && onFlag && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onFlag(); }}
@@ -252,56 +270,86 @@ export function AgentCard({
         <span className="text-lg font-bold tabular-nums text-[var(--text)]">{num}</span>
         <span className="text-[9px] font-mono text-[var(--text-muted)] uppercase tracking-wider">{modelLabel(worker)}</span>
         <span
-          className={`w-2 h-2 rounded-full shrink-0 ${stuck ? "animate-pulse" : ""}`}
-          style={{ background: flagged ? FLAG_COLOR : DOT_BG[color] }}
+          className={`w-2 h-2 rounded-full shrink-0 ${hasPrompt ? "animate-pulse" : stuck ? "animate-pulse" : ""}`}
+          style={{ background: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
         />
-        <span className="text-[10px] font-medium px-1.5 py-px rounded ml-auto" style={flagged ? { background: "rgba(249,115,22,0.12)", color: FLAG_COLOR } : badgeStyle(color)}>
-          {flagged ? "Flagged" : statusWord(worker)}
+        <span className="text-[10px] font-medium px-1.5 py-px rounded ml-auto" style={hasPrompt ? { background: "rgba(96,165,250,0.12)", color: "#60a5fa" } : flagged ? { background: "rgba(249,115,22,0.12)", color: FLAG_COLOR } : badgeStyle(color)}>
+          {hasPrompt ? "Approval needed" : flagged ? "Flagged" : statusWord(worker)}
         </span>
       </div>
 
       <p className="text-[10px] text-[var(--text-light)] truncate mb-0.5">{worker.projectName}</p>
 
-      <p className={`text-[11px] leading-tight ${stuck ? "text-[#fbbf24] font-medium" : "text-[var(--text-muted)] truncate"}`}>
-        {stuck && worker.stuckMessage
-          ? <span className="line-clamp-2">{worker.stuckMessage.split("\n")[0].slice(0, 80)}</span>
-          : statusLabel(worker)}
-      </p>
+      {hasPrompt ? (
+        <>
+          <p className="text-[11px] leading-tight text-[#60a5fa] font-medium">
+            {worker.promptMessage || "Approval needed"}
+          </p>
+          <p className="text-[10px] text-[var(--text-muted)] mt-1">
+            {worker.promptType === "trust"
+              ? "The CLI needs permission to access this project folder."
+              : "The CLI is asking about bash command sandboxing."}
+          </p>
+          {onApprovePrompt && (
+            <div className="flex items-center gap-1 mt-2" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApprovePrompt();
+                }}
+                className="quick-reply-btn"
+                style={{ background: "rgba(96,165,250,0.15)", borderColor: "rgba(96,165,250,0.3)", color: "#93bbfd" }}
+              >
+                {worker.promptType === "trust" ? "Trust folder" : "Allow"}
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <p className={`text-[11px] leading-tight ${stuck ? "text-[#fbbf24] font-medium" : "text-[var(--text-muted)] truncate"}`}>
+            {stuck && worker.stuckMessage
+              ? <span className="line-clamp-2">{worker.stuckMessage.split("\n")[0].slice(0, 80)}</span>
+              : statusLabel(worker)}
+          </p>
 
-      {!stuck && secondary && (
-        <p className="text-[10px] leading-tight text-[var(--text-muted)] line-clamp-2 opacity-50 mt-0.5">
-          {secondary}
-        </p>
-      )}
+          {!stuck && secondary && (
+            <p className="text-[10px] leading-tight text-[var(--text-muted)] line-clamp-2 opacity-50 mt-0.5">
+              {secondary}
+            </p>
+          )}
 
-      {stuck && (worker.managed || !!worker.tty) && buttons.length > 0 && (
-        <div className="flex items-center gap-1 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-          {buttons.map((b) => (
-            <button
-              key={b.value}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (b.index !== undefined && onSelect) {
-                  onSelect(b.index);
-                } else {
-                  onSend(b.value);
-                }
-              }}
-              className="quick-reply-btn"
-            >
-              {b.label}
-            </button>
-          ))}
-        </div>
-      )}
+          {stuck && (worker.managed || !!worker.tty) && buttons.length > 0 && (
+            <div className="flex items-center gap-1 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+              {buttons.map((b) => (
+                <button
+                  key={b.value}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (b.index !== undefined && onSelect) {
+                      onSelect(b.index);
+                    } else {
+                      onSend(b.value);
+                    }
+                  }}
+                  className="quick-reply-btn"
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          )}
 
-      {idle && (
-          <div className="ready-overlay absolute inset-0 flex flex-col items-center justify-center rounded-[10px]">
-            <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16] pointer-events-none">
-              READY
-            </span>
-          </div>
+          {idle && (
+              <div className="ready-overlay absolute inset-0 flex flex-col items-center justify-center rounded-[10px]">
+                <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16] pointer-events-none">
+                  READY
+                </span>
+              </div>
+          )}
+        </>
       )}
     </div>
   );
