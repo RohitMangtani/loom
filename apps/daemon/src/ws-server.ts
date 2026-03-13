@@ -229,6 +229,12 @@ export class WsServer {
         }
 
         const model = msg.model || "claude";
+        // Prevent spawning beyond 8 agents
+        const currentCount = this.telemetry.getAll().length;
+        if (currentCount >= 8) {
+          this.send(ws, { type: "error", error: "All 8 slots are occupied" });
+          return;
+        }
         // Use the requested quadrant if provided and available, otherwise first open
         const requestedQ = typeof msg.targetQuadrant === "number" && msg.targetQuadrant >= 1 && msg.targetQuadrant <= 8
           ? msg.targetQuadrant
