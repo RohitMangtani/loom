@@ -433,3 +433,45 @@ end tell
 
   return { ok: true };
 }
+
+/**
+ * Close the Terminal.app window/tab for a given TTY device.
+ * If the window has only one tab, closes the whole window.
+ * If it has multiple tabs, closes just the tab.
+ */
+export function closeTerminalWindow(tty: string): { ok: boolean; error?: string } {
+  const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+
+  const script = `
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${device}" then
+        if (count of tabs of w) is 1 then
+          close w
+        else
+          close t
+        end if
+        return "closed"
+      end if
+    end repeat
+  end repeat
+  return "not_found"
+end tell
+`;
+
+  try {
+    const result = execFileSync("/usr/bin/osascript", ["-e", script], {
+      timeout: 5000,
+      encoding: "utf-8",
+    });
+    const out = (result as string).trim();
+    if (out === "not_found") {
+      return { ok: true }; // Already gone — not an error
+    }
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `Close terminal failed: ${msg.slice(0, 150)}` };
+  }
+}

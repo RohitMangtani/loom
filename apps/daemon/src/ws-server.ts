@@ -6,7 +6,7 @@ import type { TelemetryReceiver } from "./telemetry.js";
 import type { ProcessManager } from "./process-mgr.js";
 import type { SessionStreamer } from "./session-stream.js";
 import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
-import { spawnTerminalWindow } from "./arrange-windows.js";
+import { spawnTerminalWindow, closeTerminalWindow } from "./arrange-windows.js";
 import { validateToken } from "./auth.js";
 import type { ProcessDiscovery } from "./discovery.js";
 import type { DaemonMessage, DaemonResponse } from "./types.js";
@@ -273,20 +273,33 @@ export class WsServer {
           this.send(ws, { type: "error", error: "Missing workerId" });
           return;
         }
+        // Grab PID and TTY BEFORE any removal (procMgr.kill removes from telemetry)
+        const killWorker = this.telemetry.get(msg.workerId);
+        const killPid = killWorker?.pid;
+        const killTty = killWorker?.tty;
+
         // Try ProcessManager first (for managed/spawned workers)
         this.procMgr.kill(msg.workerId);
-        // Also kill discovered workers by PID (ProcessManager doesn't track these)
-        const killWorker = this.telemetry.get(msg.workerId);
-        if (killWorker?.pid) {
+
+        // Kill the actual process by PID (works for discovered workers too)
+        if (killPid) {
           try {
-            process.kill(killWorker.pid, "SIGTERM");
+            process.kill(killPid, "SIGTERM");
+            const pid = killPid;
             setTimeout(() => {
-              try { process.kill(killWorker.pid, "SIGKILL"); } catch { /* already gone */ }
+              try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
             }, 3000);
           } catch { /* already gone */ }
-          this.telemetry.removeWorker(msg.workerId);
         }
-        console.log(`Killed worker ${msg.workerId} (pid=${killWorker?.pid})`);
+
+        // Close the Terminal.app window/tab for this agent
+        if (killTty) {
+          closeTerminalWindow(killTty);
+        }
+
+        // Ensure removed from telemetry (in case procMgr didn't handle it)
+        this.telemetry.removeWorker(msg.workerId);
+        console.log(`Killed worker ${msg.workerId} (pid=${killPid}, tty=${killTty})`);
         break;
       }
 
