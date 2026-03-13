@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "fs";
 import { basename, dirname, join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { SessionStreamer } from "./session-stream.js";
@@ -596,6 +596,19 @@ end tell
 
       this.telemetry.registerDiscovered(id, worker);
       this.discoveredPids.add(proc.pid);
+
+      // Clear stale TTY session marker so this new worker starts with
+      // fresh chat history instead of inheriting a previous session.
+      if (proc.tty) {
+        const ttyName = proc.tty.replace("/dev/", "");
+        const markerPath = join(HOME, ".hive", "sessions", ttyName);
+        try {
+          const mtime = statSync(markerPath).mtimeMs;
+          if (mtime < proc.startedAt) {
+            unlinkSync(markerPath);
+          }
+        } catch { /* marker doesn't exist — fine */ }
+      }
 
       // Clean up any spawn placeholder for this TTY — the real worker takes over.
       if (proc.tty) {
