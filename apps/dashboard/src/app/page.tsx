@@ -12,6 +12,23 @@ import type { WorkerState } from "@/lib/types";
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 const MAX_SLOTS = 4;
 
+interface LastKnown {
+  project: string;
+  projectName: string;
+  model: string;
+}
+
+function loadLastKnown(): Record<number, LastKnown> {
+  try {
+    const saved = localStorage.getItem("hive_last_known");
+    return saved ? JSON.parse(saved) : {};
+  } catch { return {}; }
+}
+
+function saveLastKnown(data: Record<number, LastKnown>) {
+  try { localStorage.setItem("hive_last_known", JSON.stringify(data)); } catch { /* non-critical */ }
+}
+
 /**
  * Use server-provided quadrant assignments (single source of truth from daemon).
  * Falls back to startedAt sorting only if server hasn't assigned quadrants yet.
@@ -67,6 +84,11 @@ export default function Home() {
   const [flaggedIds, setFlaggedIds] = useState<Set<string>>(new Set());
   const previewUrlsRef = useRef<Map<string, string>>(new Map());
   const [showReviews, setShowReviews] = useState(false);
+  const [lastKnown, setLastKnown] = useState<Record<number, LastKnown>>({});
+
+  useEffect(() => {
+    setLastKnown(loadLastKnown());
+  }, []);
 
   useEffect(() => {
     try {
@@ -145,6 +167,24 @@ export default function Home() {
   }, [selectedId]);
 
   const numbered = useStableNumbering(workers);
+
+  // Snapshot active workers to lastKnown so empty tiles can offer quick-respawn
+  useEffect(() => {
+    if (numbered.length === 0) return;
+    setLastKnown((prev) => {
+      const next = { ...prev };
+      for (const { worker: w, num } of numbered) {
+        next[num] = {
+          project: w.project,
+          projectName: w.projectName,
+          model: w.model || "claude",
+        };
+      }
+      saveLastKnown(next);
+      return next;
+    });
+  }, [numbered]);
+
   const activeCount = numbered.filter(({ worker: w }) => w.status === "working").length;
   const stuckCount = numbered.filter(({ worker: w }) => w.status === "stuck").length;
   const idleCount = numbered.filter(({ worker: w }) => w.status === "idle").length;
@@ -284,6 +324,7 @@ export default function Home() {
         {Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).map((slot) => {
           const entry = numbered.find(({ num }) => num === slot);
           if (!entry) {
+            const prev = lastKnown[slot];
             return (
               <div
                 key={slot}
@@ -295,11 +336,35 @@ export default function Home() {
                   <span className="text-lg font-bold tabular-nums text-[var(--text-light)]">{slot}</span>
                   <span className="w-2 h-2 rounded-full shrink-0 bg-[var(--border)]" />
                 </div>
-                <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16]">
-                  OFFLINE
-                </span>
+                {prev ? (
+                  <>
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-xs text-[var(--text-muted)]">{prev.projectName}</span>
+                      <span className="text-[10px] text-[var(--text-muted)] opacity-60">{prev.model}</span>
+                    </div>
+                    {!isViewer && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          send({ type: "spawn", project: prev.project, model: prev.model });
+                        }}
+                        className="absolute bottom-3 right-3 w-8 h-8 rounded-full border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+                        title={`Respawn ${prev.model} in ${prev.projectName}`}
+                      >
+                        <span className="text-lg leading-none">+</span>
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16]">
+                    OFFLINE
+                  </span>
+                )}
                 {!isViewer && (
-                  <span className="absolute bottom-3 text-[10px] text-[var(--text-muted)]">Click to spawn</span>
+                  <span className="absolute bottom-3 left-3 text-[10px] text-[var(--text-muted)]">
+                    {prev ? "Tap tile for options" : "Click to spawn"}
+                  </span>
                 )}
               </div>
             );
