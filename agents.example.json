@@ -1,0 +1,16 @@
+[
+  {
+    "id": "aider",
+    "label": "Aider",
+    "processPattern": "aider",
+    "spawnCommand": "aider",
+    "sessionDir": "~/.aider/sessions/"
+  },
+  {
+    "id": "goose",
+    "label": "Goose",
+    "processPattern": "goose\\s+session",
+    "spawnCommand": "goose session",
+    "sessionDir": "~/.config/goose/sessions/"
+  }
+]

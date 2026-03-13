@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from "child_process";
+import { ProcessDiscovery } from "./discovery.js";
 
 interface QuadrantSlot {
   quadrant: number;
@@ -328,18 +329,23 @@ end tell
  * - claude: types `claude` then sends keystroke "1" (to select option 1 from the menu)
  * - codex: types `codex`
  * - openclaw: types `openclaw tui`
+ * - custom agents: uses spawnCommand from ~/.hive/agents.json
  */
 export function spawnTerminalWindow(
   project: string,
-  model: "claude" | "codex" | "openclaw",
+  model: string,
   targetQuadrant?: number,
 ): { ok: boolean; error?: string } {
   const cdCmd = `cd "${project}"`;
-  const launchCmd = model === "claude"
-    ? `${cdCmd} && claude`
-    : model === "openclaw"
-      ? `${cdCmd} && openclaw tui`
-      : `${cdCmd} && codex`;
+  let cliCmd: string;
+  if (model === "claude") cliCmd = "claude";
+  else if (model === "codex") cliCmd = "codex";
+  else if (model === "openclaw") cliCmd = "openclaw tui";
+  else {
+    const custom = ProcessDiscovery.getCustomAgent(model);
+    cliCmd = custom?.spawnCommand || model;
+  }
+  const launchCmd = `${cdCmd} && ${cliCmd}`;
 
   // If a target quadrant is given, spawn and position in one AppleScript call
   const pos = targetQuadrant ? QUADRANT_POSITIONS[targetQuadrant] : undefined;

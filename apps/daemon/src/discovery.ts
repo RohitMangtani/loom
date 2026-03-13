@@ -86,6 +86,43 @@ export class ProcessDiscovery {
   private codexSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
   // OpenClaw session file cache — same semantics as Codex cache.
   private openclawSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
+  // Generic session file cache for custom agents — keyed by "model:pid".
+  private customSessionCache = new Map<string, { file: string | null; checkedAt: number }>();
+
+  /** Custom agent definitions loaded from ~/.hive/agents.json */
+  private static customAgents: { id: string; label: string; processPattern: string; spawnCommand: string; sessionDir?: string }[] = [];
+  private static customAgentsLoadedAt = 0;
+
+  /** Load or reload custom agent definitions from ~/.hive/agents.json */
+  static loadCustomAgents(): void {
+    const configPath = join(HOME, ".hive", "agents.json");
+    try {
+      const stat = statSync(configPath);
+      if (stat.mtimeMs <= ProcessDiscovery.customAgentsLoadedAt) return;
+      const raw = readFileSync(configPath, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        ProcessDiscovery.customAgents = parsed.filter(
+          (a: Record<string, unknown>) => a.id && a.processPattern && a.spawnCommand
+        );
+        ProcessDiscovery.customAgentsLoadedAt = stat.mtimeMs;
+        console.log(`[discovery] Loaded ${ProcessDiscovery.customAgents.length} custom agent(s) from agents.json`);
+      }
+    } catch {
+      // File doesn't exist or invalid JSON — fine, use built-ins only
+    }
+  }
+
+  /** Get custom agent config by model id */
+  static getCustomAgent(model: string): { id: string; label: string; processPattern: string; spawnCommand: string; sessionDir?: string } | undefined {
+    return ProcessDiscovery.customAgents.find(a => a.id === model);
+  }
+
+  /** Get all custom agents (for dashboard spawn dialog) */
+  static getCustomAgents(): { id: string; label: string; processPattern: string; spawnCommand: string; sessionDir?: string }[] {
+    ProcessDiscovery.loadCustomAgents();
+    return ProcessDiscovery.customAgents;
+  }
 
   constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
     this.telemetry = telemetry;
@@ -225,6 +262,10 @@ export class ProcessDiscovery {
           }
           if (!sessionFile && proc.model === "openclaw") {
             sessionFile = this.findOpenClawSessionFile(proc.pid, proc.startedAt);
+          }
+          // Custom agents with a sessionDir config
+          if (!sessionFile && proc.model && proc.model !== "claude" && proc.model !== "codex" && proc.model !== "openclaw") {
+            sessionFile = this.findCustomSessionFile(proc.model, proc.pid, proc.startedAt);
           }
 
           if (!sessionFile && proc.sessionIds.length > 0) {
@@ -458,12 +499,14 @@ export class ProcessDiscovery {
     auditCtx: Record<string, unknown>,
   ): void {
     if (!cachedPath) {
-      // No cached JSONL path. For non-Claude workers (Codex, OpenClaw), try finding
-      // their session file before falling back to CPU-only.
+      // No cached JSONL path. For non-Claude workers, try finding their session file
+      // before falling back to CPU-only.
       if (existing.model && existing.model !== "claude") {
         const codexFile = existing.model === "openclaw"
           ? this.findOpenClawSessionFile(existing.pid, existing.startedAt)
-          : this.findCodexSessionFile(existing.pid, existing.startedAt);
+          : existing.model === "codex"
+            ? this.findCodexSessionFile(existing.pid, existing.startedAt)
+            : this.findCustomSessionFile(existing.model, existing.pid, existing.startedAt);
         if (codexFile) {
           this.streamer.setSessionFile(id, codexFile);
           // Fall through to normal JSONL analysis with the found file
@@ -937,12 +980,73 @@ export class ProcessDiscovery {
     }
   }
 
-  /** Patterns to match AI agent processes in `ps` output. Order matters — first match wins. */
-  private static readonly AGENT_PATTERNS: { regex: RegExp; model: string }[] = [
+  /**
+   * Find session file for a custom agent defined in ~/.hive/agents.json.
+   * Scans the configured sessionDir for the most recently modified JSONL.
+   */
+  private findCustomSessionFile(model: string, pid: number, startedAt: number): string | null {
+    const cacheKey = `${model}:${pid}`;
+    const cached = this.customSessionCache.get(cacheKey);
+    if (cached) {
+      if (cached.file) return cached.file;
+      if (Date.now() - cached.checkedAt < 30_000) return null;
+    }
+
+    const agent = ProcessDiscovery.getCustomAgent(model);
+    if (!agent?.sessionDir) {
+      this.customSessionCache.set(cacheKey, { file: null, checkedAt: Date.now() });
+      return null;
+    }
+
+    const sessionDir = agent.sessionDir.replace(/^~/, HOME);
+    try {
+      let bestFile: string | null = null;
+      let bestMtime = 0;
+
+      // Recursively scan up to 3 levels deep for JSONL files
+      const scanDir = (dir: string, depth: number) => {
+        if (depth > 3) return;
+        try {
+          for (const entry of readdirSync(dir)) {
+            const fullPath = join(dir, entry);
+            try {
+              const stat = statSync(fullPath);
+              if (stat.isDirectory()) {
+                scanDir(fullPath, depth + 1);
+              } else if (entry.endsWith(".jsonl") && stat.mtimeMs > bestMtime) {
+                bestMtime = stat.mtimeMs;
+                bestFile = fullPath;
+              }
+            } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+      };
+
+      scanDir(sessionDir, 0);
+      this.customSessionCache.set(cacheKey, { file: bestFile, checkedAt: Date.now() });
+      return bestFile;
+    } catch {
+      this.customSessionCache.set(cacheKey, { file: null, checkedAt: Date.now() });
+      return null;
+    }
+  }
+
+  /** Built-in patterns to match AI agent processes in `ps` output. */
+  private static readonly BUILTIN_PATTERNS: { regex: RegExp; model: string }[] = [
     { regex: /claude\s*$/, model: "claude" },
     { regex: /\/codex(?:\s+(?!app-server)|$)/, model: "codex" },
     { regex: /openclaw(?:\s+tui)?(?:\s|$)/, model: "openclaw" },
   ];
+
+  /** Combined built-in + custom patterns. Reloads custom agents on each call. */
+  private static get AGENT_PATTERNS(): { regex: RegExp; model: string }[] {
+    ProcessDiscovery.loadCustomAgents();
+    const custom = ProcessDiscovery.customAgents.map(a => ({
+      regex: new RegExp(a.processPattern),
+      model: a.id,
+    }));
+    return [...ProcessDiscovery.BUILTIN_PATTERNS, ...custom];
+  }
 
   private findClaudeProcesses(): ProcessInfo[] {
     try {

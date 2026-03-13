@@ -65,7 +65,7 @@ The quadrant layout solves this. Your brain is good at spatial memory. When you 
 - **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`) and/or OpenClaw (`npm install -g openclaw`)
 - **Hosted dashboard extras** (required for the standard `npm run launch` path) — Homebrew for `cloudflared`, `python3`, and a Vercel account (`npx vercel login`). If you only want localhost, use `npm run launch:local` instead.
 
-Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection.
+Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection. Any other terminal agent can be added via a config file (see [Custom Agents](#custom-agents)).
 
 ## Quick Start
 
@@ -335,6 +335,34 @@ Claude agents read instructions from `~/.claude/CLAUDE.md` that tell them how to
 6. **Use scratchpad** — leave notes about in-progress work for other agents
 
 These behaviors are configured through the CLAUDE.md instructions, not hardcoded. Codex workers still participate in discovery, messaging, queueing, and shared state, but they do not use the Claude hook path.
+
+## Custom Agents
+
+Hive ships with Claude, Codex, and OpenClaw support built in. To add any other terminal agent, create `~/.hive/agents.json`:
+
+```json
+[
+  {
+    "id": "aider",
+    "label": "Aider",
+    "processPattern": "aider",
+    "spawnCommand": "aider",
+    "sessionDir": "~/.aider/sessions/"
+  }
+]
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | Unique identifier (used internally) |
+| `label` | yes | Display name on dashboard |
+| `processPattern` | yes | Regex to match the process in `ps` output |
+| `spawnCommand` | yes | CLI command to run in Terminal.app |
+| `sessionDir` | no | Directory to scan for JSONL session files |
+
+The daemon watches this file and reloads when it changes. No restart needed.
+
+**The easiest way to add a new agent:** Ask one of your running agents. Tell Claude or Codex "add Aider support to Hive" and it writes the config entry to `~/.hive/agents.json`. The daemon picks it up on the next scan.
 
 ## Configuration
 

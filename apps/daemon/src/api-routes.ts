@@ -3,7 +3,7 @@ import type express from "express";
 import { join } from "path";
 import { existsSync, mkdirSync, appendFileSync, readFileSync, readdirSync, statSync, realpathSync } from "fs";
 import type { ProcessManager } from "./process-mgr.js";
-import type { ProcessDiscovery } from "./discovery.js";
+import { ProcessDiscovery } from "./discovery.js";
 import type { TelemetryReceiver } from "./telemetry.js";
 import { spawnTerminalWindow } from "./arrange-windows.js";
 
@@ -311,7 +311,7 @@ export function registerApiRoutes(
       return;
     }
 
-    const model = (rawModel === "codex" ? "codex" : rawModel === "openclaw" ? "openclaw" : "claude") as "claude" | "codex" | "openclaw";
+    const model = typeof rawModel === "string" && rawModel ? rawModel : "claude";
     const openQ = receiver.getFirstOpenQuadrant();
     const result = spawnTerminalWindow(realPath, model, openQ);
     if (!result.ok) {
@@ -319,6 +319,20 @@ export function registerApiRoutes(
       return;
     }
     res.json({ ok: true, model, project: realPath });
+  });
+
+  // GET /api/models — returns built-in + custom agent types for spawn dialog
+  app.get("/api/models", requireAuth, (_req, res) => {
+    const builtIn = [
+      { id: "claude", label: "Claude" },
+      { id: "codex", label: "Codex" },
+      { id: "openclaw", label: "OpenClaw" },
+    ];
+    const custom = ProcessDiscovery.getCustomAgents().map(a => ({
+      id: a.id,
+      label: a.label,
+    }));
+    res.json([...builtIn, ...custom]);
   });
 
   // GET /api/projects
