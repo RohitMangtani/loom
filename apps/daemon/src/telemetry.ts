@@ -17,7 +17,7 @@ import { Scratchpad } from "./scratchpad.js";
 import type { ScratchpadEntry } from "./scratchpad.js";
 import { LockManager } from "./lock-manager.js";
 import { registerApiRoutes } from "./api-routes.js";
-import { updateTerminalTitles, arrangeTerminalWindows, detectQuadrantsFromWindowPositions, positionWindowToQuadrant } from "./arrange-windows.js";
+import { updateTerminalTitles, arrangeTerminalWindows, detectQuadrantsFromWindowPositions, positionWindowToQuadrant, resetArrangementCache } from "./arrange-windows.js";
 import type { Collector } from "./collector.js";
 import { SuggestionEngine } from "./suggestion-engine.js";
 import { ReviewStore } from "./review-store.js";
@@ -966,6 +966,19 @@ export class TelemetryReceiver {
         model: s.model,
       }));
     arrangeTerminalWindows(arrangeSlots);
+  }
+
+  /** Force rearrange terminal windows (resets cache and fires immediately). */
+  forceRearrange(): void {
+    resetArrangementCache();
+    const slots = [...this.quadrantAssignments.entries()]
+      .map(([workerId, q]) => {
+        const w = this.workers.get(workerId);
+        if (!w?.tty) return null;
+        return { quadrant: q, tty: w.tty, projectName: w.projectName, model: w.model || "claude" };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+    if (slots.length > 0) arrangeTerminalWindows(slots);
   }
 
   /** Returns the lowest slot (1-8) not currently assigned, or undefined if full. */

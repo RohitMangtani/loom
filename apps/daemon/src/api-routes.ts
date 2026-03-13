@@ -430,5 +430,11 @@ export function registerApiRoutes(
     }
   });
 
-  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/projects, /api/reviews, /api/notifications/config");
+  // POST /api/rearrange — force rearrange terminal windows
+  app.post("/api/rearrange", requireAuth, (_req, res) => {
+    receiver.forceRearrange();
+    res.json({ ok: true });
+  });
+
+  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange");
 }

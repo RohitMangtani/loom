@@ -43,6 +43,12 @@ function getSlotPosition(slot: number, agentCount: number): { x: number; y: numb
 let lastArrangement = "";
 let lastTitleFingerprint = "";
 
+/** Reset the arrangement cache so the next arrangeTerminalWindows() call fires. */
+export function resetArrangementCache(): void {
+  lastArrangement = "";
+  lastTitleFingerprint = "";
+}
+
 /**
  * Detect the physical screen position of each Terminal window by TTY
  * and return the quadrant assignment (1-4) based on where the window
