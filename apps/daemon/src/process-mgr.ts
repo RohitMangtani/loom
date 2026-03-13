@@ -298,13 +298,14 @@ export class ProcessManager {
   }
 
   private resolveHookPath(): string {
+    // Prefer src/hooks/ since tsc doesn't copy .sh files to dist/
+    const srcHooks = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "hooks", "telemetry-hook.sh");
+    if (fs.existsSync(srcHooks)) return srcHooks;
+
     const local = fileURLToPath(new URL("./hooks/telemetry-hook.sh", import.meta.url));
     if (fs.existsSync(local)) return local;
 
-    const fallback = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "hooks", "telemetry-hook.sh");
-    if (fs.existsSync(fallback)) return fallback;
-
-    return local;
+    return srcHooks;
   }
 
   private handleStdoutLine(worker: ManagedWorker, line: string): void {

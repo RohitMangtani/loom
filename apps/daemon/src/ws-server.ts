@@ -172,6 +172,13 @@ export class WsServer {
         const workerId = msg.workerId;
         this.clientSubs.set(ws, workerId);
 
+        // Verify session file mapping against TTY marker before reading history.
+        // This prevents chat cross-contamination when multiple workers share a project.
+        const subWorker = this.telemetry.get(workerId);
+        if (subWorker?.tty) {
+          this.streamer.verifySessionFile(workerId, subWorker.tty);
+        }
+
         // Send chat history (full = authoritative replace on client)
         const history = this.streamer.readHistory(workerId);
         this.send(ws, { type: "chat_history", workerId, messages: history, full: true });
@@ -222,12 +229,16 @@ export class WsServer {
         }
 
         const model = msg.model || "claude";
-        const openQ = this.telemetry.getFirstOpenQuadrant();
+        // Use the requested quadrant if provided and available, otherwise first open
+        const requestedQ = typeof msg.targetQuadrant === "number" && msg.targetQuadrant >= 1 && msg.targetQuadrant <= 4
+          ? msg.targetQuadrant
+          : undefined;
+        const openQ = requestedQ ?? this.telemetry.getFirstOpenQuadrant();
 
         // Auto-send an init message after the agent starts (task or "hi")
         const initMessage = msg.task?.trim() || "hi";
 
-        // Open a real Terminal window with the CLI, positioned in the first open corner
+        // Open a real Terminal window with the CLI, positioned in the target quadrant
         const termResult = spawnTerminalWindow(real, model, openQ, initMessage);
         if (!termResult.ok) {
           this.send(ws, { type: "error", error: termResult.error || "Failed to spawn terminal" });

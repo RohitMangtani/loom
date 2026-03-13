@@ -335,6 +335,7 @@ export function spawnTerminalWindow(
   project: string,
   model: string,
   targetQuadrant?: number,
+  initialMessage?: string,
 ): { ok: boolean; error?: string } {
   const cdCmd = `cd "${project}"`;
   let cliCmd: string;
@@ -347,7 +348,9 @@ export function spawnTerminalWindow(
   }
   const launchCmd = `${cdCmd} && ${cliCmd}`;
 
-  // If a target quadrant is given, spawn and position in one AppleScript call
+  // If a target quadrant is given, spawn and position in one AppleScript call.
+  // Capture the tab reference from `do script` and use `window of newTab`
+  // instead of `front window` to avoid race conditions with `activate`.
   const pos = targetQuadrant ? QUADRANT_POSITIONS[targetQuadrant] : undefined;
   const positionBlock = pos ? `
 tell application "Finder"
@@ -363,13 +366,13 @@ set halfH to (screenH - screenY - menuBarH) / 2
 ` : "";
 
   const setBoundsLine = pos
-    ? `set bounds of front window to {screenX + ${pos.x} * halfW, screenY + ${pos.y} * halfH + menuBarH, screenX + ${pos.x} * halfW + halfW, screenY + ${pos.y} * halfH + halfH + menuBarH}`
+    ? `set bounds of window of newTab to {screenX + ${pos.x} * halfW, screenY + ${pos.y} * halfH + menuBarH, screenX + ${pos.x} * halfW + halfW, screenY + ${pos.y} * halfH + halfH + menuBarH}`
     : "";
 
   const script = `
 ${positionBlock}
 tell application "Terminal"
-  do script "${launchCmd.replace(/"/g, '\\"')}"
+  set newTab to do script "${launchCmd.replace(/"/g, '\\"')}"
   activate
   ${setBoundsLine}
 end tell
@@ -385,12 +388,11 @@ end tell
     return { ok: false, error: `Spawn terminal failed: ${msg.slice(0, 150)}` };
   }
 
-  // For claude, we need to send "1" + Enter after a short delay
-  // to select the first option from the CLI menu
+  // For claude, we need to send "1" + Enter after a short delay to select
+  // the first option from the CLI menu, then type the initial message.
   if (model === "claude") {
     setTimeout(() => {
       try {
-        // Press "1" key in the frontmost Terminal window
         const selectScript = `
 tell application "System Events"
   tell process "Terminal"
@@ -405,10 +407,57 @@ end tell
           encoding: "utf-8",
         });
       } catch {
-        // Non-critical - user can press 1 manually
         console.log("[arrange] Failed to auto-press 1 for claude CLI menu");
       }
+
+      // After menu selection, wait for session to start then type initial message
+      if (initialMessage) {
+        setTimeout(() => {
+          try {
+            const escaped = initialMessage.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+            const msgScript = `
+tell application "System Events"
+  tell process "Terminal"
+    keystroke "${escaped}"
+    delay 0.2
+    key code 36
+  end tell
+end tell
+`;
+            execFileSync("/usr/bin/osascript", ["-e", msgScript], {
+              timeout: 5000,
+              encoding: "utf-8",
+            });
+          } catch {
+            console.log("[arrange] Failed to type initial message after spawn");
+          }
+        }, 4000); // Wait for claude session to initialize after menu selection
+      }
     }, 3000); // Wait for claude CLI to show its menu
+  } else {
+    // For codex / openclaw / custom: just wait for CLI to start, then type the message
+    if (initialMessage) {
+      setTimeout(() => {
+        try {
+          const escaped = initialMessage.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          const msgScript = `
+tell application "System Events"
+  tell process "Terminal"
+    keystroke "${escaped}"
+    delay 0.2
+    key code 36
+  end tell
+end tell
+`;
+          execFileSync("/usr/bin/osascript", ["-e", msgScript], {
+            timeout: 5000,
+            encoding: "utf-8",
+          });
+        } catch {
+          console.log("[arrange] Failed to type initial message for ${model}");
+        }
+      }, 5000); // Wait for non-claude CLIs to initialize
+    }
   }
 
   return { ok: true };

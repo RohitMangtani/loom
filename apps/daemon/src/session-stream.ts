@@ -1,4 +1,4 @@
-import { readFileSync, statSync, readdirSync, watch, type FSWatcher } from "fs";
+import { existsSync, readFileSync, statSync, readdirSync, watch, type FSWatcher } from "fs";
 import { basename, join } from "path";
 import type { ChatEntry } from "./types.js";
 import { describeAction, describeBashCommand, truncate } from "./utils.js";
@@ -61,6 +61,51 @@ export class SessionStreamer {
     }
 
     return bestFile;
+  }
+
+  /**
+   * Verify the session file mapping for a worker by cross-checking the
+   * TTY marker file (~/.hive/sessions/{tty}). If the marker says a different
+   * session ID than what's currently mapped, correct the mapping.
+   *
+   * Called on subscribe to prevent chat cross-contamination when multiple
+   * workers share the same project directory.
+   */
+  verifySessionFile(workerId: string, tty: string | undefined): boolean {
+    if (!tty) return false;
+
+    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+    const markerPath = join(homeDir, ".hive", "sessions", tty);
+    let markerSessionId: string;
+    try {
+      markerSessionId = readFileSync(markerPath, "utf-8").trim();
+    } catch {
+      return false; // No marker file — can't verify
+    }
+    if (!markerSessionId || markerSessionId.length < 30) return false;
+
+    // Check if current mapping already points to the correct session
+    const currentFile = this.sessionFiles.get(workerId);
+    if (currentFile && basename(currentFile, ".jsonl") === markerSessionId) {
+      return false; // Already correct
+    }
+
+    // Find the JSONL file for the marker's session ID
+    const projectsDir = join(homeDir, ".claude", "projects");
+    try {
+      for (const projectDir of readdirSync(projectsDir)) {
+        const candidatePath = join(projectsDir, projectDir, `${markerSessionId}.jsonl`);
+        if (existsSync(candidatePath)) {
+          const oldName = currentFile ? basename(currentFile) : "none";
+          console.log(`[session-verify] Correcting ${workerId} (${tty}): ${oldName} → ${markerSessionId}.jsonl`);
+          this.sessionFiles.set(workerId, candidatePath);
+          return true;
+        }
+      }
+    } catch {
+      // projects dir missing
+    }
+    return false;
   }
 
   /**

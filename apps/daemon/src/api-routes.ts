@@ -284,7 +284,7 @@ export function registerApiRoutes(
 
   // POST /api/spawn
   app.post("/api/spawn", requireAuth, (req, res) => {
-    const { project, model: rawModel, task } = req.body as { project?: string; model?: string; task?: string };
+    const { project, model: rawModel, task, targetQuadrant } = req.body as { project?: string; model?: string; task?: string; targetQuadrant?: number };
     if (!project) {
       res.status(400).json({ error: "Missing project" });
       return;
@@ -313,7 +313,9 @@ export function registerApiRoutes(
 
     const model = typeof rawModel === "string" && rawModel ? rawModel : "claude";
     const initMessage = typeof task === "string" && task.trim() ? task.trim() : "hi";
-    const openQ = receiver.getFirstOpenQuadrant();
+    const requestedQ = typeof targetQuadrant === "number" && targetQuadrant >= 1 && targetQuadrant <= 4
+      ? targetQuadrant : undefined;
+    const openQ = requestedQ ?? receiver.getFirstOpenQuadrant();
     const result = spawnTerminalWindow(realPath, model, openQ, initMessage);
     if (!result.ok) {
       res.status(500).json({ error: result.error || "Failed to spawn terminal" });

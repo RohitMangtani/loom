@@ -17,7 +17,7 @@ import { Scratchpad } from "./scratchpad.js";
 import type { ScratchpadEntry } from "./scratchpad.js";
 import { LockManager } from "./lock-manager.js";
 import { registerApiRoutes } from "./api-routes.js";
-import { updateTerminalTitles, detectQuadrantsFromWindowPositions, positionWindowToQuadrant } from "./arrange-windows.js";
+import { updateTerminalTitles, arrangeTerminalWindows, detectQuadrantsFromWindowPositions, positionWindowToQuadrant } from "./arrange-windows.js";
 import type { Collector } from "./collector.js";
 import { SuggestionEngine } from "./suggestion-engine.js";
 import { ReviewStore } from "./review-store.js";
@@ -953,17 +953,18 @@ export class TelemetryReceiver {
       );
     } catch { /* non-critical */ }
 
-    // Update tab titles to match quadrant assignments (no window repositioning)
-    updateTerminalTitles(
-      slots
-        .filter(s => s.tty)
-        .map(s => ({
-          quadrant: s.quadrant,
-          tty: s.tty!,
-          projectName: s.projectName,
-          model: s.model,
-        }))
-    );
+    // Arrange terminal windows to match quadrant assignments.
+    // arrangeTerminalWindows both sets titles AND moves windows to correct positions.
+    // It has internal fingerprint caching so redundant calls are skipped.
+    const arrangeSlots = slots
+      .filter(s => s.tty)
+      .map(s => ({
+        quadrant: s.quadrant,
+        tty: s.tty!,
+        projectName: s.projectName,
+        model: s.model,
+      }));
+    arrangeTerminalWindows(arrangeSlots);
   }
 
   /** Returns the lowest quadrant (1-4) not currently assigned, or undefined if full. */

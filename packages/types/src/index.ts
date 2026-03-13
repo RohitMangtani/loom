@@ -51,6 +51,8 @@ export interface DaemonMessage {
   content?: string;
   /** Model to spawn: "claude", "codex", or "openclaw". Defaults to "claude". */
   model?: string;
+  /** Target quadrant (1-4) for spawn. If set, places the terminal in this quadrant. */
+  targetQuadrant?: number;
   optionIndex?: number;
   /** Phase 4: which suggestion label was applied */
   appliedLabel?: string;

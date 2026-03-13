@@ -347,7 +347,7 @@ export default function Home() {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          send({ type: "spawn", project: prev.project, model: prev.model });
+                          send({ type: "spawn", project: prev.project, model: prev.model, targetQuadrant: slot });
                         }}
                         className="absolute bottom-3 right-3 w-8 h-8 rounded-full border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
                         title={`Respawn ${prev.model} in ${prev.projectName}`}
