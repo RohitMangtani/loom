@@ -2,18 +2,7 @@
 
 One screen for all your AI agents. Find My iPhone, but for terminal agents. macOS only.
 
-```
-  Your terminals                    Your phone
-┌─────────────────────┐       ┌─────────────────────┐
-│  ● Agent 1 (green)  │       │  ● Agent 1  green   │
-├─────────────────────┤       ├─────────────────────┤
-│  ● Agent 2 (red)    │       │  ● Agent 2  red     │
-├─────────────────────┤  ───► ├─────────────────────┤
-│  ● Agent 3 (yellow) │       │  ● Agent 3  yellow  │
-├─────────────────────┤       ├─────────────────────┤
-│  ● Agent 4 (green)  │       │  ● Agent 4  green   │
-└─────────────────────┘       └─────────────────────┘
-```
+![Hive stacked dashboard diagram](docs/hive-stack.svg)
 
 The dashboard maps 1:1 to your terminal layout. Terminals stack vertically on your screen, tiles stack vertically on the dashboard. Top terminal is top tile. Bottom terminal is bottom tile. Green means working. Red means done. Yellow means stuck. You look at your phone and know exactly which terminal needs attention without reading a single line of output.
 
