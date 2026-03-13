@@ -138,13 +138,16 @@ export class ProcessDiscovery {
    */
   readTerminalContent(tty: string): string | null {
     const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+    // Use "history" instead of "contents" — the contents property returns
+    // a tab reference string on modern macOS instead of the visible text.
+    // "history" returns the full scrollback; we trim to the tail later.
     const script = `
 tell application "Terminal"
   set theText to ""
   repeat with w in windows
     repeat with t in tabs of w
       if tty of t is "${device}" then
-        set theText to contents of t
+        set theText to history of t
       end if
     end repeat
   end repeat
@@ -447,6 +450,15 @@ end tell
               existing.terminalPreview = preview;
               existing.status = "waiting";
               existing.currentAction = "Waiting for input...";
+            }
+          } else if (cachedSessionFile && proc.tty && existing.status === "idle") {
+            // Idle agent with session — read terminal content once so the
+            // dashboard tile shows something useful instead of just "READY".
+            // Re-read if the preview looks like a stale AppleScript reference.
+            const needsPreview = !existing.terminalPreview || existing.terminalPreview.startsWith("tab ");
+            if (needsPreview) {
+              const preview = this.readTerminalPreview(proc.tty);
+              if (preview && !preview.startsWith("tab ")) existing.terminalPreview = preview;
             }
           }
 
