@@ -239,7 +239,7 @@ export class WsServer {
         const initMessage = msg.task?.trim() || undefined;
 
         // Open a real Terminal window with the CLI, positioned in the target quadrant
-        const termResult = spawnTerminalWindow(real, model, openQ, initMessage);
+        const termResult = spawnTerminalWindow(real, model, openQ, initMessage, this.telemetry.getAll().length);
         if (!termResult.ok) {
           this.send(ws, { type: "error", error: termResult.error || "Failed to spawn terminal" });
           return;

@@ -8,22 +8,35 @@ interface QuadrantSlot {
   model: string;
 }
 
-/** Screen slot positions: 4-column × 2-row grid supporting up to 8 agents.
- *  Slots 1-4 = top row (left to right), slots 5-8 = bottom row (left to right).
- *  x/y are column/row indices used as multipliers against cell dimensions. */
+/** Grid formations for each agent count.
+ *  Each formation defines cols, rows, and slot positions (x=col, y=row indices). */
 const MAX_SLOTS = 8;
-const GRID_COLS = 4;
-const GRID_ROWS = 2;
-const QUADRANT_POSITIONS: Record<number, { x: number; y: number }> = {
-  1: { x: 0, y: 0 },
-  2: { x: 1, y: 0 },
-  3: { x: 2, y: 0 },
-  4: { x: 3, y: 0 },
-  5: { x: 0, y: 1 },
-  6: { x: 1, y: 1 },
-  7: { x: 2, y: 1 },
-  8: { x: 3, y: 1 },
+
+interface GridFormation {
+  cols: number;
+  rows: number;
+  positions: Record<number, { x: number; y: number }>;
+}
+
+const FORMATIONS: Record<number, GridFormation> = {
+  1: { cols: 1, rows: 1, positions: { 1: { x: 0, y: 0 } } },
+  2: { cols: 2, rows: 1, positions: { 1: { x: 0, y: 0 }, 2: { x: 1, y: 0 } } },
+  3: { cols: 2, rows: 2, positions: { 1: { x: 0, y: 0 }, 2: { x: 1, y: 0 }, 3: { x: 0, y: 1 } } },
+  4: { cols: 2, rows: 2, positions: { 1: { x: 0, y: 0 }, 2: { x: 1, y: 0 }, 3: { x: 0, y: 1 }, 4: { x: 1, y: 1 } } },
+  5: { cols: 3, rows: 2, positions: { 1: { x: 0, y: 0 }, 2: { x: 1, y: 0 }, 3: { x: 2, y: 0 }, 4: { x: 0, y: 1 }, 5: { x: 1, y: 1 } } },
+  6: { cols: 3, rows: 2, positions: { 1: { x: 0, y: 0 }, 2: { x: 1, y: 0 }, 3: { x: 2, y: 0 }, 4: { x: 0, y: 1 }, 5: { x: 1, y: 1 }, 6: { x: 2, y: 1 } } },
+  7: { cols: 4, rows: 2, positions: { 1: { x: 0, y: 0 }, 2: { x: 1, y: 0 }, 3: { x: 2, y: 0 }, 4: { x: 3, y: 0 }, 5: { x: 0, y: 1 }, 6: { x: 1, y: 1 }, 7: { x: 2, y: 1 } } },
+  8: { cols: 4, rows: 2, positions: { 1: { x: 0, y: 0 }, 2: { x: 1, y: 0 }, 3: { x: 2, y: 0 }, 4: { x: 3, y: 0 }, 5: { x: 0, y: 1 }, 6: { x: 1, y: 1 }, 7: { x: 2, y: 1 }, 8: { x: 3, y: 1 } } },
 };
+
+function getFormation(agentCount: number): GridFormation {
+  return FORMATIONS[Math.max(1, Math.min(agentCount, MAX_SLOTS))];
+}
+
+// Backwards-compatible accessor used by spawnTerminalWindow and arrangeTerminalWindows
+function getSlotPosition(slot: number, agentCount: number): { x: number; y: number } | undefined {
+  return getFormation(agentCount).positions[slot];
+}
 
 // Track last arrangement to avoid redundant AppleScript calls
 let lastArrangement = "";
@@ -125,25 +138,31 @@ return "SCREEN:" & midX & "," & midY & linefeed & output
     }
 
     const result = new Map<string, number>();
-    const usedQuadrants = new Set<number>();
+    const usedSlots = new Set<number>();
 
-    // Determine grid cell dimensions from screen size
-    const cellW = midX * 2 / GRID_COLS;
-    const cellH = midY * 2 / GRID_ROWS;
+    // Use the formation matching the number of detected agents
+    const formation = getFormation(positions.length);
+    const cellW = midX * 2 / formation.cols;
+    const cellH = midY * 2 / formation.rows;
 
     for (const pos of positions) {
-      const col = Math.min(Math.floor(pos.cx / cellW), GRID_COLS - 1);
-      const row = Math.min(Math.floor(pos.cy / cellH), GRID_ROWS - 1);
-      let q = row * GRID_COLS + col + 1; // 1-indexed slot
+      const col = Math.min(Math.floor(pos.cx / cellW), formation.cols - 1);
+      const row = Math.min(Math.floor(pos.cy / cellH), formation.rows - 1);
+      // Find the slot whose position matches this col/row
+      let q = 0;
+      for (const [slot, spos] of Object.entries(formation.positions)) {
+        if (spos.x === col && spos.y === row) { q = Number(slot); break; }
+      }
+      if (!q) q = 1; // fallback
 
-      if (usedQuadrants.has(q)) {
-        const allSlots = Array.from({ length: MAX_SLOTS }, (_, i) => i + 1);
-        const free = allSlots.filter(n => !usedQuadrants.has(n));
+      if (usedSlots.has(q)) {
+        const allSlots = Object.keys(formation.positions).map(Number);
+        const free = allSlots.filter(n => !usedSlots.has(n));
         if (free.length === 0) continue;
         q = free[0];
       }
       result.set(pos.tty, q);
-      usedQuadrants.add(q);
+      usedSlots.add(q);
     }
 
     callback(result);
@@ -171,8 +190,10 @@ export function arrangeTerminalWindows(slots: QuadrantSlot[]): void {
   // Build AppleScript that:
   // 1. Gets screen dimensions
   // 2. For each slot, finds the tab by TTY, sets its title, and positions its window
+  const formation = getFormation(slots.length);
+
   const tabBlocks = slots.map(slot => {
-    const pos = QUADRANT_POSITIONS[slot.quadrant];
+    const pos = getSlotPosition(slot.quadrant, slots.length);
     if (!pos) return "";
     const device = slot.tty.startsWith("/dev/") ? slot.tty : `/dev/${slot.tty}`;
     const title = `Q${slot.quadrant} - ${slot.projectName}`;
@@ -211,8 +232,8 @@ tell application "Finder"
   set screenH to item 4 of screenBounds
 end tell
 set menuBarH to 25
-set cellW to (screenW - screenX) / ${GRID_COLS}
-set cellH to (screenH - screenY - menuBarH) / ${GRID_ROWS}
+set cellW to (screenW - screenX) / ${formation.cols}
+set cellH to (screenH - screenY - menuBarH) / ${formation.rows}
 
 tell application "Terminal"
 ${tabBlocks}
@@ -292,9 +313,11 @@ end tell
  * Position a single Terminal window to the given quadrant.
  * Used only on spawn to place new windows in an open corner.
  */
-export function positionWindowToQuadrant(tty: string, quadrant: number): void {
-  const pos = QUADRANT_POSITIONS[quadrant];
+export function positionWindowToQuadrant(tty: string, quadrant: number, agentCount?: number): void {
+  const count = agentCount || 4;
+  const pos = getSlotPosition(quadrant, count);
   if (!pos) return;
+  const formation = getFormation(count);
   const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
 
   const script = `
@@ -306,14 +329,14 @@ tell application "Finder"
   set screenH to item 4 of screenBounds
 end tell
 set menuBarH to 25
-set halfW to (screenW - screenX) / 2
-set halfH to (screenH - screenY - menuBarH) / 2
+set cellW to (screenW - screenX) / ${formation.cols}
+set cellH to (screenH - screenY - menuBarH) / ${formation.rows}
 
 tell application "Terminal"
   repeat with w in windows
     repeat with t in tabs of w
       if tty of t is "${device}" then
-        set bounds of w to {screenX + ${pos.x} * halfW, screenY + ${pos.y} * halfH + menuBarH, screenX + ${pos.x} * halfW + halfW, screenY + ${pos.y} * halfH + halfH + menuBarH}
+        set bounds of w to {screenX + ${pos.x} * cellW, screenY + ${pos.y} * cellH + menuBarH, screenX + ${pos.x} * cellW + cellW, screenY + ${pos.y} * cellH + cellH + menuBarH}
         exit repeat
       end if
     end repeat
@@ -346,6 +369,7 @@ export function spawnTerminalWindow(
   model: string,
   targetQuadrant?: number,
   initialMessage?: string,
+  currentAgentCount?: number,
 ): { ok: boolean; error?: string } {
   const cdCmd = `cd "${project}"`;
   let cliCmd: string;
@@ -361,7 +385,10 @@ export function spawnTerminalWindow(
   // If a target quadrant is given, spawn and position in one AppleScript call.
   // Capture the tab reference from `do script` and use `window of newTab`
   // instead of `front window` to avoid race conditions with `activate`.
-  const pos = targetQuadrant ? QUADRANT_POSITIONS[targetQuadrant] : undefined;
+  // Use formation for (currentAgentCount + 1) since we're adding one
+  const newCount = (currentAgentCount || 0) + 1;
+  const formation = getFormation(newCount);
+  const pos = targetQuadrant ? getSlotPosition(targetQuadrant, newCount) : undefined;
   const positionBlock = pos ? `
 tell application "Finder"
   set screenBounds to bounds of window of desktop
@@ -371,8 +398,8 @@ tell application "Finder"
   set screenH to item 4 of screenBounds
 end tell
 set menuBarH to 25
-set cellW to (screenW - screenX) / ${GRID_COLS}
-set cellH to (screenH - screenY - menuBarH) / ${GRID_ROWS}
+set cellW to (screenW - screenX) / ${formation.cols}
+set cellH to (screenH - screenY - menuBarH) / ${formation.rows}
 ` : "";
 
   const setBoundsLine = pos

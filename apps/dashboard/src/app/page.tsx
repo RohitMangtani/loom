@@ -11,6 +11,19 @@ import type { WorkerState } from "@/lib/types";
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 const MAX_SLOTS = 8;
 
+/** Grid formations: cols×rows for each agent count, matching daemon window arrangement */
+const GRID_CLASSES: Record<number, string> = {
+  0: "grid-cols-1 grid-rows-1",
+  1: "grid-cols-1 grid-rows-1",
+  2: "grid-cols-2 grid-rows-1",
+  3: "grid-cols-2 grid-rows-2",
+  4: "grid-cols-2 grid-rows-2",
+  5: "grid-cols-3 grid-rows-2",
+  6: "grid-cols-3 grid-rows-2",
+  7: "grid-cols-4 grid-rows-2",
+  8: "grid-cols-4 grid-rows-2",
+};
+
 interface LastKnown {
   project: string;
   projectName: string;
@@ -82,11 +95,6 @@ export default function Home() {
   const [flaggedIds, setFlaggedIds] = useState<Set<string>>(new Set());
   const previewUrlsRef = useRef<Map<string, string>>(new Map());
   const [showReviews, setShowReviews] = useState(false);
-  const [lastKnown, setLastKnown] = useState<Record<number, LastKnown>>({});
-
-  useEffect(() => {
-    setLastKnown(loadLastKnown());
-  }, []);
 
   useEffect(() => {
     try {
@@ -166,22 +174,6 @@ export default function Home() {
 
   const numbered = useStableNumbering(workers);
 
-  // Snapshot active workers to lastKnown so empty tiles can offer quick-respawn
-  useEffect(() => {
-    if (numbered.length === 0) return;
-    setLastKnown((prev) => {
-      const next = { ...prev };
-      for (const { worker: w, num } of numbered) {
-        next[num] = {
-          project: w.project,
-          projectName: w.projectName,
-          model: w.model || "claude",
-        };
-      }
-      saveLastKnown(next);
-      return next;
-    });
-  }, [numbered]);
 
   const activeCount = numbered.filter(({ worker: w }) => w.status === "working").length;
   const stuckCount = numbered.filter(({ worker: w }) => w.status === "stuck").length;
@@ -314,66 +306,52 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Body — adaptive grid: 2x2 for ≤4 agents, 4x2 for 5-8 */}
+      {/* Body — adaptive grid matching daemon window formations */}
       <div
-        className={`min-h-0 grid ${numbered.length > 4 ? "grid-cols-4 grid-rows-2" : "grid-cols-2 grid-rows-2"} gap-3 p-4 sm:p-6 transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0" : "flex-1"}`}
+        className={`min-h-0 grid ${GRID_CLASSES[numbered.length + (!isViewer && numbered.length < MAX_SLOTS ? 1 : 0)] || GRID_CLASSES[4]} gap-3 p-4 sm:p-6 transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0" : "flex-1"}`}
         style={!isViewer && selectedEntry ? { flexBasis: chatExpanded ? "0px" : "40%", maxHeight: chatExpanded ? "0px" : "none", overflow: chatExpanded ? "hidden" : "visible", padding: chatExpanded ? "0px" : undefined, gap: chatExpanded ? "0px" : undefined } : undefined}
       >
-        {Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).map((slot) => {
-          const entry = numbered.find(({ num }) => num === slot);
-          if (!entry) {
-            return (
-              <div
-                key={slot}
-                className={`card relative flex items-center justify-center ${isViewer ? "opacity-40" : "opacity-40 hover:opacity-60 transition-opacity"}`}
-                style={{ borderLeftColor: "var(--border)" }}
+        {/* Active agent tiles */}
+        {numbered.map(({ worker: w, num }) => (
+          <AgentCard
+            key={w.id}
+            worker={w}
+            num={num}
+            selected={!isViewer && selectedId === w.id}
+            flagged={flaggedIds.has(w.id)}
+            onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
+            onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
+            onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
+            onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
+            onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
+            onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
+          />
+        ))}
+
+        {/* Spawn tile — only shown if under max and not viewer */}
+        {!isViewer && numbered.length < MAX_SLOTS && (
+          <div
+            className="card relative flex items-center justify-center opacity-40 hover:opacity-60 transition-opacity"
+            style={{ borderLeftColor: "var(--border)" }}
+          >
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => send({ type: "spawn", project: "~", model: "claude" })}
+                className="rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
               >
-                <div className="flex items-center gap-2.5 absolute top-3 left-3">
-                  <span className="text-lg font-bold tabular-nums text-[var(--text-light)]">{slot}</span>
-                  <span className="w-2 h-2 rounded-full shrink-0 bg-[var(--border)]" />
-                </div>
-                {!isViewer ? (
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => send({ type: "spawn", project: "~", model: "claude", targetQuadrant: slot })}
-                      className="rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
-                    >
-                      Claude
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => send({ type: "spawn", project: "~", model: "codex", targetQuadrant: slot })}
-                      className="rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
-                    >
-                      Codex
-                    </button>
-                  </div>
-                ) : (
-                  <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16]">
-                    OFFLINE
-                  </span>
-                )}
-              </div>
-            );
-          }
-          const { worker: w, num } = entry;
-          return (
-            <AgentCard
-              key={w.id}
-              worker={w}
-              num={num}
-              selected={!isViewer && selectedId === w.id}
-              flagged={flaggedIds.has(w.id)}
-              onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
-              onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
-              onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
-              onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
-              onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
-              onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
-            />
-          );
-        })}
+                + Claude
+              </button>
+              <button
+                type="button"
+                onClick={() => send({ type: "spawn", project: "~", model: "codex" })}
+                className="rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+              >
+                + Codex
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Inline chat panel — admin only */}

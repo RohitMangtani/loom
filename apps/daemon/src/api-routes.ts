@@ -316,7 +316,7 @@ export function registerApiRoutes(
     const requestedQ = typeof targetQuadrant === "number" && targetQuadrant >= 1 && targetQuadrant <= 8
       ? targetQuadrant : undefined;
     const openQ = requestedQ ?? receiver.getFirstOpenQuadrant();
-    const result = spawnTerminalWindow(realPath, model, openQ, initMessage);
+    const result = spawnTerminalWindow(realPath, model, openQ, initMessage, receiver.getAll().length);
     if (!result.ok) {
       res.status(500).json({ error: result.error || "Failed to spawn terminal" });
       return;
