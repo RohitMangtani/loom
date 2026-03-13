@@ -1747,8 +1747,8 @@ export class ProcessDiscovery {
   private projectIdentityFromCwd(cwd: string): { project: string; projectName: string } {
     if (cwd === HOME || cwd === "/") {
       return {
-        project: `${HOME}/factory/projects/unknown`,
-        projectName: "unknown",
+        project: HOME,
+        projectName: "home",
       };
     }
 

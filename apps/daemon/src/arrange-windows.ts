@@ -388,9 +388,13 @@ end tell
     return { ok: false, error: `Spawn terminal failed: ${msg.slice(0, 150)}` };
   }
 
-  // For claude, we need to send "1" + Enter after a short delay to select
-  // the first option from the CLI menu, then type the initial message.
-  if (model === "claude") {
+  // Both Claude and Codex show a startup menu that needs auto-bypass.
+  // Claude: press "1" + Enter to select first project option.
+  // Codex: press "1" + Enter to accept/select first option.
+  // After the menu is cleared, type the initial message.
+  const needsMenuBypass = model === "claude" || model === "codex";
+
+  if (needsMenuBypass) {
     setTimeout(() => {
       try {
         const selectScript = `
@@ -407,10 +411,9 @@ end tell
           encoding: "utf-8",
         });
       } catch {
-        console.log("[arrange] Failed to auto-press 1 for claude CLI menu");
+        console.log(`[arrange] Failed to auto-press 1 for ${model} CLI menu`);
       }
 
-      // After menu selection, wait for session to start then type initial message
       if (initialMessage) {
         setTimeout(() => {
           try {
@@ -429,13 +432,13 @@ end tell
               encoding: "utf-8",
             });
           } catch {
-            console.log("[arrange] Failed to type initial message after spawn");
+            console.log(`[arrange] Failed to type initial message for ${model}`);
           }
-        }, 4000); // Wait for claude session to initialize after menu selection
+        }, 4000);
       }
-    }, 3000); // Wait for claude CLI to show its menu
+    }, 3000);
   } else {
-    // For codex / openclaw / custom: just wait for CLI to start, then type the message
+    // For openclaw / custom: just wait for CLI to start, then type the message
     if (initialMessage) {
       setTimeout(() => {
         try {
@@ -454,9 +457,9 @@ end tell
             encoding: "utf-8",
           });
         } catch {
-          console.log("[arrange] Failed to type initial message for ${model}");
+          console.log(`[arrange] Failed to type initial message for ${model}`);
         }
-      }, 5000); // Wait for non-claude CLIs to initialize
+      }, 5000);
     }
   }
 

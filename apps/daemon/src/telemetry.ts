@@ -1802,7 +1802,8 @@ export class TelemetryReceiver {
 
     if (cwd) {
       const name = cwd.split("/").pop();
-      if (name && name !== "rmgtni" && name !== "/") {
+      const homeBase = HOME.split("/").pop();
+      if (name && name !== homeBase && name !== "/") {
         worker.project = cwd;
         worker.projectName = name;
       }

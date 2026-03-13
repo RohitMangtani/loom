@@ -206,26 +206,26 @@ export class WsServer {
       }
 
       case "spawn": {
-        if (!msg.project) {
-          this.send(ws, { type: "error", error: "Missing project path" });
-          return;
-        }
-        // Resolve ~ to home directory
         const home = homedir();
-        const projectPath = msg.project.startsWith("~/")
-          ? msg.project.replace("~", home)
-          : msg.project;
-        // Path traversal guard: real path (symlinks resolved) must be under home dir
+        // Default to home directory if no project specified
         let real: string;
-        try {
-          real = realpathSync(projectPath);
-        } catch {
-          this.send(ws, { type: "error", error: "Invalid project path" });
-          return;
-        }
-        if (!real.startsWith(home + "/")) {
-          this.send(ws, { type: "error", error: "Invalid project path" });
-          return;
+        if (!msg.project || msg.project === "~") {
+          real = home;
+        } else {
+          const projectPath = msg.project.startsWith("~/")
+            ? msg.project.replace("~", home)
+            : msg.project;
+          // Path traversal guard: real path (symlinks resolved) must be under home dir
+          try {
+            real = realpathSync(projectPath);
+          } catch {
+            this.send(ws, { type: "error", error: "Invalid project path" });
+            return;
+          }
+          if (!real.startsWith(home + "/") && real !== home) {
+            this.send(ws, { type: "error", error: "Invalid project path" });
+            return;
+          }
         }
 
         const model = msg.model || "claude";

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHive } from "@/lib/ws";
 import { getAuthMode, unlockAdmin, lockAdmin } from "@/components/SitePasswordGate";
-import { SpawnDialog } from "@/components/SpawnDialog";
 import { AgentCard, DOT_BG } from "@/components/AgentCard";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
@@ -77,7 +76,6 @@ export default function Home() {
   const [mode, setMode] = useState<"admin" | "viewer">("viewer");
   const [showUnlock, setShowUnlock] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
-  const [showSpawn, setShowSpawn] = useState(false);
   const [chatExpanded, setChatExpanded] = useState(false);
   const draftsRef = useRef<Map<string, string>>(new Map());
   const [, setDraftTick] = useState(0);
@@ -324,46 +322,36 @@ export default function Home() {
         {Array.from({ length: MAX_SLOTS }, (_, i) => i + 1).map((slot) => {
           const entry = numbered.find(({ num }) => num === slot);
           if (!entry) {
-            const prev = lastKnown[slot];
             return (
               <div
                 key={slot}
-                className={`card relative flex items-center justify-center ${isViewer ? "opacity-40" : "opacity-40 hover:opacity-60 cursor-pointer transition-opacity"}`}
+                className={`card relative flex items-center justify-center ${isViewer ? "opacity-40" : "opacity-40 hover:opacity-60 transition-opacity"}`}
                 style={{ borderLeftColor: "var(--border)" }}
-                onClick={isViewer ? undefined : () => setShowSpawn(true)}
               >
                 <div className="flex items-center gap-2.5 absolute top-3 left-3">
                   <span className="text-lg font-bold tabular-nums text-[var(--text-light)]">{slot}</span>
                   <span className="w-2 h-2 rounded-full shrink-0 bg-[var(--border)]" />
                 </div>
-                {prev ? (
-                  <>
-                    <div className="flex flex-col items-center gap-1">
-                      <span className="text-xs text-[var(--text-muted)]">{prev.projectName}</span>
-                      <span className="text-[10px] text-[var(--text-muted)] opacity-60">{prev.model}</span>
-                    </div>
-                    {!isViewer && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          send({ type: "spawn", project: prev.project, model: prev.model, targetQuadrant: slot });
-                        }}
-                        className="absolute bottom-3 right-3 w-8 h-8 rounded-full border border-[var(--border)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
-                        title={`Respawn ${prev.model} in ${prev.projectName}`}
-                      >
-                        <span className="text-lg leading-none">+</span>
-                      </button>
-                    )}
-                  </>
+                {!isViewer ? (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => send({ type: "spawn", project: "~", model: "claude", targetQuadrant: slot })}
+                      className="rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+                    >
+                      Claude
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => send({ type: "spawn", project: "~", model: "codex", targetQuadrant: slot })}
+                      className="rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+                    >
+                      Codex
+                    </button>
+                  </div>
                 ) : (
                   <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16]">
                     OFFLINE
-                  </span>
-                )}
-                {!isViewer && (
-                  <span className="absolute bottom-3 left-3 text-[10px] text-[var(--text-muted)]">
-                    {prev ? "Tap tile for options" : "Click to spawn"}
                   </span>
                 )}
               </div>
@@ -443,15 +431,6 @@ export default function Home() {
         />
       )}
 
-      {showSpawn && (
-        <SpawnDialog
-          onSpawn={(project, task, model) => {
-            send({ type: "spawn", project, task, model });
-            setShowSpawn(false);
-          }}
-          onClose={() => setShowSpawn(false)}
-        />
-      )}
 
       <ReviewDrawer
         open={showReviews}
