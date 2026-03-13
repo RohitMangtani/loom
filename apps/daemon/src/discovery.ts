@@ -183,18 +183,24 @@ end tell
       return null;
     }
 
+    // Only check the last ~500 chars of terminal history — if the prompt
+    // text appears near the end, the agent is currently waiting at it.
+    // Matching on full history would false-positive on established agents
+    // that passed through the prompt minutes/hours ago.
+    const tail = content.slice(-500);
+
     // Claude CLI trust prompt patterns
-    if (content.includes("trust this folder") ||
-        content.includes("Is this a project you created") ||
-        content.includes("Yes, I trust") ||
-        content.includes("safety check")) {
+    if (tail.includes("Yes, I trust") ||
+        tail.includes("trust this folder") ||
+        tail.includes("Is this a project you created") ||
+        tail.includes("Enter to confirm")) {
       this.promptCheckedTtys.set(tty, { checkedAt: Date.now(), result: "trust" });
       return { type: "trust", message: "Trust this project folder?", content };
     }
 
     // Claude CLI sandbox prompt patterns
-    if (content.includes("sandboxed") ||
-        content.includes("sandbox") && content.includes("bash")) {
+    if (tail.includes("sandboxed") ||
+        (tail.includes("sandbox") && tail.includes("bash"))) {
       this.promptCheckedTtys.set(tty, { checkedAt: Date.now(), result: "sandbox" });
       return { type: "sandbox", message: "Allow bash commands?", content };
     }
@@ -427,16 +433,16 @@ end tell
           // passed the trust/sandbox prompts and started a real session.
           const cachedSessionFile = this.streamer.getSessionFile(id);
           if (existing.promptType && cachedSessionFile) {
-            // Session file exists — but verify the terminal no longer shows
-            // a prompt before clearing. The session file may be stale (from
-            // state store) while the terminal is still at a trust prompt.
-            const stillPrompt = proc.tty ? this.detectPrompt(proc.tty) : null;
-            if (stillPrompt) {
-              // Prompt still showing — keep state, skip to next worker
-              this.telemetry.notifyExternal(existing);
-              continue;
+            // If the agent is young (<3min), verify the prompt is actually
+            // gone before clearing. Older agents always clear — their
+            // terminal history contains stale prompt text.
+            if (proc.tty && Date.now() - proc.startedAt < 600_000) {
+              const stillPrompt = this.detectPrompt(proc.tty);
+              if (stillPrompt) {
+                this.telemetry.notifyExternal(existing);
+                continue;
+              }
             }
-            // Prompt gone — session truly started
             existing.promptType = null;
             existing.promptMessage = undefined;
             existing.terminalPreview = undefined;
@@ -460,11 +466,10 @@ end tell
               existing.status = "waiting";
               existing.currentAction = "Waiting for input...";
             }
-          } else if (proc.tty && existing.status === "idle" && !existing.promptType) {
-            // Idle agent — check for trust/sandbox prompts and capture
-            // terminal content. Runs regardless of session file because
-            // the session file may be stale (from state store) while the
-            // terminal is actually sitting at a trust prompt.
+          } else if (proc.tty && existing.status === "idle" && !existing.promptType && Date.now() - proc.startedAt < 600_000) {
+            // Young idle agent (<3min) — check for trust/sandbox prompts.
+            // Only young agents need this; older agents have prompt text in
+            // their terminal history but aren't actually waiting for input.
             const prompt = this.detectPrompt(proc.tty);
             if (prompt) {
               existing.status = "waiting";
@@ -474,12 +479,6 @@ end tell
               existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
               this.telemetry.notifyExternal(existing);
               continue;
-            }
-            // No prompt — read terminal preview once for tile content
-            const needsPreview = !existing.terminalPreview || existing.terminalPreview.startsWith("tab ");
-            if (needsPreview) {
-              const preview = this.readTerminalPreview(proc.tty);
-              if (preview && !preview.startsWith("tab ")) existing.terminalPreview = preview;
             }
           }
 
@@ -645,9 +644,10 @@ end tell
           const preview = this.readTerminalPreview(proc.tty);
           if (preview) worker.terminalPreview = preview;
         }
-      } else if (proc.tty && sessionFile && initialStatus === "idle") {
-        // Has session file but idle — check for trust prompt (session file
-        // may be from state store while terminal shows a prompt).
+      } else if (proc.tty && sessionFile && initialStatus === "idle" && processAge < 180_000) {
+        // Young idle agent with session — check for trust prompt (session
+        // file may be from state store while terminal shows a prompt).
+        // Only for agents < 3min old to avoid matching stale prompt text.
         const prompt = this.detectPrompt(proc.tty);
         if (prompt) {
           worker.status = "waiting";
@@ -655,9 +655,6 @@ end tell
           worker.promptMessage = prompt.message;
           worker.currentAction = prompt.message;
           worker.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
-        } else {
-          const preview = this.readTerminalPreview(proc.tty);
-          if (preview) worker.terminalPreview = preview;
         }
       }
     }
