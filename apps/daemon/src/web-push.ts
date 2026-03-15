@@ -35,7 +35,7 @@ export class WebPushManager {
     this.subs = this.loadSubs();
 
     webpush.setVapidDetails(
-      "mailto:hive@localhost",
+      "https://rohitmangtani.com",
       this.vapid.publicKey,
       this.vapid.privateKey,
     );
