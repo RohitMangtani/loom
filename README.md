@@ -1,8 +1,8 @@
-# Hive
+# Loom
 
 One screen for all your AI agents. Find My iPhone, but for terminal agents. macOS only.
 
-![Hive stacked dashboard diagram](docs/hive-stack.svg)
+![Loom stacked dashboard diagram](docs/hive-stack.svg)
 
 The dashboard maps 1:1 to your terminal layout. Terminals stack vertically on your screen, tiles stack vertically on the dashboard. Top terminal is top tile. Bottom terminal is bottom tile. Green means working. Red means done. Yellow means stuck. You look at your phone and know exactly which terminal needs attention without reading a single line of output.
 
@@ -121,7 +121,7 @@ Without this, auto-pilot will not work and agents will stall waiting for permiss
 
 ## Running
 
-You have three supported ways to run Hive:
+You have three supported ways to run Loom:
 
 **Standard hosted launch** (recommended)
 ```bash
@@ -327,7 +327,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   http://localhost:3001/api/queue
 ```
 
-## How Agents Use Hive
+## How Agents Use Loom
 
 Claude agents read instructions from `~/.claude/CLAUDE.md` that tell them how to interact with the daemon. Here's what that hook-driven path does automatically:
 
@@ -342,7 +342,7 @@ These behaviors are configured through the CLAUDE.md instructions, not hardcoded
 
 ## Custom Agents
 
-Hive ships with Claude, Codex, and OpenClaw support built in. To add any other terminal agent, create `~/.hive/agents.json`:
+Loom ships with Claude, Codex, and OpenClaw support built in. To add any other terminal agent, create `~/.hive/agents.json`:
 
 ```json
 [
@@ -366,7 +366,7 @@ Hive ships with Claude, Codex, and OpenClaw support built in. To add any other t
 
 The daemon watches this file and reloads when it changes. No restart needed.
 
-**The easiest way to add a new agent:** Ask one of your running agents. Tell Claude or Codex "add Aider support to Hive" and it writes the config entry to `~/.hive/agents.json`. The daemon picks it up on the next scan.
+**The easiest way to add a new agent:** Ask one of your running agents. Tell Claude or Codex "add Aider support to Loom" and it writes the config entry to `~/.hive/agents.json`. The daemon picks it up on the next scan.
 
 ## Configuration
 
@@ -374,7 +374,7 @@ The daemon watches this file and reloads when it changes. No restart needed.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HIVE_PROJECT` | `~/factory/projects/hive` | Path to the Hive project root |
+| `HIVE_PROJECT` | `~/factory/projects/hive` | Path to the Loom project root |
 | `SEND_RETURN_BIN` | `~/send-return` | Path to the CGEvent binary for auto-pilot |
 | `NEXT_PUBLIC_WS_URL` | `ws://localhost:3002` | WebSocket URL the dashboard connects to |
 
@@ -387,7 +387,7 @@ If Claude Code is installed, setup installs or updates these hooks in `~/.claude
 - **Notification** — fires on agent notifications (errors, completions)
 - **Stop** — fires when an agent session ends
 
-`bash setup-hooks.sh` is idempotent. It merges Hive hooks into existing settings instead of replacing them.
+`bash setup-hooks.sh` is idempotent. It merges Loom hooks into existing settings instead of replacing them.
 
 ### Authentication
 
@@ -472,7 +472,7 @@ Dashboard (Next.js, port 3000 — installable as PWA)
 **Hooks not reporting events**
 - This applies to Claude Code only
 - Verify hooks exist: `cat ~/.claude/settings.json | jq .hooks`
-- Re-run `bash setup-hooks.sh` to repair or update the Hive hook entries.
+- Re-run `bash setup-hooks.sh` to repair or update the Loom hook entries.
 - Test a hook manually: start `claude`, use any tool, check daemon logs for `[telemetry]` events.
 
 **Build errors**
@@ -499,7 +499,7 @@ The app caches itself via service worker, so repeat opens are instant. It works 
 
 ## Deploy Your Own Dashboard
 
-For a hosted dashboard, use the current Hive architecture:
+For a hosted dashboard, use the current Loom architecture:
 
 1. `npm start` to run the daemon and create a free Cloudflare quick tunnel for `ws://localhost:3002`
 2. `npm run deploy:dashboard` to deploy `apps/dashboard` to your own Vercel account using that tunnel URL
@@ -507,7 +507,7 @@ For a hosted dashboard, use the current Hive architecture:
 
 `npm run deploy:dashboard` reads the current tunnel URL from `~/.hive/tunnel-url.txt`, converts it to `wss://...`, and passes it to Vercel as `NEXT_PUBLIC_WS_URL` for that deployment.
 
-Every clone is a completely independent instance. Setup generates a unique auth token at `~/.hive/token`. Your daemon, your agents, your dashboard, your data. Nothing connects to anyone else's setup. Two people can run Hive on the same network without any interference.
+Every clone is a completely independent instance. Setup generates a unique auth token at `~/.hive/token`. Your daemon, your agents, your dashboard, your data. Nothing connects to anyone else's setup. Two people can run Loom on the same network without any interference.
 
 ## Development
 

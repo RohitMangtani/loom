@@ -8,6 +8,7 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { SpawnDialog } from "@/components/SpawnDialog";
 import type { WorkerState } from "@/lib/types";
+import { usePushSubscription } from "@/components/ServiceWorker";
 
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 const MAX_SLOTS = 8;
@@ -144,7 +145,8 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey } = useHive(daemonUrl);
+  usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
 
   useEffect(() => {
@@ -239,7 +241,7 @@ export default function Home() {
         onClick={() => { if (chatExpanded) { setChatExpanded(false); } }}
       >
         <div className="text-center relative">
-          <h1 className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)]">Hive</h1>
+          <h1 className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)]">Loom</h1>
           <div className="flex items-center justify-center gap-1.5 mt-1">
             <span className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-[var(--dot-active)]" : "bg-[var(--dot-offline)]"}`} />
             <span className="text-[10px] text-[var(--text-light)]">

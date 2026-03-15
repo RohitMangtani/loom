@@ -13,13 +13,13 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Hive",
+  title: "Loom",
   description: "Multi-agent orchestration dashboard",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Hive",
+    title: "Loom",
   },
   icons: {
     apple: "/apple-touch-icon.png",

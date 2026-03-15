@@ -1,6 +1,6 @@
 {
-  "name": "Hive",
-  "short_name": "Hive",
+  "name": "Loom",
+  "short_name": "Loom",
   "description": "Multi-agent orchestration dashboard",
   "start_url": "/",
   "display": "standalone",

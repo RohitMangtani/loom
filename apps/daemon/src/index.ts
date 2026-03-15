@@ -7,6 +7,7 @@ import { AutoPilot } from "./auto-pilot.js";
 import { Watchdog } from "./watchdog.js";
 import { StateStore } from "./state-store.js";
 import { NotificationManager } from "./notifications.js";
+import { WebPushManager } from "./web-push.js";
 import { Collector } from "./collector.js";
 import { OutboxScanner } from "./outbox.js";
 import { loadOrCreateToken, deriveViewerToken, patchHookUrls } from "./auth.js";
@@ -20,13 +21,16 @@ const procMgr = new ProcessManager(telemetry);
 const streamer = new SessionStreamer();
 const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken);
 const discovery = new ProcessDiscovery(telemetry, streamer);
+const pushMgr = new WebPushManager();
+const notifications = new NotificationManager();
+notifications.setPushManager(pushMgr);
 ws.setDiscovery(discovery);
+ws.setPushManager(pushMgr);
 const autoPilot = new AutoPilot(telemetry, streamer);
 const watchdog = new Watchdog(telemetry);
 const collector = new Collector();
 const outbox = new OutboxScanner(telemetry);
 const stateStore = new StateStore();
-const notifications = new NotificationManager();
 
 telemetry.start();
 telemetry.registerProcessManager(procMgr);
@@ -68,7 +72,7 @@ telemetry.writeWorkersFile();
 // Start periodic state snapshots (every 30s, separate from the 3s tick)
 stateStore.startPeriodicSave(() => telemetry.exportState());
 
-console.log("Hive daemon running.");
+console.log("Loom daemon running.");
 console.log("  Token: ~/.hive/token");
 console.log("  Telemetry: http://127.0.0.1:3001");
 console.log("  WebSocket: ws://127.0.0.1:3002");

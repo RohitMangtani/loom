@@ -155,7 +155,7 @@ export class Watchdog {
     if (now - this.allIdleSince > 10 * 60 * 1000 && !this.idleAlertSent) {
       this.idleAlertSent = true;
       const mins = Math.round((now - this.allIdleSince) / 60_000);
-      this.notify("Hive Fleet Idle", `All ${workers.length} agents idle for ${mins}+ minutes`);
+      this.notify("Loom Fleet Idle", `All ${workers.length} agents idle for ${mins}+ minutes`);
       console.log(`[watchdog] Fleet idle alert: all ${workers.length} agents idle for ${mins}+ minutes`);
     }
   }
@@ -192,7 +192,7 @@ export class Watchdog {
     }
 
     console.log(`[watchdog] ESCALATED: ${tracked.anomaly.type} after ${tracked.attempts} attempts — shown on dashboard`);
-    this.notify("Hive Watchdog Escalation", `${tracked.anomaly.type} — ${tracked.attempts} failed auto-fix attempts`);
+    this.notify("Loom Watchdog Escalation", `${tracked.anomaly.type} — ${tracked.attempts} failed auto-fix attempts`);
   }
 
   /** Fire a macOS system notification. */
@@ -225,7 +225,7 @@ export class Watchdog {
     try {
       if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
       const header = !existsSync(learningsPath)
-        ? "# Hive Learnings\n\nLessons captured automatically. Every agent in this project reads this file.\n\n"
+        ? "# Loom Learnings\n\nLessons captured automatically. Every agent in this project reads this file.\n\n"
         : "";
       const timestamp = new Date().toISOString().split("T")[0];
       appendFileSync(learningsPath, `${header}- [${timestamp}] ${lesson}\n`);

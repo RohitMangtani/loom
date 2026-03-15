@@ -57,11 +57,11 @@ export class ProcessManager {
     // Register with telemetry
     this.telemetry.registerWorker(id, 0, project, task);
 
-    // Send the initial task with Hive dispatch context
+    // Send the initial task with Loom dispatch context
     if (task) {
       const preamble = [
-        `You are a Hive-managed agent (worker ${id}).`,
-        `You can dispatch work to other agents via the Hive REST API at http://127.0.0.1:3001.`,
+        `You are a Loom-managed agent (worker ${id}).`,
+        `You can dispatch work to other agents via the Loom REST API at http://127.0.0.1:3001.`,
         `Auth: read token from ~/.hive/token. See ~/.claude/CLAUDE.md for full dispatch docs.`,
         `Your task:\n\n${task}`,
       ].join(" ");

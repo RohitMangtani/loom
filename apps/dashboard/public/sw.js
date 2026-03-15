@@ -31,3 +31,46 @@ self.addEventListener("fetch", (e) => {
       .catch(() => caches.match(e.request))
   );
 });
+
+// Web Push notification handler
+self.addEventListener("push", (e) => {
+  if (!e.data) return;
+
+  let payload;
+  try {
+    payload = e.data.json();
+  } catch {
+    payload = { title: "Loom", body: e.data.text() };
+  }
+
+  const options = {
+    body: payload.body || "",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    tag: payload.tag || "hive-notification",
+    data: payload.data || {},
+    // Vibrate pattern: short buzz for task completion
+    vibrate: [100, 50, 100],
+    // Renotify if same tag (new completion for same agent)
+    renotify: true,
+  };
+
+  e.waitUntil(self.registration.showNotification(payload.title || "Loom", options));
+});
+
+// Tap notification → open/focus the dashboard
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      // Focus existing dashboard tab if open
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && "focus" in client) {
+          return client.focus();
+        }
+      }
+      // Otherwise open a new tab
+      return clients.openWindow("/");
+    })
+  );
+});

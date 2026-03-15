@@ -180,7 +180,7 @@ export function registerApiRoutes(
       }
 
       const header = !existsSync(learningFile)
-        ? "# Hive Learnings\n\nLessons captured from past sessions. Every agent in this project reads this file.\n\n"
+        ? "# Loom Learnings\n\nLessons captured from past sessions. Every agent in this project reads this file.\n\n"
         : "";
 
       const timestamp = new Date().toISOString().split("T")[0];
