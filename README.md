@@ -63,8 +63,8 @@ Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-ba
 ## Quick Start
 
 ```bash
-git clone https://github.com/RohitMangtani/hive.git
-cd hive
+git clone https://github.com/RohitMangtani/loom.git
+cd loom
 bash setup.sh
 npx vercel login
 npm run launch
@@ -95,8 +95,8 @@ The daemon auto-discovers any supported CLI in about 3 seconds. Arrange the wind
 ## Setup
 
 ```bash
-git clone https://github.com/RohitMangtani/hive.git
-cd hive
+git clone https://github.com/RohitMangtani/loom.git
+cd loom
 bash setup.sh
 ```
 
