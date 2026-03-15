@@ -1,5 +1,5 @@
 /**
- * Hive Subprocess POC — Proof that Claude Code can be managed via stdin/stdout
+ * Loom Subprocess POC — Proof that Claude Code can be managed via stdin/stdout
  *
  * Run this from a PLAIN terminal (not inside Claude Code):
  *   npx tsx scripts/subprocess-poc.ts
@@ -141,7 +141,7 @@ class SubprocessAgent {
 const project = process.argv[2] || process.env.HOME + "/factory/projects/hive";
 const task = process.argv[3] || "List the top-level files in this project. Just the filenames, nothing else.";
 
-console.log("=== Hive Subprocess POC ===");
+console.log("=== Loom Subprocess POC ===");
 console.log(`Project: ${project}`);
 console.log(`Task: ${task}`);
 

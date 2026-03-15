@@ -1,6 +1,6 @@
-# Hive Dashboard
+# Loom Dashboard
 
-Next.js frontend for the Hive daemon. Shows a 2×2 grid of agent status cards with live chat, messaging, and spawn controls.
+Next.js frontend for the Loom daemon. Shows a 2×2 grid of agent status cards with live chat, messaging, and spawn controls.
 
 ## Running
 
