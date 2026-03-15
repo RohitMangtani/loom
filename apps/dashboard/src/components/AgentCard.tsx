@@ -266,31 +266,63 @@ export function AgentCard({
           title={flagged ? "Unflag" : "Flag for later"}
         />
       )}
-      <div className={`flex items-center gap-2.5 mb-1.5 ${onFlag ? "pr-5" : ""}`}>
-        <span className="text-lg font-bold tabular-nums text-[var(--text)]">{num}</span>
-        <span className="text-[9px] font-mono text-[var(--text-muted)] uppercase tracking-wider">{modelLabel(worker)}</span>
-        <span
-          className={`w-2 h-2 rounded-full shrink-0 ${hasPrompt ? "animate-pulse" : stuck ? "animate-pulse" : ""}`}
-          style={{ background: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
-        />
-        {color === "green" && !hasPrompt && (
-          <span className="shrink-0 opacity-60" title="Active chat">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v7a1 1 0 01-1 1H6l-3 3V11H3a1 1 0 01-1-1V3z" fill="var(--dot-active)" fillOpacity="0.5" stroke="var(--dot-active)" strokeWidth="1" />
-            </svg>
-          </span>
-        )}
-        {(hasPrompt || flagged) && (
-          <span className="text-[10px] font-medium px-1.5 py-px rounded ml-auto" style={hasPrompt ? { background: "rgba(96,165,250,0.12)", color: "#60a5fa" } : { background: "rgba(249,115,22,0.12)", color: FLAG_COLOR }}>
-            {hasPrompt ? "Approval needed" : "Flagged"}
-          </span>
-        )}
-      </div>
+      <div className={`flex items-start gap-3 ${onFlag ? "pr-6" : ""}`}>
+        <div className="card-slot-badge">{num}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="card-model-pill">{modelLabel(worker)}</span>
+            <span className="card-project-pill">{worker.projectName || "Unknown project"}</span>
+            <span
+              className={`card-status-pill ${hasPrompt ? "card-status-prompt" : `card-status-${color}`}`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full shrink-0 ${hasPrompt || stuck ? "animate-pulse" : ""}`}
+                style={{ background: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
+              />
+              {hasPrompt ? "Prompt" : statusWord(worker)}
+            </span>
+            {(hasPrompt || flagged) && (
+              <span className="card-status-pill card-status-flag">
+                {hasPrompt ? "Approval needed" : "Flagged"}
+              </span>
+            )}
+          </div>
 
-      {/* Project name omitted — tiles show only agent + description */}
+          {!hasPrompt && (
+            <div className="mt-3 flex items-start gap-2">
+              <span
+                className={`mt-1.5 h-2.5 w-2.5 rounded-full shrink-0 ${stuck ? "animate-pulse" : ""}`}
+                style={{ background: flagged ? FLAG_COLOR : DOT_BG[color] }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className={`card-primary-copy ${stuck ? "text-[#fde68a]" : ""}`}>
+                  {stuck && worker.stuckMessage
+                    ? worker.stuckMessage.split("\n")[0].slice(0, 120)
+                    : statusLabel(worker)}
+                </p>
+
+                {!stuck && secondary && (
+                  <p className="card-secondary-copy">
+                    {secondary}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-light)]">
+            <span className="card-meta-chip">Slot {num}</span>
+            {worker.tty && <span className="card-meta-chip">{worker.tty}</span>}
+            {worker.managed && <span className="card-meta-chip">managed</span>}
+          </div>
+        </div>
+      </div>
 
       {hasPrompt ? (
         <>
+          <p className="mt-3 text-[12px] leading-snug text-[#bfdbfe]">
+            {worker.promptMessage || "A trust or sandbox approval is waiting on this worker."}
+          </p>
           {onApprovePrompt && (
             <div className="flex items-center gap-1 mt-1.5" onClick={(e) => e.stopPropagation()}>
               <button
@@ -309,18 +341,6 @@ export function AgentCard({
         </>
       ) : (
         <>
-          <p className={`text-[11px] leading-tight ${stuck ? "text-[#fbbf24] font-medium" : "text-[var(--text-muted)] truncate"}`}>
-            {stuck && worker.stuckMessage
-              ? <span className="line-clamp-2">{worker.stuckMessage.split("\n")[0].slice(0, 80)}</span>
-              : statusLabel(worker)}
-          </p>
-
-          {!stuck && secondary && (
-            <p className="text-[10px] leading-tight text-[var(--text-muted)] line-clamp-2 opacity-50 mt-0.5">
-              {secondary}
-            </p>
-          )}
-
           {stuck && (worker.managed || !!worker.tty) && buttons.length > 0 && (
             <div className="flex items-center gap-1 mt-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
               {buttons.map((b) => (

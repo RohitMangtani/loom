@@ -281,7 +281,7 @@ export function ReviewDrawer({
       {/* Backdrop */}
       {open && (
         <div
-          className="fixed inset-0 bg-black/40 z-40 transition-opacity"
+          className="fixed inset-0 bg-[rgba(2,6,23,0.68)] backdrop-blur-sm z-40 transition-opacity"
           onClick={onClose}
         />
       )}
@@ -293,8 +293,9 @@ export function ReviewDrawer({
         style={{
           width: "min(360px, 85vw)",
           transform: open ? `translateX(${drawerOffset}px)` : "translateX(100%)",
-          background: "var(--bg-card)",
+          background: "linear-gradient(180deg, rgba(11,19,37,0.98), rgba(8,12,24,0.98))",
           borderLeft: "1px solid var(--border)",
+          boxShadow: "-24px 0 60px rgba(2, 6, 23, 0.42)",
           transition: drawerSwiping.current ? "none" : undefined,
         }}
         onTouchStart={onDrawerTouchStart}
@@ -302,9 +303,9 @@ export function ReviewDrawer({
         onTouchEnd={onDrawerTouchEnd}
       >
         {/* Header */}
-        <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+        <div className="shrink-0 flex items-center justify-between px-4 py-4 border-b border-[var(--border)]">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-[var(--text)]">Activity</span>
+            <span className="text-sm font-semibold tracking-[0.08em] uppercase text-[var(--text-light)]">Activity</span>
             <span className="text-[10px] text-[var(--text-muted)]">
               {reviews.length > 0 ? `${reviews.length}` : ""}
             </span>

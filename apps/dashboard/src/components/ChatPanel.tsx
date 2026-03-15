@@ -135,23 +135,38 @@ export function ChatPanel({
   }, []);
 
   return (
-      <div className="chat-panel flex-1 min-h-0 flex flex-col border-t border-[var(--border)] bg-[var(--bg-card)]">
+      <div className="chat-panel flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
           ref={headerRef}
-          className="relative flex items-center justify-between px-4 pt-5 pb-4 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing touch-none bg-[var(--bg-card)]/95 backdrop-blur-sm"
+          className="relative flex items-start justify-between gap-3 px-5 pt-6 pb-5 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing touch-none bg-[rgba(8,12,24,0.92)] backdrop-blur-xl"
         >
-          <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-[var(--border-light)]" />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: DOT_BG[color] }} />
-              <span className="font-semibold text-[15px]">{modelLabel(worker)} {num}</span>
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-[rgba(148,163,184,0.35)]" />
+          <div className="min-w-0 flex items-start gap-3">
+            <div className="card-slot-badge shrink-0">{num}</div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="card-model-pill">{modelLabel(worker)}</span>
+                <span className="card-project-pill">{worker.projectName || "Unknown project"}</span>
+                <span className={`card-status-pill card-status-${color}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${stuck ? "animate-pulse" : ""}`} style={{ background: DOT_BG[color] }} />
+                  {stuck ? "Waiting" : worker.status === "working" ? "Active" : "Idle"}
+                </span>
+              </div>
+              <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-light)]">
+                Selected worker relay
+              </p>
+              <p className="mt-1 text-sm text-[var(--text)] leading-snug">
+                {statusLabel(worker)}
+              </p>
+              {previewUrl && (
+                <p className="mt-2 max-w-full truncate text-[10px] font-mono text-[var(--text-light)]">
+                  Preview: {previewUrl}
+                </p>
+              )}
             </div>
-            <p className="text-[11px] text-[var(--text-light)] mt-0.5 ml-[18px]">
-              {statusLabel(worker)}
-            </p>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full text-[var(--text-light)] hover:text-[var(--text)] hover:bg-[var(--bg-panel)] text-lg leading-none transition-colors">&times;</button>
+            <button onClick={onClose} className="loom-icon-btn !h-9 !w-9 text-lg leading-none">&times;</button>
           </div>
         </div>
 
@@ -276,7 +291,7 @@ export function ChatPanel({
         </div>
 
         {canSend && (
-          <div className="border-t border-[var(--border)] px-3 py-2 shrink-0">
+          <div className="border-t border-[var(--border)] bg-[rgba(8,12,24,0.88)] px-4 py-3 shrink-0">
             {stuck && buttons.length > 0 && (
               <div className="flex items-center gap-1.5 mb-2 flex-wrap">
                 <span className="text-[10px] text-[#fbbf24] shrink-0">{worker.currentAction}:</span>
