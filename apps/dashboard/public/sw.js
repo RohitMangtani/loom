@@ -1,4 +1,4 @@
-const CACHE = "hive-v1";
+const CACHE = "loom-v1";
 const SHELL = ["/", "/manifest.json", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -47,7 +47,7 @@ self.addEventListener("push", (e) => {
     body: payload.body || "",
     icon: "/icon-192.png",
     badge: "/icon-192.png",
-    tag: payload.tag || "hive-notification",
+    tag: payload.tag || "loom-notification",
     data: payload.data || {},
     // Vibrate pattern: short buzz for task completion
     vibrate: [100, 50, 100],

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Hive setup — run once after cloning.
+# Loom setup — run once after cloning.
 # Usage: bash setup.sh
 
 set -e
 
 echo ""
-echo "  Setting up Hive..."
+echo "  Setting up Loom..."
 echo ""
 
 # ── Check prerequisites ──────────────────────────────────────────────
@@ -79,10 +79,10 @@ else
   echo "  ✓ ~/send-return already exists"
 fi
 
-# ── Create Hive auth token ───────────────────────────────────────────
+# ── Create Loom auth token ───────────────────────────────────────────
 
 echo ""
-echo "  Preparing Hive auth..."
+echo "  Preparing Loom auth..."
 node <<'NODE'
 const { randomBytes, createHash } = require('crypto');
 const fs = require('fs');
@@ -131,7 +131,7 @@ fi
 
 echo ""
 echo "  ┌─────────────────────────────────────────┐"
-echo "  │  Hive is ready.                         │"
+echo "  │  Loom is ready.                         │"
 echo "  │                                         │"
 echo "  │  Standard hosted path:                  │"
 echo "  │    npx vercel login   (first time only) │"

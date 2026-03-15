@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start Hive with the hosted dashboard path: daemon + tunnel + Vercel deploy.
+# Start Loom with the hosted dashboard path: daemon + tunnel + Vercel deploy.
 
 set -euo pipefail
 
@@ -33,9 +33,9 @@ if ! npx vercel whoami >/dev/null 2>&1; then
 fi
 
 if is_listening "$DAEMON_PORT"; then
-  echo "Hive daemon already running on :$DAEMON_PORT"
+  echo "Loom daemon already running on :$DAEMON_PORT"
 else
-  echo "Starting Hive daemon + tunnel..."
+  echo "Starting Loom daemon + tunnel..."
   npm start &
   STACK_PID=$!
   STARTED_STACK=1
@@ -68,15 +68,15 @@ fi
 
 echo ""
 if [ -n "$DASHBOARD_URL" ]; then
-  echo "Hive dashboard is live: $DASHBOARD_URL"
+  echo "Loom dashboard is live: $DASHBOARD_URL"
   if command -v open >/dev/null 2>&1; then
     open "$DASHBOARD_URL" >/dev/null 2>&1 || true
   fi
 else
-  echo "Hive dashboard deployed. Open the URL printed above."
+  echo "Loom dashboard deployed. Open the URL printed above."
 fi
 echo "Open 1-4 Terminal.app windows, run 'claude' and/or 'codex', and place them in the screen corners."
-echo "Keep this terminal open while Hive runs."
+echo "Keep this terminal open while Loom runs."
 
 if [ "$STARTED_STACK" -eq 1 ]; then
   wait "$STACK_PID"

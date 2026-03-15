@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start Hive daemon + cloudflared quick tunnel for the hosted dashboard.
+# Start Loom daemon + cloudflared quick tunnel for the hosted dashboard.
 
 set -euo pipefail
 
@@ -17,7 +17,7 @@ mkdir -p "$HIVE_DIR"
 rm -f "$TUNNEL_FILE" "$TUNNEL_LOG"
 
 # Start daemon in background
-echo "Starting Hive daemon..."
+echo "Starting Loom daemon..."
 npx tsx apps/daemon/src/index.ts &
 DAEMON_PID=$!
 
@@ -56,7 +56,7 @@ if [ -n "$TUNNEL_URL" ]; then
 fi
 
 echo ""
-echo "Hive is running."
+echo "Loom is running."
 echo "  Daemon PID: $DAEMON_PID"
 echo "  Tunnel PID: $TUNNEL_PID"
 if [ -n "$TUNNEL_URL" ]; then
