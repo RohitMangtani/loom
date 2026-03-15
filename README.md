@@ -48,7 +48,7 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 - **State persistence** — daemon snapshots state every 30 seconds. Restart your computer, reopen terminals, and routing restores after one prompt per terminal.
 - **Review queue** — a slide-out drawer on the dashboard showing recent pushes, deploys, and PRs across all agents. The daemon auto-detects reviewable actions from hook events, and agents can self-report with richer summaries. Tap the three-line icon in the header to see what changed and where.
 - **Prompt approval** — when a freshly spawned agent hits a trust or sandbox prompt, the tile shows the prompt text with an approval button. Tap to approve from the dashboard without switching to the terminal.
-- **Push notifications** — when an agent goes yellow, macOS sends a native notification with the project name and what it needs.
+- **Push notifications** — when an agent goes yellow, macOS sends a native notification. When an agent finishes (green to red), Web Push sends a notification to your phone. Add the dashboard to your Home Screen on iOS or Android and tap the bell icon to subscribe. No third-party apps needed.
 
 ## Prerequisites
 
@@ -237,7 +237,12 @@ When you open 4 terminals within seconds of each other, their session log files 
 On a fresh computer restart, the old marker files are overwritten the moment you type your first prompt in each terminal. The daemon picks up the correct mapping within 3 seconds. This means routing is accurate after one prompt per terminal, which is invisible to you since you would be typing anyway.
 
 ### Push Notifications
-When any agent transitions to stuck (yellow), macOS sends a native notification with the agent name, project, and what it needs. 60-second cooldown per agent prevents spam. Configure at `~/.hive/notifications.json` (enabled, cooldownMs, errorThreshold, sound). Defaults work out of the box.
+Two channels, zero setup:
+
+- **macOS desktop** — when an agent goes stuck (yellow), a native notification fires with the agent name, project, and what it needs. 60-second cooldown per agent.
+- **Web Push (iOS/Android/desktop browser)** — when an agent finishes work (green to red), a push notification is sent to all subscribed devices. 15-second cooldown per agent. The dashboard is a PWA. Add it to your Home Screen, tap the bell icon in the header, and allow notifications. VAPID keys are auto-generated on first daemon start (`~/.hive/vapid.json`). Subscriptions persist across daemon restarts (`~/.hive/push-subs.json`).
+
+Configure at `~/.hive/notifications.json`. Set `pushOnComplete: false` to disable completion notifications. Defaults work out of the box.
 
 ### Watchdog
 Monitors agents for stuck loops (same tool called 6+ times in a row). Detects when agents are spinning on a problem and escalates to the dashboard so you can intervene. Does not send messages to agents automatically.
