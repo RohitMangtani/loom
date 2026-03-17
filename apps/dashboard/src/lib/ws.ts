@@ -21,6 +21,7 @@ export function useHive(daemonUrl: string) {
     { id: "claude", label: "Claude" },
     { id: "codex", label: "Codex" },
     { id: "openclaw", label: "OpenClaw" },
+    { id: "gemini", label: "Gemini" },
   ]);
   const [vapidKey, setVapidKey] = useState<string | null>(null);
 

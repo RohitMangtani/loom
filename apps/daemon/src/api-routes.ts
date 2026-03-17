@@ -330,6 +330,7 @@ export function registerApiRoutes(
       { id: "claude", label: "Claude" },
       { id: "codex", label: "Codex" },
       { id: "openclaw", label: "OpenClaw" },
+      { id: "gemini", label: "Gemini" },
     ];
     const custom = ProcessDiscovery.getCustomAgents().map(a => ({
       id: a.id,

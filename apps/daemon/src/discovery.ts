@@ -86,6 +86,7 @@ export class ProcessDiscovery {
   private codexSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
   // OpenClaw session file cache — same semantics as Codex cache.
   private openclawSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
+  private geminiSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
   // Generic session file cache for custom agents — keyed by "model:pid".
   private customSessionCache = new Map<string, { file: string | null; checkedAt: number }>();
 
@@ -362,8 +363,11 @@ end tell
           if (!sessionFile && proc.model === "openclaw") {
             sessionFile = this.findOpenClawSessionFile(proc.pid, proc.startedAt);
           }
+          if (!sessionFile && proc.model === "gemini") {
+            sessionFile = this.findGeminiSessionFile(proc.pid, proc.startedAt);
+          }
           // Custom agents with a sessionDir config
-          if (!sessionFile && proc.model && proc.model !== "claude" && proc.model !== "codex" && proc.model !== "openclaw") {
+          if (!sessionFile && proc.model && proc.model !== "claude" && proc.model !== "codex" && proc.model !== "openclaw" && proc.model !== "gemini") {
             sessionFile = this.findCustomSessionFile(proc.model, proc.pid, proc.startedAt);
           }
 
@@ -715,7 +719,9 @@ end tell
           ? this.findOpenClawSessionFile(existing.pid, existing.startedAt)
           : existing.model === "codex"
             ? this.findCodexSessionFile(existing.pid, existing.startedAt)
-            : this.findCustomSessionFile(existing.model, existing.pid, existing.startedAt);
+            : existing.model === "gemini"
+              ? this.findGeminiSessionFile(existing.pid, existing.startedAt)
+              : this.findCustomSessionFile(existing.model, existing.pid, existing.startedAt);
         if (codexFile) {
           this.streamer.setSessionFile(id, codexFile);
           // Fall through to normal JSONL analysis with the found file
@@ -1190,6 +1196,60 @@ end tell
   }
 
   /**
+   * Find Gemini CLI session files. Gemini CLI currently does not persist JSONL
+   * session logs, so this will return null. When Google adds session persistence,
+   * files are expected under ~/.gemini/ — the scanner is ready.
+   */
+  private findGeminiSessionFile(pid: number, startedAt: number): string | null {
+    const cached = this.geminiSessionCache.get(pid);
+    if (cached) {
+      if (cached.file) return cached.file;
+      if (Date.now() - cached.checkedAt < 30_000) return null;
+    }
+
+    const geminiDir = join(HOME, ".gemini");
+    try {
+      let bestFile: string | null = null;
+      let bestMtime = 0;
+      let bestBirthtimeDiff = Infinity;
+
+      // Scan up to 3 levels deep for .jsonl files under ~/.gemini/
+      const scanDir = (dir: string, depth: number) => {
+        if (depth > 3) return;
+        try {
+          for (const entry of readdirSync(dir)) {
+            const fullPath = join(dir, entry);
+            try {
+              const stat = statSync(fullPath);
+              if (stat.isDirectory()) {
+                scanDir(fullPath, depth + 1);
+              } else if (entry.endsWith(".jsonl")) {
+                const birthtimeDiff = Math.abs(stat.birthtimeMs - startedAt);
+                if (birthtimeDiff < 120_000 && birthtimeDiff < bestBirthtimeDiff) {
+                  bestBirthtimeDiff = birthtimeDiff;
+                  bestFile = fullPath;
+                  bestMtime = stat.mtimeMs;
+                }
+                if (!bestFile && stat.mtimeMs > bestMtime) {
+                  bestMtime = stat.mtimeMs;
+                  bestFile = fullPath;
+                }
+              }
+            } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+      };
+
+      scanDir(geminiDir, 0);
+      this.geminiSessionCache.set(pid, { file: bestFile, checkedAt: Date.now() });
+      return bestFile;
+    } catch {
+      this.geminiSessionCache.set(pid, { file: null, checkedAt: Date.now() });
+      return null;
+    }
+  }
+
+  /**
    * Find session file for a custom agent defined in ~/.hive/agents.json.
    * Scans the configured sessionDir for the most recently modified JSONL.
    */
@@ -1245,6 +1305,7 @@ end tell
     { regex: /claude\s*$/, model: "claude" },
     { regex: /\/codex(?:\s+(?!app-server)|$)/, model: "codex" },
     { regex: /openclaw(?:\s+tui)?(?:\s|$)/, model: "openclaw" },
+    { regex: /\/gemini(?:\s|$)/, model: "gemini" },
   ];
 
   /** Combined built-in + custom patterns. Reloads custom agents on each call. */
@@ -1273,7 +1334,7 @@ end tell
         if (trimmed.includes("grep")) continue;
         // Skip Node.js wrapper processes (e.g. "node /opt/homebrew/bin/codex")
         // that share a TTY with the actual agent binary.
-        if (/\bnode\s+/.test(trimmed) && !trimmed.endsWith("claude")) continue;
+        if (/\bnode\s+/.test(trimmed) && !trimmed.endsWith("claude") && !/\/gemini(?:\s|$)/.test(trimmed)) continue;
 
         // Match against all known agent patterns
         const matched = ProcessDiscovery.AGENT_PATTERNS.find(p => p.regex.test(trimmed));
@@ -1380,6 +1441,10 @@ end tell
         const codexJsonlMatch = lines[i].match(/^n(.*\.codex\/sessions\/.*\.jsonl)$/);
         if (codexJsonlMatch && !jsonlFile) {
           jsonlFile = codexJsonlMatch[1];
+        }
+        const geminiJsonlMatch = lines[i].match(/^n(.*\.gemini\/.*\.jsonl)$/);
+        if (geminiJsonlMatch && !jsonlFile) {
+          jsonlFile = geminiJsonlMatch[1];
         }
       }
 

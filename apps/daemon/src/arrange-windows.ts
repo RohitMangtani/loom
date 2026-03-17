@@ -369,6 +369,7 @@ end tell
  * - claude: types `claude` then sends keystroke "1" (to select option 1 from the menu)
  * - codex: types `codex`
  * - openclaw: types `openclaw tui`
+ * - gemini: types `gemini`
  * - custom agents: uses spawnCommand from ~/.hive/agents.json
  */
 export function spawnTerminalWindow(
@@ -383,6 +384,7 @@ export function spawnTerminalWindow(
   if (model === "claude") cliCmd = "claude";
   else if (model === "codex") cliCmd = "codex";
   else if (model === "openclaw") cliCmd = "openclaw tui";
+  else if (model === "gemini") cliCmd = "gemini";
   else {
     const custom = ProcessDiscovery.getCustomAgent(model);
     cliCmd = custom?.spawnCommand || model;
