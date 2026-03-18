@@ -1332,8 +1332,10 @@ end tell
               if (stat.isDirectory()) {
                 scanDir(fullPath, depth + 1);
               } else if (entry.startsWith("session-") && entry.endsWith(".json")) {
-                const birthtimeDiff = Math.abs(stat.birthtimeMs - startedAt);
-                if (birthtimeDiff < 120_000 && birthtimeDiff < birthtimeBest) {
+                // File must be born AFTER the process started (not before).
+                // Prevents picking old session files from killed instances.
+                const birthtimeDiff = stat.birthtimeMs - startedAt;
+                if (birthtimeDiff >= 0 && birthtimeDiff < 120_000 && birthtimeDiff < birthtimeBest) {
                   birthtimeBest = birthtimeDiff;
                   birthtimeMatch = fullPath;
                 }
