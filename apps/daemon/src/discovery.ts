@@ -1017,48 +1017,40 @@ end tell
         }
       }
 
-      // Input-sent guard: keep working if we just sent a message
-      const lastInput = this.telemetry.getLastInputSent(id);
-      if (lastInput > 0 && Date.now() - lastInput < 15_000) {
-        this.checkTransition(id, tty, "working", "gemini: input-sent guard", ctx);
-        existing.currentAction = "Thinking...";
+      // Agent response at tail + stale file → idle (red)
+      // Check this FIRST — if the response is done, nothing else matters.
+      if (lastType === "gemini" && fileAgeMs > 3_000) {
+        existing.status = "idle";
+        existing.currentAction = null;
         existing.lastActionAt = Date.now();
-        return;
-      }
-
-      // User message at tail + recent file → agent is processing (green)
-      if (lastType === "user" && fileAgeMs < 30_000) {
-        this.checkTransition(id, tty, "working", "gemini: user at tail, file fresh", ctx);
-        existing.currentAction = "Thinking...";
-        existing.lastActionAt = Date.now();
-        this.lastConfirmedWorking.set(id, Date.now());
+        this.telemetry.setIdleConfirmed(id, true);
+        this.checkTransition(id, tty, "idle", "gemini: response at tail, file stale", ctx);
         return;
       }
 
       // Agent response at tail + very fresh file → mid-stream (green)
-      if (lastType === "gemini" && fileAgeMs < 4_000) {
+      if (lastType === "gemini" && fileAgeMs <= 3_000) {
         this.checkTransition(id, tty, "working", "gemini: response mid-stream", ctx);
         existing.currentAction = "Thinking...";
         existing.lastActionAt = Date.now();
         return;
       }
 
-      // Cooldown: if recently confirmed working, stay green
-      const lastWorking = this.lastConfirmedWorking.get(id) || 0;
-      if (Date.now() - lastWorking < 25_000) {
-        this.checkTransition(id, tty, "working", `gemini: cooldown (${Math.round((Date.now() - lastWorking) / 1000)}s)`, ctx);
+      // User message at tail → agent is processing (green)
+      if (lastType === "user") {
+        this.checkTransition(id, tty, "working", "gemini: user at tail", ctx);
         existing.currentAction = "Thinking...";
         existing.lastActionAt = Date.now();
         return;
       }
 
-      // Agent response at tail + stale file → idle (red)
-      if (lastType === "gemini" && fileAgeMs > 4_000) {
-        existing.status = "idle";
-        existing.currentAction = null;
+      // Input-sent guard: only if session file hasn't updated yet (gap between
+      // TTY send and Gemini writing the session file, typically <2s)
+      const lastInput = this.telemetry.getLastInputSent(id);
+      if (lastInput > 0 && Date.now() - lastInput < 5_000) {
+        this.checkTransition(id, tty, "working", "gemini: input-sent guard", ctx);
+        existing.currentAction = "Thinking...";
         existing.lastActionAt = Date.now();
-        this.telemetry.setIdleConfirmed(id, true);
-        this.checkTransition(id, tty, "idle", "gemini: response at tail, file stale", ctx);
         return;
       }
 
