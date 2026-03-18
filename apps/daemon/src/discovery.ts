@@ -510,7 +510,12 @@ end tell
             action: existing.currentAction,
           };
 
-          if (hookAge < 5_000) {
+          // Non-Claude models don't fire hooks. Any "fresh" hooks on their worker
+          // are cross-contaminated from another Claude session. Skip hook-trusted
+          // paths entirely and go straight to session/CPU analysis.
+          const hasNativeHooks = !existing.model || existing.model === "claude";
+
+          if (hasNativeHooks && hookAge < 5_000) {
             // Hooks are live (<5s) — trust hook-set status, but apply hysteresis
             // for working→idle transitions to prevent flapping (58 transitions/15min).
             if (existing.status === "working") {
@@ -535,7 +540,7 @@ end tell
               // stuck, waiting — pass through
               this.checkTransition(id, tty, existing.status, `hooks fresh (${Math.round(hookAge)}ms)`, auditCtx);
             }
-          } else if (hookAge < 15_000) {
+          } else if (hasNativeHooks && hookAge < 15_000) {
             // Hooks recent (<15s) — trust hook state for stuck/toolInFlight
             if (existing.status === "stuck") {
               this.checkTransition(id, tty, "stuck", "hook-trusted stuck", auditCtx);
@@ -547,7 +552,7 @@ end tell
               this.runJsonlAnalysis(id, existing, tty, cachedPath, cachedMtime, hookAge, auditCtx);
             }
           } else {
-            // Hooks stale (>15s) — check for long-running tools before JSONL analysis.
+            // Hooks stale (>15s) or non-hook model — session/CPU analysis is the authority.
             // The Agent tool spawns a subagent that runs for minutes. During this time,
             // the parent process goes completely silent (no hooks, no JSONL writes).
             // toolInFlight persists from the PreToolUse hook — trust it up to 10 minutes.
