@@ -827,7 +827,7 @@ export class TelemetryReceiver {
   private lastPositionDetect = 0;
   // Cache: context summaries per worker, invalidated when worker state changes
   private contextCache = new Map<string, { fingerprint: string; context: WorkerContextSnapshot }>();
-  private static POSITION_DETECT_INTERVAL = 10_000; // 10s throttle
+  private static POSITION_DETECT_INTERVAL = 3_000; // 3s — match tick loop for fast snap-back
 
   writeWorkersFile(): void {
     const workers = this.getAll().sort((a, b) => a.startedAt - b.startedAt);
@@ -837,7 +837,7 @@ export class TelemetryReceiver {
       if (!this.workers.has(id)) this.quadrantAssignments.delete(id);
     }
 
-    // Fire off async position detection (throttled to every 10s).
+    // Fire off async position detection (throttled to every 3s).
     // Results apply on the NEXT writeWorkersFile() cycle via callback.
     const now = Date.now();
     const workersWithTty = workers.filter(w => w.tty);
@@ -849,7 +849,7 @@ export class TelemetryReceiver {
 
       detectQuadrantsFromWindowPositions(
         workerSnapshot.map(w => w.tty),
-        (positionMap) => {
+        (positionMap, rawSlots) => {
           if (positionMap.size === 0) return;
 
           // Sticky assignments: existing workers keep their slots.
@@ -868,13 +868,17 @@ export class TelemetryReceiver {
             }
           }
 
-          // Snap-back: detect if any window has drifted from its assigned slot.
-          // If so, reset the arrangement cache and force windows back into position.
+          // Snap-back: use rawSlots (natural position without collision resolution)
+          // to detect drift. The collision-resolved positionMap can mask drift when
+          // a dragged window overlaps another — the free-slot fallback happens to
+          // match the original assignment, hiding the actual position mismatch.
+          const driftMap = rawSlots || positionMap;
           let drifted = false;
           for (const w of workerSnapshot) {
             const assignedQ = this.quadrantAssignments.get(w.id);
-            const detectedQ = positionMap.get(w.tty);
+            const detectedQ = driftMap.get(w.tty);
             if (assignedQ && detectedQ && assignedQ !== detectedQ) {
+              console.log(`[snap-back] Drift: ${w.tty} assigned=Q${assignedQ} actual=Q${detectedQ}`);
               drifted = true;
               break;
             }

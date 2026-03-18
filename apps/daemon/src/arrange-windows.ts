@@ -68,7 +68,7 @@ let detectInFlight = false;
  */
 export function detectQuadrantsFromWindowPositions(
   ttys: string[],
-  callback: (result: Map<string, number>) => void,
+  callback: (result: Map<string, number>, rawSlots?: Map<string, number>) => void,
 ): void {
   if (ttys.length === 0) return;
   if (detectInFlight) return;
@@ -145,6 +145,7 @@ return "SCREEN:" & midX & "," & midY & linefeed & output
     }
 
     const result = new Map<string, number>();
+    const rawSlots = new Map<string, number>(); // natural slot per tty, no collision resolution
     const usedSlots = new Set<number>();
 
     // Use the formation matching the number of detected agents
@@ -162,6 +163,9 @@ return "SCREEN:" & midX & "," & midY & linefeed & output
       }
       if (!q) q = 1; // fallback
 
+      // Store the natural (pre-collision) slot for drift detection
+      rawSlots.set(pos.tty, q);
+
       if (usedSlots.has(q)) {
         const allSlots = Object.keys(formation.positions).map(Number);
         const free = allSlots.filter(n => !usedSlots.has(n));
@@ -172,7 +176,7 @@ return "SCREEN:" & midX & "," & midY & linefeed & output
       usedSlots.add(q);
     }
 
-    callback(result);
+    callback(result, rawSlots);
   });
 }
 
