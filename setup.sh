@@ -39,12 +39,12 @@ if command -v openclaw &>/dev/null; then
 fi
 
 if [ "$HAS_CLAUDE" -eq 0 ] && [ "$HAS_CODEX" -eq 0 ] && [ "$HAS_OPENCLAW" -eq 0 ]; then
-  echo "  ✗ No supported CLI found."
-  echo "    Install at least one:"
+  echo "  • No AI CLI found yet. Install at least one before using Hive:"
   echo "      Claude Code: npm install -g @anthropic-ai/claude-code"
   echo "      Codex:       npm install -g @openai/codex"
   echo "      OpenClaw:    npm install -g openclaw"
-  exit 1
+  echo ""
+  echo "    Setup will continue — you can install a CLI after."
 fi
 
 if [ "$HAS_CLAUDE" -eq 1 ]; then
@@ -59,11 +59,14 @@ if [ "$HAS_OPENCLAW" -eq 1 ]; then
   echo "  ✓ OpenClaw"
 fi
 
-if ! command -v swiftc &>/dev/null; then
-  echo "  ✗ swiftc not found. Install Xcode Command Line Tools: xcode-select --install"
-  exit 1
+if command -v swiftc &>/dev/null; then
+  echo "  ✓ Swift compiler"
+  HAS_SWIFT=1
+else
+  echo "  • swiftc not found — auto-pilot (auto-approve prompts) will be disabled"
+  echo "    To enable later: xcode-select --install && bash setup.sh"
+  HAS_SWIFT=0
 fi
-echo "  ✓ Swift compiler"
 
 # ── Install dependencies ─────────────────────────────────────────────
 
@@ -72,21 +75,23 @@ echo "  Installing dependencies..."
 npm install --silent 2>&1 | tail -1
 echo "  ✓ Dependencies installed"
 
-# ── Compile send-return binary (auto-pilot needs this) ───────────────
+# ── Compile send-return binary (auto-pilot needs this — optional) ────
 
-if [ ! -f "$HOME/send-return" ]; then
-  echo ""
-  echo "  Compiling send-return binary..."
-  swiftc -o "$HOME/send-return" tools/send-return.swift
-  chmod +x "$HOME/send-return"
-  echo "  ✓ ~/send-return compiled"
-  echo ""
-  echo "  ⚠  Grant Accessibility permission to ~/send-return"
-  echo "     System Settings → Privacy & Security → Accessibility"
-  echo "     Drag ~/send-return into the list and enable it."
-  echo ""
-else
-  echo "  ✓ ~/send-return already exists"
+if [ "$HAS_SWIFT" -eq 1 ]; then
+  if [ ! -f "$HOME/send-return" ]; then
+    echo ""
+    echo "  Compiling send-return binary..."
+    swiftc -o "$HOME/send-return" tools/send-return.swift
+    chmod +x "$HOME/send-return"
+    echo "  ✓ ~/send-return compiled"
+    echo ""
+    echo "  ⚠  Grant Accessibility permission to ~/send-return"
+    echo "     System Settings → Privacy & Security → Accessibility"
+    echo "     Drag ~/send-return into the list and enable it."
+    echo ""
+  else
+    echo "  ✓ ~/send-return already exists"
+  fi
 fi
 
 # ── Create Hive auth token ───────────────────────────────────────────
@@ -139,19 +144,21 @@ fi
 
 # ── Done ─────────────────────────────────────────────────────────────
 
+TOKEN="$(cat "$HOME/.hive/token" 2>/dev/null || echo '(not found)')"
+
 echo ""
-echo "  ┌──────────────────────────────────────────────┐"
-echo "  │  Hive is ready.                              │"
-echo "  │                                              │"
-echo "  │  Standard hosted path:                       │"
-echo "  │    npx vercel login   (first time only)      │"
-echo "  │    npm run launch                            │"
-echo "  │                                              │"
-echo "  │  Local-only fallback:                        │"
-echo "  │    npm run launch:local                      │"
-echo "  │                                              │"
-echo "  │  Then open 1-8 Terminal windows and run      │"
-echo "  │  'claude', 'codex', or 'openclaw tui'.       │"
-echo "  │  The daemon auto-discovers them in ~3s.      │"
-echo "  └──────────────────────────────────────────────┘"
+echo "  ────────────────────────────────────────────────"
+echo ""
+echo "  Hive is ready."
+echo ""
+echo "  Your token:"
+echo "  $TOKEN"
+echo ""
+echo "  Next:  npm run launch"
+echo ""
+echo "  Then open Terminal windows and run"
+echo "  'claude', 'codex', or 'openclaw tui'."
+echo "  The daemon auto-discovers them in ~3s."
+echo ""
+echo "  ────────────────────────────────────────────────"
 echo ""

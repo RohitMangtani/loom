@@ -26,9 +26,16 @@ trap cleanup INT TERM EXIT
 
 cd "$ROOT"
 
+# Auto-run setup if not done yet
+if [ ! -f "$HOME/.hive/token" ]; then
+  echo "First run detected — running setup..."
+  bash "$ROOT/setup.sh"
+fi
+
 if ! npx vercel whoami >/dev/null 2>&1; then
   echo "Vercel login required for the hosted launch path."
   echo "Run: npx vercel login"
+  echo "Or use: npm run launch:local (no Vercel needed)"
   exit 1
 fi
 

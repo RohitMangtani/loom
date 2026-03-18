@@ -30,6 +30,12 @@ trap cleanup INT TERM EXIT
 
 cd "$ROOT"
 
+# Auto-run setup if not done yet
+if [ ! -f "$HOME/.hive/token" ]; then
+  echo "First run detected — running setup..."
+  bash "$ROOT/setup.sh"
+fi
+
 if is_listening "$DAEMON_PORT"; then
   echo "Hive daemon already running on :$DAEMON_PORT"
 else

@@ -54,8 +54,17 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 
 - **macOS** (uses AppleScript + CGEvent for terminal interaction)
 - **Node.js 20+** — [nodejs.org](https://nodejs.org)
-- **Xcode Command Line Tools** — provides `swiftc` for the `send-return` helper (`xcode-select --install`)
-- **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`) and/or OpenClaw (`npm install -g openclaw`) - **Hosted dashboard extras** (required for the standard `npm run launch` path) — Homebrew for `cloudflared`, `python3`, and a Vercel account (`npx vercel login`). If you only want localhost, use `npm run launch:local` instead.
+
+That's it. Everything else is optional and the setup script handles it gracefully:
+
+| Optional | What it enables | How to get it |
+|----------|----------------|---------------|
+| At least one AI CLI | Agents to manage | `npm install -g @anthropic-ai/claude-code` or `@openai/codex` or `openclaw` |
+| Xcode Command Line Tools | Auto-pilot (auto-approve prompts) | `xcode-select --install` |
+| Cloudflare tunnel | Phone/remote access | `brew install cloudflared` (auto-installed by `npm start`) |
+| Vercel account | Hosted dashboard | `npx vercel login` |
+
+Without an AI CLI, setup still completes — install one later and agents auto-appear. Without `swiftc`, everything works except auto-pilot. Without Vercel/cloudflared, use `npm run launch:local` for localhost-only.
 
 Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection. Any other terminal agent can be added via a config file (see [Custom Agents](#custom-agents)).
 
@@ -64,59 +73,50 @@ Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-ba
 ```bash
 git clone https://github.com/RohitMangtani/hive.git
 cd hive
-bash setup.sh
-npx vercel login
-npm run launch
+npm run launch:local
 ```
 
-`npm run launch` is the standard path. It starts the local daemon, opens a Cloudflare quick tunnel for the WebSocket server, deploys or updates your own free Vercel dashboard, opens that hosted URL, and leaves the local daemon and tunnel running in one terminal.
+That's three commands. Setup runs automatically on first launch — installs dependencies, generates your auth token, configures hooks. Your token is printed at the end and saved to `~/.hive/token`.
 
-Then open `Terminal.app` windows (up to 8) and run whichever supported CLI you installed:
+The dashboard opens at `http://localhost:3000`. Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
 
-```bash
-claude
-```
-
-or
+**Want remote/phone access?** Use the hosted path instead:
 
 ```bash
-codex
-```
-
-or
-
-```bash
-openclaw tui
+npx vercel login   # one-time
+npm run launch     # starts daemon + tunnel + deploys dashboard to Vercel
 ```
 
 The daemon auto-discovers any supported CLI in about 3 seconds. Arrange the windows in the screen corners and the dashboard mirrors that layout automatically.
 
 ## Setup
 
+Setup runs automatically when you launch Hive for the first time. You can also run it manually:
+
 ```bash
-git clone https://github.com/RohitMangtani/hive.git
-cd hive
 bash setup.sh
 ```
 
-The setup script does 6 things:
-1. Checks Node.js 20+, `swiftc`, and at least one supported CLI
-2. Installs all npm dependencies (monorepo workspaces)
-3. Generates `~/.hive/token` and `~/.hive/viewer-token`
-4. Compiles the `send-return` Swift binary for auto-pilot keystroke injection
-5. Installs or updates Claude Code hooks if Claude is present
-6. Creates `.env` from the template
+The setup script:
+1. Checks Node.js 20+ (required)
+2. Detects installed AI CLIs (warns if none found, does not block)
+3. Installs all npm dependencies (monorepo workspaces)
+4. Generates `~/.hive/token` and `~/.hive/viewer-token`
+5. Compiles the `send-return` Swift binary for auto-pilot (skipped if `swiftc` not available)
+6. Installs or updates Claude Code hooks if Claude is present
+7. Creates `.env` from the template
+8. Prints your auth token
 
-### Accessibility Permission (required)
+### Accessibility Permission (optional — for auto-pilot)
 
-After setup, you must grant Accessibility permission to `~/send-return`. This binary sends Return keystrokes to auto-approve agent prompts.
+If `swiftc` was available and `~/send-return` was compiled, grant it Accessibility permission so auto-pilot can auto-approve agent prompts:
 
 1. Open **System Settings → Privacy & Security → Accessibility**
 2. Click the **+** button
 3. Press **Cmd+Shift+G**, type `~/send-return`, and select it
 4. Toggle it **on**
 
-Without this, auto-pilot will not work and agents will stall waiting for permission approvals.
+Without this, agents will pause on permission prompts until you approve manually. Everything else works fine.
 
 ## Running
 
