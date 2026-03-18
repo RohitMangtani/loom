@@ -868,6 +868,22 @@ export class TelemetryReceiver {
             }
           }
 
+          // Snap-back: detect if any window has drifted from its assigned slot.
+          // If so, reset the arrangement cache and force windows back into position.
+          let drifted = false;
+          for (const w of workerSnapshot) {
+            const assignedQ = this.quadrantAssignments.get(w.id);
+            const detectedQ = positionMap.get(w.tty);
+            if (assignedQ && detectedQ && assignedQ !== detectedQ) {
+              drifted = true;
+              break;
+            }
+          }
+          if (drifted) {
+            resetArrangementCache();
+            this.forceRearrange();
+          }
+
           if (changed) {
             this.writeWorkersFile();
           }
