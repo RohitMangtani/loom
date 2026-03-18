@@ -1301,17 +1301,13 @@ end tell
   private findGeminiSessionFile(pid: number, startedAt: number): string | null {
     const cached = this.geminiSessionCache.get(pid);
     if (cached) {
-      // Return cached file if it still exists on disk. Unlike Claude (where
-      // context compaction creates new files), Gemini's session file is stable
-      // for the entire session — it never changes path, only content.
-      if (cached.file) {
-        try {
-          statSync(cached.file); // Just check existence
-          return cached.file;
-        } catch { /* file gone, re-scan */ }
-      } else {
-        if (Date.now() - cached.checkedAt < 30_000) return null;
-      }
+      // Once a Gemini session file is found, keep it permanently for this PID.
+      // Gemini rewrites the file atomically (delete + create), which gives the
+      // replacement a new birthtime. Re-scanning after that would fail the
+      // birthtime check and lose the mapping. The file path stays the same
+      // even through atomic rewrites.
+      if (cached.file) return cached.file;
+      if (Date.now() - cached.checkedAt < 30_000) return null;
     }
 
     const geminiDir = join(HOME, ".gemini");
