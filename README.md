@@ -68,26 +68,31 @@ Without an AI CLI, setup still completes — install one later and agents auto-a
 
 Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection. Any other terminal agent can be added via a config file (see [Custom Agents](#custom-agents)).
 
-## Quick Start
+## Install
+
+Paste this into Claude Code, Codex, or any AI coding agent:
+
+> Clone https://github.com/RohitMangtani/hive and run `npm run launch:local` from inside the cloned directory.
+
+The agent handles everything: clones the repo, runs setup automatically on first launch, installs dependencies, generates your auth token, and starts the dashboard. Your token is printed at the end and saved to `~/.hive/token`.
+
+If `swiftc` is available (Xcode Command Line Tools), the agent compiles the auto-pilot binary and opens System Settings + Finder for you. Drag `send-return` into the Accessibility list and toggle it on. Skip this if you don't need auto-approve.
+
+Once the dashboard is running at `http://localhost:3000`, open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
+
+**Want remote/phone access?** Tell the agent:
+
+> Run `npx vercel login` then `npm run launch` in the hive directory.
+
+This starts the daemon, opens a Cloudflare tunnel, and deploys the dashboard to your own free Vercel URL.
+
+### Manual install
 
 ```bash
 git clone https://github.com/RohitMangtani/hive.git
 cd hive
 npm run launch:local
 ```
-
-That's three commands. Setup runs automatically on first launch — installs dependencies, generates your auth token, configures hooks. Your token is printed at the end and saved to `~/.hive/token`.
-
-The dashboard opens at `http://localhost:3000`. Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
-
-**Want remote/phone access?** Use the hosted path instead:
-
-```bash
-npx vercel login   # one-time
-npm run launch     # starts daemon + tunnel + deploys dashboard to Vercel
-```
-
-The daemon auto-discovers any supported CLI in about 3 seconds. Arrange the windows in the screen corners and the dashboard mirrors that layout automatically.
 
 ## Setup
 
