@@ -2107,6 +2107,10 @@ export class TelemetryReceiver {
     const worker = this.workers.get(event.worker_id);
     if (!worker) return;
 
+    // Only Claude fires telemetry events. Cross-contaminated events from
+    // other sessions must not change non-Claude worker status.
+    if (worker.model && worker.model !== "claude") return;
+
     const now = event.timestamp || Date.now();
     worker.lastActionAt = now;
 

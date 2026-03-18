@@ -1054,9 +1054,11 @@ end tell
 
       // Agent response at tail + stale file → idle (red)
       if (lastType === "gemini" && fileAgeMs > 4_000) {
-        this.checkTransition(id, tty, "idle", "gemini: response at tail, file stale", ctx);
+        existing.status = "idle";
         existing.currentAction = null;
-        existing.lastActionAt = Date.now(); // Prevent telemetry.tick() from overriding
+        existing.lastActionAt = Date.now();
+        this.telemetry.setIdleConfirmed(id, true);
+        this.checkTransition(id, tty, "idle", "gemini: response at tail, file stale", ctx);
         return;
       }
 
