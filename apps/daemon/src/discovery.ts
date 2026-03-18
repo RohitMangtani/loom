@@ -371,31 +371,30 @@ end tell
             sessionFile = this.findCustomSessionFile(proc.model, proc.pid, proc.startedAt);
           }
 
-          if (!sessionFile && proc.sessionIds.length > 0) {
-            sessionFile = this.streamer.findSessionFile(proc.sessionIds);
-            if (!sessionFile) {
-              const jsonl = this.findBestJsonlFile(proc.sessionIds);
-              if (jsonl) sessionFile = jsonl.path;
+          // Claude-specific heuristics: session ID match and birthtime fallback.
+          // Skip for non-Claude models — these search .claude/projects/ and can
+          // grab stale Claude JSONL files, cross-contaminating the session mapping.
+          if (!sessionFile && (!proc.model || proc.model === "claude")) {
+            if (proc.sessionIds.length > 0) {
+              sessionFile = this.streamer.findSessionFile(proc.sessionIds);
+              if (!sessionFile) {
+                const jsonl = this.findBestJsonlFile(proc.sessionIds);
+                if (jsonl) sessionFile = jsonl.path;
+              }
             }
-          }
-          // Fallback: match JSONL by creation time closest to process start.
-          // Each Claude session creates a fresh JSONL, so birthtime ≈ startedAt.
-          // Deduplication via claimedFiles prevents collision when all workers
-          // start within seconds (birthtimes cluster within 1-2s).
-          if (!sessionFile) {
-            sessionFile = this.findSessionFileByStartTime(proc.cwd, proc.startedAt, claimedFiles);
+            // Fallback: match JSONL by creation time closest to process start.
+            if (!sessionFile) {
+              sessionFile = this.findSessionFileByStartTime(proc.cwd, proc.startedAt, claimedFiles);
+            }
           }
         }
 
         // Stale-file recovery: when context compaction creates a new session,
         // the old JSONL stops being written to. If the cached file is stale
         // (>2min), search for a successor JSONL in the same directory.
-        // DO NOT reduce below 120s — long subagent chains (Task tool) cause
-        // 30-90s gaps in JSONL writes. At 30s, stale-file recovery triggers
-        // mid-task and grabs ANOTHER worker's file (cross-contamination)
-        // when multiple workers share the same project directory.
+        // Only for Claude — non-Claude models have their own session file finders.
         const effectiveFile = sessionFile || this.streamer.getSessionFile(id);
-        if (effectiveFile) {
+        if (effectiveFile && (!proc.model || proc.model === "claude")) {
           try {
             const age = Date.now() - statSync(effectiveFile).mtimeMs;
             if (age > 120_000) {
