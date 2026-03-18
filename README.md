@@ -72,7 +72,7 @@ Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-ba
 
 Paste this into Claude Code or Codex:
 
-> I want to install Hive from https://github.com/RohitMangtani/hive — clone it, run setup, log into Vercel with `npx vercel login`, and then run `npm run launch` so I get a live dashboard URL I can open on my phone. Walk me through anything that needs my approval.
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive, cd into it, and run `bash setup.sh`. After setup finishes, I need to log into Vercel — run `npx vercel login` and it will open my browser to authenticate (don't pass --non-interactive, it needs the browser). Once I'm logged in, run `npm run launch` from the hive directory. That will start the daemon, deploy the dashboard to Vercel, and print a URL. Give me that URL and the token from `~/.hive/token` when it's done.
 
 **What you need beforehand:**
 - macOS with Node.js 20+ installed
