@@ -3,7 +3,7 @@ import { basename, join } from "path";
 import type { ChatEntry } from "./types.js";
 import { describeAction, describeBashCommand, truncate } from "./utils.js";
 
-const MAX_HISTORY = 200;
+const MAX_USER_MESSAGES = 50;
 const POLL_INTERVAL = 500; // fallback poll if fs.watch misses events
 const NUDGE_INTERVALS = [200, 500, 1_000, 2_000, 4_000]; // rapid polls after message send
 
@@ -145,30 +145,33 @@ export class SessionStreamer {
 
   /**
    * Read recent chat history from a session file.
+   * Returns coherent conversation: user messages + agent responses only,
+   * limited to the last MAX_USER_MESSAGES user messages.
    */
   readHistory(workerId: string): ChatEntry[] {
     const filePath = this.sessionFiles.get(workerId);
     if (!filePath) return [];
 
     try {
+      let entries: ChatEntry[];
+
       // Gemini JSON format: single JSON object with messages array
       if (filePath.endsWith(".json")) {
-        return parseGeminiSession(filePath).slice(-MAX_HISTORY);
+        entries = parseGeminiSession(filePath);
+      } else {
+        // Claude/Codex JSONL format: one JSON object per line
+        const buf = readFileSync(filePath);
+        const content = buf.toString("utf-8");
+        const lines = content.split("\n").filter(Boolean);
+
+        entries = [];
+        for (const line of lines) {
+          const parsed = parseLine(line);
+          if (parsed) entries.push(...parsed);
+        }
       }
 
-      // Claude/Codex JSONL format: one JSON object per line
-      const buf = readFileSync(filePath);
-      const content = buf.toString("utf-8");
-      const lines = content.split("\n").filter(Boolean);
-
-      const entries: ChatEntry[] = [];
-      for (const line of lines) {
-        const parsed = parseLine(line);
-        if (parsed) entries.push(...parsed);
-      }
-
-      // Return last MAX_HISTORY entries
-      return entries.slice(-MAX_HISTORY);
+      return filterCoherent(entries);
     } catch {
       return [];
     }
@@ -285,9 +288,12 @@ export class SessionStreamer {
         const prevCount = sub.geminiMsgCount ?? 0;
         sub.geminiMsgCount = allEntries.length;
         if (isFileChange) {
-          if (allEntries.length > 0) sub.callback(allEntries, true);
+          const filtered = filterCoherent(allEntries);
+          if (filtered.length > 0) sub.callback(filtered, true);
         } else if (allEntries.length > prevCount) {
-          sub.callback(allEntries.slice(prevCount));
+          // Incremental: filter out tool entries only (no user-message limit)
+          const newEntries = allEntries.slice(prevCount).filter(e => e.role !== "tool");
+          if (newEntries.length > 0) sub.callback(newEntries);
         }
         return;
       }
@@ -308,8 +314,15 @@ export class SessionStreamer {
       }
 
       if (entries.length > 0) {
-        // File change = full replace (prevents duplicate entries after context compaction)
-        sub.callback(entries, isFileChange);
+        if (isFileChange) {
+          // File change = full replace with coherent filtering
+          const filtered = filterCoherent(entries);
+          if (filtered.length > 0) sub.callback(filtered, true);
+        } else {
+          // Incremental: filter out tool entries only
+          const coherent = entries.filter(e => e.role !== "tool");
+          if (coherent.length > 0) sub.callback(coherent);
+        }
       }
     } catch {
       // File might have been deleted/rotated
@@ -359,6 +372,30 @@ function cleanUserMessage(text: string): string | null {
   cleaned = cleaned.replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "");
   cleaned = cleaned.trim();
   return cleaned || null;
+}
+
+/**
+ * Filter entries to coherent conversation: user messages + agent responses only,
+ * limited to the last MAX_USER_MESSAGES user messages.
+ */
+function filterCoherent(entries: ChatEntry[]): ChatEntry[] {
+  // Remove tool entries — show only user messages and agent text responses
+  const coherent = entries.filter(e => e.role !== "tool");
+
+  // Find the start index: walk backwards counting user messages
+  let userCount = 0;
+  let startIdx = 0;
+  for (let i = coherent.length - 1; i >= 0; i--) {
+    if (coherent[i].role === "user") {
+      userCount++;
+      if (userCount >= MAX_USER_MESSAGES) {
+        startIdx = i;
+        break;
+      }
+    }
+  }
+
+  return coherent.slice(startIdx);
 }
 
 /** Parse a single JSONL line into chat entries (Claude or Codex format) */

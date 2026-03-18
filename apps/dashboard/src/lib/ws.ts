@@ -6,7 +6,7 @@ import type { AgentModel, ChatEntry, DaemonMessage, DaemonResponse, ReviewItem, 
 /** Extended response type until shared types package adds "models" */
 type ExtendedResponse = DaemonResponse | { type: "models"; models?: AgentModel[] } | { type: "vapid_key"; vapidKey?: string } | { type: "push_status"; subscribed?: boolean };
 
-const MAX_CHAT_ENTRIES = 200;
+const MAX_CHAT_ENTRIES = 150;
 
 /** Normalize text for comparison — matches tty-input.ts cleaning */
 const norm = (s: string) => s.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
