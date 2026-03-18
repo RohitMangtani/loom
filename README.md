@@ -72,9 +72,14 @@ Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-ba
 
 Paste this into Claude Code or Codex:
 
-> Clone https://github.com/RohitMangtani/hive and run `npm run launch:local` from inside the cloned directory.
+> Clone https://github.com/RohitMangtani/hive, run `npx vercel login`, then run `npm run launch` from inside the cloned directory.
 
-The agent will handle the full install. You'll need to approve a few things along the way — terminal access, sandbox permissions, and possibly an Accessibility setting. These are one-time approvals that macOS and the AI CLIs require before Hive can run fully hands-free. Say yes when prompted and the agent keeps going.
+The agent will handle the full install. You'll need to approve a few things along the way — terminal access, sandbox permissions, Vercel login (free account, opens a browser tab), and possibly an Accessibility setting for auto-pilot. These are one-time approvals. Say yes when prompted and the agent keeps going.
+
+**What you need beforehand:**
+- macOS with Node.js 20+ installed
+- A free [Vercel](https://vercel.com) account (the dashboard deploys here so you can access it from any device)
+- At least one AI CLI installed: `claude`, `codex`, or `openclaw`
 
 Once setup finishes, the agent prints your token. Copy it.
 
@@ -82,7 +87,9 @@ Once setup finishes, the agent prints your token. Copy it.
 
 Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds. On first launch, select **full sandbox** permission mode and grant terminal access when prompted.
 
-### Manual install
+### Local-only install (no Vercel needed)
+
+If you just want localhost access without deploying anywhere:
 
 ```bash
 git clone https://github.com/RohitMangtani/hive.git
