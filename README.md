@@ -70,23 +70,21 @@ Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-ba
 
 ## Install
 
-Paste this into Claude Code, Codex, or any AI coding agent:
+Paste this into Claude Code or Codex:
 
 > Clone https://github.com/RohitMangtani/hive and run `npm run launch:local` from inside the cloned directory.
 
-The agent handles everything: clones the repo, runs setup automatically on first launch, installs dependencies, generates your auth token, and starts the dashboard. Your token is printed at the end and saved to `~/.hive/token`.
+When prompted, grant the agent terminal/shell access so it can run the install commands.
 
-If `swiftc` is available (Xcode Command Line Tools), the agent compiles the auto-pilot binary and opens System Settings + Finder for you. Drag `send-return` into the Accessibility list and toggle it on. Skip this if you don't need auto-approve.
+The agent clones the repo, installs dependencies, generates your auth token, and starts the dashboard. If `swiftc` is available (Xcode Command Line Tools), it compiles the auto-pilot binary and opens System Settings + Finder — drag `send-return` into the Accessibility list and toggle it on.
 
-Once the dashboard is running at `http://localhost:3000`, open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
+Once setup finishes, the agent prints your token. Copy it.
 
-**Important:** When launching Claude Code or Codex for the first time, select the **full sandbox** permission mode. This lets agents run commands and edit files without pausing for approval on every action, which is how Hive is designed to work. Without sandbox mode, agents stall constantly on permission prompts.
+**Your token** is the key to your dashboard. Open the dashboard URL, paste the token into the input field at the top, and hit enter. You now have full control — send messages to agents, spawn new ones, and manage your fleet. The token is also saved at `~/.hive/token` if you need it again.
 
-**Want remote/phone access?** Tell the agent:
+Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
 
-> Run `npx vercel login` then `npm run launch` in the hive directory.
-
-This starts the daemon, opens a Cloudflare tunnel, and deploys the dashboard to your own free Vercel URL.
+When launching Claude Code or Codex for the first time, select the **full sandbox** permission mode and grant terminal access when prompted. This lets agents run commands and edit files without pausing for approval on every action.
 
 ### Manual install
 
