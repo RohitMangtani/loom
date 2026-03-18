@@ -2,7 +2,7 @@
 
 One screen for all your AI agents. Find My iPhone, but for terminal agents. macOS only.
 
-![Loom stacked dashboard diagram](docs/loom-stack.svg)
+![Hive stacked dashboard diagram](docs/loom-stack.svg)
 
 The dashboard maps 1:1 to your terminal layout. Terminals stack vertically on your screen, tiles stack vertically on the dashboard. Top terminal is top tile. Bottom terminal is bottom tile. Green means working. Red means done. Yellow means stuck. You look at your phone and know exactly which terminal needs attention without reading a single line of output.
 
@@ -62,8 +62,8 @@ Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-ba
 ## Quick Start
 
 ```bash
-git clone https://github.com/RohitMangtani/loom.git
-cd loom
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
 bash setup.sh
 npx vercel login
 npm run launch
@@ -94,8 +94,8 @@ The daemon auto-discovers any supported CLI in about 3 seconds. Arrange the wind
 ## Setup
 
 ```bash
-git clone https://github.com/RohitMangtani/loom.git
-cd loom
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
 bash setup.sh
 ```
 
