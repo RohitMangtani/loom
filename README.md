@@ -74,17 +74,13 @@ Paste this into Claude Code or Codex:
 
 > Clone https://github.com/RohitMangtani/hive and run `npm run launch:local` from inside the cloned directory.
 
-When prompted, grant the agent terminal/shell access so it can run the install commands.
-
-The agent clones the repo, installs dependencies, generates your auth token, and starts the dashboard. If `swiftc` is available (Xcode Command Line Tools), it compiles the auto-pilot binary and opens System Settings + Finder — drag `send-return` into the Accessibility list and toggle it on.
+The agent will handle the full install. You'll need to approve a few things along the way — terminal access, sandbox permissions, and possibly an Accessibility setting. These are one-time approvals that macOS and the AI CLIs require before Hive can run fully hands-free. Say yes when prompted and the agent keeps going.
 
 Once setup finishes, the agent prints your token. Copy it.
 
 **Your token** is the key to your dashboard. Open the dashboard URL, paste the token into the input field at the top, and hit enter. You now have full control — send messages to agents, spawn new ones, and manage your fleet. The token is also saved at `~/.hive/token` if you need it again.
 
-Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
-
-When launching Claude Code or Codex for the first time, select the **full sandbox** permission mode and grant terminal access when prompted. This lets agents run commands and edit files without pausing for approval on every action.
+Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds. On first launch, select **full sandbox** permission mode and grant terminal access when prompted.
 
 ### Manual install
 
