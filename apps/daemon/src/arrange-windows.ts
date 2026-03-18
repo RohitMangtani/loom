@@ -491,6 +491,32 @@ end tell
     }
     return { ok: true };
   } catch (err: unknown) {
+    // osascript failed — likely missing Automation permission.
+    // Fallback: SIGHUP all processes on the TTY so the shell exits
+    // and Terminal.app auto-closes the window ("Close if shell exited cleanly").
+    try {
+      const output = execFileSync("/usr/sbin/lsof", ["-t", device], {
+        timeout: 3000,
+        encoding: "utf-8",
+      });
+      const pids = output
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((p) => parseInt(p, 10))
+        .filter((p) => !isNaN(p) && p !== process.pid);
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGHUP");
+        } catch {
+          /* already gone */
+        }
+      }
+      if (pids.length > 0) return { ok: true };
+    } catch {
+      /* lsof also failed */
+    }
+
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `Close terminal failed: ${msg.slice(0, 150)}` };
   }
