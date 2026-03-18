@@ -17,8 +17,14 @@ function createServer(initialWorkers: unknown[] = []) {
     onRemoval(handler: RemovalHandler) {
       removalHandler = handler;
     },
+    onReviewAdded() {
+      // no-op for tests
+    },
     getAll() {
       return workers;
+    },
+    getReviews() {
+      return [];
     },
   };
 
@@ -72,26 +78,24 @@ describe("WsServer pushState", () => {
     const harness = createServer([{ id: "w1", status: "idle" }]);
     const client = harness.addClient();
 
-    harness.server.pushState();
-    harness.server.pushState();
+    harness.server.pushState();  // sends workers + models (first call)
+    harness.server.pushState();  // no change — skips both
     harness.setWorkers([{ id: "w1", status: "working" }]);
-    harness.server.pushState();
+    harness.server.pushState();  // sends workers (changed), skips models (same)
 
-    expect(client.send).toHaveBeenCalledTimes(2);
-    expect(client.send).toHaveBeenNthCalledWith(
-      1,
-      JSON.stringify({
-        type: "workers",
-        workers: [{ id: "w1", status: "idle" }],
-      })
-    );
-    expect(client.send).toHaveBeenNthCalledWith(
-      2,
-      JSON.stringify({
-        type: "workers",
-        workers: [{ id: "w1", status: "working" }],
-      })
-    );
+    // Filter to workers broadcasts only (pushState also sends models on first call)
+    const workersCalls = (client.send.mock.calls as [string][])
+      .map(([raw]) => JSON.parse(raw))
+      .filter((msg: { type: string }) => msg.type === "workers");
+    expect(workersCalls).toHaveLength(2);
+    expect(workersCalls[0]).toEqual({
+      type: "workers",
+      workers: [{ id: "w1", status: "idle" }],
+    });
+    expect(workersCalls[1]).toEqual({
+      type: "workers",
+      workers: [{ id: "w1", status: "working" }],
+    });
   });
 
   it("does not rebroadcast the same removal snapshot on the next tick", () => {
@@ -101,13 +105,16 @@ describe("WsServer pushState", () => {
     harness.triggerRemoval();
     harness.server.pushState();
 
-    expect(client.send).toHaveBeenCalledTimes(1);
-    expect(client.send).toHaveBeenCalledWith(
-      JSON.stringify({
-        type: "workers",
-        workers: [{ id: "w1", status: "idle" }],
-      })
-    );
+    // triggerRemoval sends workers once, pushState skips workers (same snapshot)
+    // but pushState sends models on first call (lastModelsSnapshot starts null)
+    const workersCalls = (client.send.mock.calls as [string][])
+      .map(([raw]) => JSON.parse(raw))
+      .filter((msg: { type: string }) => msg.type === "workers");
+    expect(workersCalls).toHaveLength(1);
+    expect(workersCalls[0]).toEqual({
+      type: "workers",
+      workers: [{ id: "w1", status: "idle" }],
+    });
   });
 
   it("keeps immediate worker_update broadcasts unchanged", () => {
