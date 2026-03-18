@@ -211,10 +211,18 @@ export class SessionStreamer {
       // fs.watch can fail on some filesystems
     }
 
+    // For Gemini JSON files, initialize message count to current count
+    // so the first poll doesn't re-send messages already delivered by readHistory.
+    let geminiMsgCount: number | undefined;
+    if (filePath.endsWith(".json")) {
+      geminiMsgCount = parseGeminiSession(filePath).length;
+    }
+
     const sub: Subscription = {
       workerId,
       filePath,
       byteOffset,
+      geminiMsgCount,
       callback,
       watcher,
       timer: setInterval(() => this.poll(subKey), POLL_INTERVAL),
