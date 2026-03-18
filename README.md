@@ -37,7 +37,7 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 ## What You Get
 
 - **Stoplight dashboard** — vertical stack that mirrors your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor. The tile order matches your terminal order top to bottom. Supports 1-8 agents.
-- **Multi-model** — run Claude, Codex, and OpenClaw agents side by side. Each tile shows which model is running. Spawn any from the dashboard with the "+ Agent" button. Add custom agents via `~/.hive/agents.json` and they appear in the spawn dialog automatically.
+- **Multi-model** — run Claude, Codex, and OpenClaw agents side by side. Each provider builds on its own strengths, and those strengths complement each other. Claude goes deep on architecture, Codex moves fast through targeted edits, and OpenClaw gives you reach beyond any single vendor. Hive lets you conduct them like instruments in the same symphony. Spawn any from the dashboard with the "+ Agent" button. Add custom agents via `~/.hive/agents.json` and they appear in the spawn dialog automatically.
 - **Auto-discovery** — start `claude`, `codex`, or `openclaw tui` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
 - **Auto-pilot** — permission prompts auto-approve after a 15-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
