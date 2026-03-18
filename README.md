@@ -80,6 +80,8 @@ If `swiftc` is available (Xcode Command Line Tools), the agent compiles the auto
 
 Once the dashboard is running at `http://localhost:3000`, open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
 
+**Important:** When launching Claude Code or Codex for the first time, select the **full sandbox** permission mode. This lets agents run commands and edit files without pausing for approval on every action, which is how Hive is designed to work. Without sandbox mode, agents stall constantly on permission prompts.
+
 **Want remote/phone access?** Tell the agent:
 
 > Run `npx vercel login` then `npm run launch` in the hive directory.
