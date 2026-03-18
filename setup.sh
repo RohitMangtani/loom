@@ -1,11 +1,11 @@
 #!/bin/bash
-# Loom setup — run once after cloning.
+# Hive setup — run once after cloning.
 # Usage: bash setup.sh
 
 set -e
 
 echo ""
-echo "  Setting up Loom..."
+echo "  Setting up Hive..."
 echo ""
 
 # ── Check prerequisites ──────────────────────────────────────────────
@@ -24,6 +24,7 @@ echo "  ✓ Node.js $(node -v)"
 
 HAS_CLAUDE=0
 HAS_CODEX=0
+HAS_OPENCLAW=0
 
 if command -v claude &>/dev/null; then
   HAS_CLAUDE=1
@@ -33,11 +34,16 @@ if command -v codex &>/dev/null; then
   HAS_CODEX=1
 fi
 
-if [ "$HAS_CLAUDE" -eq 0 ] && [ "$HAS_CODEX" -eq 0 ]; then
+if command -v openclaw &>/dev/null; then
+  HAS_OPENCLAW=1
+fi
+
+if [ "$HAS_CLAUDE" -eq 0 ] && [ "$HAS_CODEX" -eq 0 ] && [ "$HAS_OPENCLAW" -eq 0 ]; then
   echo "  ✗ No supported CLI found."
   echo "    Install at least one:"
   echo "      Claude Code: npm install -g @anthropic-ai/claude-code"
   echo "      Codex:       npm install -g @openai/codex"
+  echo "      OpenClaw:    npm install -g openclaw"
   exit 1
 fi
 
@@ -47,6 +53,10 @@ fi
 
 if [ "$HAS_CODEX" -eq 1 ]; then
   echo "  ✓ Codex"
+fi
+
+if [ "$HAS_OPENCLAW" -eq 1 ]; then
+  echo "  ✓ OpenClaw"
 fi
 
 if ! command -v swiftc &>/dev/null; then
@@ -79,10 +89,10 @@ else
   echo "  ✓ ~/send-return already exists"
 fi
 
-# ── Create Loom auth token ───────────────────────────────────────────
+# ── Create Hive auth token ───────────────────────────────────────────
 
 echo ""
-echo "  Preparing Loom auth..."
+echo "  Preparing Hive auth..."
 node <<'NODE'
 const { randomBytes, createHash } = require('crypto');
 const fs = require('fs');
@@ -130,18 +140,18 @@ fi
 # ── Done ─────────────────────────────────────────────────────────────
 
 echo ""
-echo "  ┌─────────────────────────────────────────┐"
-echo "  │  Loom is ready.                         │"
-echo "  │                                         │"
-echo "  │  Standard hosted path:                  │"
-echo "  │    npx vercel login   (first time only) │"
-echo "  │    npm run launch                       │"
-echo "  │                                         │"
-echo "  │  Local-only fallback:                   │"
-echo "  │    npm run launch:local                 │"
-echo "  │                                         │"
-echo "  │  Then open 1-4 Terminal windows and run │"
-echo "  │  'claude' and/or 'codex'. The daemon    │"
-echo "  │  auto-discovers supported CLIs in ~3s.  │"
-echo "  └─────────────────────────────────────────┘"
+echo "  ┌──────────────────────────────────────────────┐"
+echo "  │  Hive is ready.                              │"
+echo "  │                                              │"
+echo "  │  Standard hosted path:                       │"
+echo "  │    npx vercel login   (first time only)      │"
+echo "  │    npm run launch                            │"
+echo "  │                                              │"
+echo "  │  Local-only fallback:                        │"
+echo "  │    npm run launch:local                      │"
+echo "  │                                              │"
+echo "  │  Then open 1-8 Terminal windows and run      │"
+echo "  │  'claude', 'codex', or 'openclaw tui'.       │"
+echo "  │  The daemon auto-discovers them in ~3s.      │"
+echo "  └──────────────────────────────────────────────┘"
 echo ""

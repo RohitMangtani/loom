@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start Loom locally with one command: daemon + dashboard + browser tab.
+# Start Hive locally with one command: daemon + dashboard + browser tab.
 
 set -euo pipefail
 
@@ -31,18 +31,18 @@ trap cleanup INT TERM EXIT
 cd "$ROOT"
 
 if is_listening "$DAEMON_PORT"; then
-  echo "Loom daemon already running on :$DAEMON_PORT"
+  echo "Hive daemon already running on :$DAEMON_PORT"
 else
-  echo "Starting Loom daemon..."
+  echo "Starting Hive daemon..."
   npm run dev:daemon &
   DAEMON_PID=$!
   STARTED_DAEMON=1
 fi
 
 if is_listening "$DASHBOARD_PORT"; then
-  echo "Loom dashboard already running on :$DASHBOARD_PORT"
+  echo "Hive dashboard already running on :$DASHBOARD_PORT"
 else
-  echo "Starting Loom dashboard..."
+  echo "Starting Hive dashboard..."
   npm run dev:dashboard &
   DASHBOARD_PID=$!
   STARTED_DASHBOARD=1
@@ -52,7 +52,7 @@ echo "Waiting for dashboard at $URL ..."
 for _ in $(seq 1 60); do
   if curl -fsS "$URL" >/dev/null 2>&1; then
     echo ""
-    echo "Loom is live: $URL"
+    echo "Hive is live: $URL"
     echo "Open 1-4 Terminal.app windows, run 'claude' and/or 'codex', and place them in the screen corners."
     if command -v open >/dev/null 2>&1; then
       open "$URL" >/dev/null 2>&1 || true
@@ -63,5 +63,5 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
-echo "Loom dashboard did not become reachable at $URL within 60 seconds."
+echo "Hive dashboard did not become reachable at $URL within 60 seconds."
 exit 1

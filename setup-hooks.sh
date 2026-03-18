@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-time setup: install or update Loom hooks in ~/.claude/settings.json.
+# One-time setup: install or update Hive hooks in ~/.claude/settings.json.
 # Run: bash setup-hooks.sh
 
 set -e
@@ -160,7 +160,7 @@ settings.hooks = hooks;
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 
 console.log(`Updated ${settingsPath}`);
-console.log('Installed Loom hooks for UserPromptSubmit, PreToolUse, PostToolUse, Notification, and Stop.');
+console.log('Installed Hive hooks for UserPromptSubmit, PreToolUse, PostToolUse, Notification, and Stop.');
 console.log(`Identity hook: ${identityCmd}`);
 console.log(`Auto-approve hook: ${autoApproveCmd}`);
 NODE
