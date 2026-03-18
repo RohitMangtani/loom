@@ -109,14 +109,12 @@ The setup script:
 
 ### Accessibility Permission (optional — for auto-pilot)
 
-If `swiftc` was available and `~/send-return` was compiled, grant it Accessibility permission so auto-pilot can auto-approve agent prompts:
+If `swiftc` was available, setup compiles `~/send-return` and automatically opens System Settings and Finder for you:
 
-1. Open **System Settings → Privacy & Security → Accessibility**
-2. Click the **+** button
-3. Press **Cmd+Shift+G**, type `~/send-return`, and select it
-4. Toggle it **on**
+1. **Drag** `send-return` from the Finder window into the Accessibility list
+2. **Toggle it on**
 
-Without this, agents will pause on permission prompts until you approve manually. Everything else works fine.
+That's it. Without this, agents pause on permission prompts until you approve manually. Everything else works fine.
 
 ## Running
 

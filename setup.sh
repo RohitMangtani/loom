@@ -85,10 +85,14 @@ if [ "$HAS_SWIFT" -eq 1 ]; then
     chmod +x "$HOME/send-return"
     echo "  ✓ ~/send-return compiled"
     echo ""
-    echo "  ⚠  Grant Accessibility permission to ~/send-return"
-    echo "     System Settings → Privacy & Security → Accessibility"
-    echo "     Drag ~/send-return into the list and enable it."
+    echo "  ⚠  Auto-pilot needs Accessibility permission for ~/send-return."
+    echo "     Opening System Settings and Finder now..."
+    echo "     → Drag 'send-return' from the Finder window into the Accessibility list."
+    echo "     → Toggle it on."
     echo ""
+    # Open the exact System Settings pane and reveal the binary in Finder
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility" 2>/dev/null || true
+    open -R "$HOME/send-return" 2>/dev/null || true
   else
     echo "  ✓ ~/send-return already exists"
   fi
