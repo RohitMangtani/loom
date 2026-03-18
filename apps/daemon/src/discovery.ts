@@ -1333,12 +1333,27 @@ end tell
               if (stat.isDirectory()) {
                 scanDir(fullPath, depth + 1);
               } else if (entry.startsWith("session-") && entry.endsWith(".json")) {
-                // File must be born AFTER the process started (not before).
-                // Prevents picking old session files from killed instances.
+                // Match by birthtime (born after process start, within 120s).
+                // Also match by session startTime inside the JSON (survives
+                // atomic rewrites that change the OS birthtime).
                 const birthtimeDiff = stat.birthtimeMs - startedAt;
                 if (birthtimeDiff >= 0 && birthtimeDiff < 120_000 && birthtimeDiff < birthtimeBest) {
                   birthtimeBest = birthtimeDiff;
                   birthtimeMatch = fullPath;
+                }
+                // Fallback: read startTime from JSON and match to process start
+                if (!birthtimeMatch) {
+                  try {
+                    const content = readFileSync(fullPath, "utf-8");
+                    const sessionStart = JSON.parse(content).startTime;
+                    if (sessionStart) {
+                      const jsonDiff = new Date(sessionStart).getTime() - startedAt;
+                      if (jsonDiff >= 0 && jsonDiff < 120_000 && jsonDiff < birthtimeBest) {
+                        birthtimeBest = jsonDiff;
+                        birthtimeMatch = fullPath;
+                      }
+                    }
+                  } catch { /* skip */ }
                 }
                 if (stat.mtimeMs > mtimeBest) {
                   mtimeBest = stat.mtimeMs;
