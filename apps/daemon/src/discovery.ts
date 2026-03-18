@@ -735,6 +735,13 @@ end tell
       return;
     }
 
+    // Gemini JSON session files need a dedicated parser — they're single JSON
+    // objects with a messages array, not line-delimited JSONL.
+    if (cachedPath.endsWith(".json")) {
+      this.runGeminiSessionAnalysis(id, existing, tty, cachedPath, hookAge, auditCtx);
+      return;
+    }
+
     const ctx = this.readSessionContextFromFile(cachedPath);
     const tailCtx = { ...auditCtx, tailStatus: ctx.status, tailAction: ctx.latestAction, tailFileAgeMs: Math.round(ctx.fileAgeMs) };
 
@@ -965,6 +972,93 @@ end tell
    * that have no JSONL session files or hook telemetry.
    * Reuses the same hysteresis and cooldown patterns as JSONL analysis.
    */
+  /**
+   * Gemini-specific status detection from its JSON session file.
+   * Logic:
+   *   - Last message is "user" + file modified < 30s ago → working (green)
+   *   - Last message is "gemini" + file modified < 4s ago → working (mid-stream)
+   *   - Last message is "gemini" + file stale → idle (red)
+   *   - CPU fallback if session file can't be read
+   */
+  private runGeminiSessionAnalysis(
+    id: string,
+    existing: WorkerState,
+    tty: string,
+    filePath: string,
+    hookAge: number,
+    auditCtx: Record<string, unknown>,
+  ): void {
+    try {
+      const stat = statSync(filePath);
+      const fileAgeMs = Date.now() - stat.mtimeMs;
+
+      const raw = readFileSync(filePath, "utf-8");
+      const session = JSON.parse(raw);
+      const messages = session.messages;
+      if (!Array.isArray(messages) || messages.length === 0) {
+        this.runCpuOnlyAnalysis(id, existing, tty, auditCtx);
+        return;
+      }
+
+      const lastMsg = messages[messages.length - 1];
+      const lastType = lastMsg?.type as string;
+      const ctx = { ...auditCtx, geminiLastType: lastType, geminiFileAgeMs: Math.round(fileAgeMs), geminiMsgCount: messages.length };
+
+      // Extract latest action for display
+      if (lastMsg?.content && typeof lastMsg.content === "string") {
+        const snippet = lastMsg.content.slice(0, 80);
+        if (lastType === "gemini") {
+          existing.lastAction = snippet;
+          existing.lastActionAt = Date.now();
+        }
+      }
+
+      // Input-sent guard: keep working if we just sent a message
+      const lastInput = this.telemetry.getLastInputSent(id);
+      if (lastInput > 0 && Date.now() - lastInput < 15_000) {
+        this.checkTransition(id, tty, "working", "gemini: input-sent guard", ctx);
+        existing.currentAction = "Thinking...";
+        return;
+      }
+
+      // User message at tail + recent file → agent is processing (green)
+      if (lastType === "user" && fileAgeMs < 30_000) {
+        this.checkTransition(id, tty, "working", "gemini: user at tail, file fresh", ctx);
+        existing.currentAction = "Thinking...";
+        this.lastConfirmedWorking.set(id, Date.now());
+        return;
+      }
+
+      // Agent response at tail + very fresh file → mid-stream (green)
+      if (lastType === "gemini" && fileAgeMs < 4_000) {
+        this.checkTransition(id, tty, "working", "gemini: response mid-stream", ctx);
+        existing.currentAction = "Thinking...";
+        return;
+      }
+
+      // Cooldown: if recently confirmed working, stay green
+      const lastWorking = this.lastConfirmedWorking.get(id) || 0;
+      if (Date.now() - lastWorking < 25_000) {
+        this.checkTransition(id, tty, "working", `gemini: cooldown (${Math.round((Date.now() - lastWorking) / 1000)}s)`, ctx);
+        existing.currentAction = "Thinking...";
+        return;
+      }
+
+      // Agent response at tail + stale file → idle (red)
+      if (lastType === "gemini" && fileAgeMs > 4_000) {
+        this.checkTransition(id, tty, "idle", "gemini: response at tail, file stale", ctx);
+        existing.currentAction = null;
+        return;
+      }
+
+      // Fallback: use CPU
+      this.runCpuOnlyAnalysis(id, existing, tty, auditCtx);
+    } catch {
+      // Can't read session file — fall back to CPU
+      this.runCpuOnlyAnalysis(id, existing, tty, auditCtx);
+    }
+  }
+
   private runCpuOnlyAnalysis(
     id: string,
     existing: WorkerState,
