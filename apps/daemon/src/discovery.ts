@@ -1297,11 +1297,13 @@ end tell
   private findGeminiSessionFile(pid: number, startedAt: number): string | null {
     const cached = this.geminiSessionCache.get(pid);
     if (cached) {
-      // Re-check if cached file is stale (Gemini creates a new file per session)
+      // Return cached file if it still exists on disk. Unlike Claude (where
+      // context compaction creates new files), Gemini's session file is stable
+      // for the entire session — it never changes path, only content.
       if (cached.file) {
         try {
-          const age = Date.now() - statSync(cached.file).mtimeMs;
-          if (age < 120_000) return cached.file; // Still active
+          statSync(cached.file); // Just check existence
+          return cached.file;
         } catch { /* file gone, re-scan */ }
       } else {
         if (Date.now() - cached.checkedAt < 30_000) return null;
