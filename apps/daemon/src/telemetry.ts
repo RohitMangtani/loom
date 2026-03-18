@@ -1724,10 +1724,14 @@ export class TelemetryReceiver {
         encoding: "utf-8",
         timeout: 3000,
       }).trim();
-      return root.split("/").pop() || worker.projectName;
-    } catch {
-      return worker.projectName;
-    }
+      const name = root.split("/").pop();
+      if (name && name !== "unknown") return name;
+    } catch { /* not a git repo at this cwd */ }
+    // Fallback: derive from project path (last non-empty segment)
+    const segments = worker.project.replace(/\/+$/, "").split("/").filter(Boolean);
+    const last = segments[segments.length - 1];
+    if (last && last !== "unknown" && last !== process.env.USER) return last;
+    return worker.projectName !== "unknown" ? worker.projectName : "agent";
   }
 
   /** Build a rich review summary with quadrant, project, and branch context */
