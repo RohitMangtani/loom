@@ -1881,6 +1881,12 @@ export class TelemetryReceiver {
     const worker = this.workers.get(workerId);
     if (!worker) return;
 
+    // Only Claude fires these hooks. If a hook routes to a non-Claude worker
+    // (via CWD fallback or session ID collision), ignore it — applying Claude
+    // hook state (PreToolUse/PostToolUse) to Gemini/Codex/OpenClaw workers
+    // causes phantom green (status set to "working" by cross-contaminated hooks).
+    if (worker.model && worker.model !== "claude") return;
+
     const now = Date.now();
     this.lastHookTime.set(workerId, now);
     worker.lastActionAt = now;
