@@ -1017,8 +1017,18 @@ end tell
         }
       }
 
-      // Agent response at tail + stale file → idle (red)
-      // Check this FIRST — if the response is done, nothing else matters.
+      // Check if the last gemini message has tool calls (still executing)
+      const lastHasTools = Array.isArray(lastMsg.toolCalls) && lastMsg.toolCalls.length > 0;
+
+      // Agent response with tool calls + file still being written → working
+      if (lastType === "gemini" && lastHasTools && fileAgeMs < 300_000) {
+        this.checkTransition(id, tty, "working", "gemini: tool calls in progress", ctx);
+        existing.currentAction = lastMsg.content?.slice?.(0, 60) || "Running tools...";
+        existing.lastActionAt = Date.now();
+        return;
+      }
+
+      // Agent response at tail + stale file + no tools → idle (red)
       if (lastType === "gemini" && fileAgeMs > 3_000) {
         existing.status = "idle";
         existing.currentAction = null;

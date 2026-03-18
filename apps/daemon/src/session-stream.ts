@@ -487,8 +487,15 @@ function parseGeminiSession(filePath: string): ChatEntry[] {
         // Agent content is a plain string
         const text = typeof msg.content === "string" ? msg.content.trim() : null;
         if (text) entries.push({ role: "agent", text });
+        // Tool calls on this message
+        if (Array.isArray(msg.toolCalls)) {
+          for (const tc of msg.toolCalls) {
+            const name = tc.name || tc.functionName || "tool";
+            entries.push({ role: "tool", text: name });
+          }
+        }
       }
-      // Skip: info, warning, tool_use, tool_result
+      // Skip: info, warning
     }
     return entries;
   } catch {
