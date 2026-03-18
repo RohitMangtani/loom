@@ -389,6 +389,17 @@ export function spawnTerminalWindow(
     const custom = ProcessDiscovery.getCustomAgent(model);
     cliCmd = custom?.spawnCommand || model;
   }
+
+  // Append initial message as a CLI argument when supported.
+  // Claude: positional prompt argument
+  // Gemini: --prompt-interactive flag (executes prompt, stays interactive)
+  // Codex/OpenClaw: no CLI prompt arg, message sent via TTY after startup
+  if (initialMessage) {
+    const escaped = initialMessage.replace(/'/g, "'\\''");
+    if (model === "claude") cliCmd += ` '${escaped}'`;
+    else if (model === "gemini") cliCmd += ` -i '${escaped}'`;
+  }
+
   const launchCmd = `${cdCmd} && ${cliCmd}`;
 
   // If a target quadrant is given, spawn and position in one AppleScript call.
