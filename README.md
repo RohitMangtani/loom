@@ -86,7 +86,8 @@ The agent handles the install, but macOS and the AI CLIs will ask you to approve
 1. **Terminal/shell access** — Claude Code and Codex ask for permission to run shell commands. Approve so the agent can run `git clone`, `npm install`, etc.
 2. **Sandbox mode** — when launching Claude Code or Codex, select **full sandbox** so agents can run commands and edit files without pausing on every action.
 3. **Vercel login** — opens a browser tab to sign in. Click authorize and the agent continues.
-4. **Accessibility permission** (optional) — if Xcode Command Line Tools are installed, setup compiles an auto-pilot binary and opens System Settings + Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip this if you prefer to approve manually.
+4. **Automation permission** — the first time the daemon starts, macOS will ask "osascript wants to control Terminal.app." Click **OK**. This is required for Hive to send messages to agents, close terminals from the dashboard, and detect window positions. If you accidentally click Don't Allow, go to System Settings → Privacy & Security → Automation and enable Terminal for the process.
+5. **Accessibility permission** (optional) — if Xcode Command Line Tools are installed, setup compiles an auto-pilot binary and opens System Settings + Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip this if you prefer to approve manually.
 
 ### Using your token
 
