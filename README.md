@@ -74,18 +74,27 @@ Paste this into Claude Code or Codex:
 
 > Clone https://github.com/RohitMangtani/hive, run `npx vercel login`, then run `npm run launch` from inside the cloned directory.
 
-The agent will handle the full install. You'll need to approve a few things along the way — terminal access, sandbox permissions, Vercel login (free account, opens a browser tab), and possibly an Accessibility setting for auto-pilot. These are one-time approvals. Say yes when prompted and the agent keeps going.
-
 **What you need beforehand:**
 - macOS with Node.js 20+ installed
 - A free [Vercel](https://vercel.com) account (the dashboard deploys here so you can access it from any device)
 - At least one AI CLI installed: `claude`, `codex`, or `openclaw`
 
-Once setup finishes, the agent prints your token. Copy it.
+### First-time approvals
 
-**Your token** is the key to your dashboard. Open the dashboard URL, paste the token into the input field at the top, and hit enter. You now have full control — send messages to agents, spawn new ones, and manage your fleet. The token is also saved at `~/.hive/token` if you need it again.
+The agent handles the install, but macOS and the AI CLIs will ask you to approve a few things the first time. These are all one-time — say yes and the agent keeps going:
 
-Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds. On first launch, select **full sandbox** permission mode and grant terminal access when prompted.
+1. **Terminal/shell access** — Claude Code and Codex ask for permission to run shell commands. Approve so the agent can run `git clone`, `npm install`, etc.
+2. **Sandbox mode** — when launching Claude Code or Codex, select **full sandbox** so agents can run commands and edit files without pausing on every action.
+3. **Vercel login** — opens a browser tab to sign in. Click authorize and the agent continues.
+4. **Accessibility permission** (optional) — if Xcode Command Line Tools are installed, setup compiles an auto-pilot binary and opens System Settings + Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip this if you prefer to approve manually.
+
+### Using your token
+
+Once setup finishes, the agent prints your token. Copy it. Open the dashboard URL the agent gives you, paste the token into the input field at the top of the page, and hit enter. You now have full control — send messages to agents, spawn new ones, close them with the X button on each tile, and manage your fleet. The token is saved at `~/.hive/token` if you need it again.
+
+### Running agents
+
+Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
 
 ### Local-only install (no Vercel needed)
 

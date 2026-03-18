@@ -234,14 +234,14 @@ export function AgentCard({
     <div
       onClick={managing ? undefined : onClick}
       onPointerDown={managing ? undefined : onPointerDown}
-      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""}`}
+      className={`card relative group ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""}`}
       style={{ borderLeftColor: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
-      {managing && onKill && (
+      {onKill && (
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onKill(); }}
-          className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full transition-all duration-200 cursor-pointer hover:scale-110 z-20"
+          className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full transition-all duration-200 cursor-pointer hover:scale-110 z-20 opacity-40 hover:opacity-100"
           style={{
             background: "rgba(239,68,68,0.15)",
             border: "1px solid rgba(239,68,68,0.3)",
