@@ -333,13 +333,20 @@ end tell
           sessionFile = cachedFile; // Already set correctly by register-tty
         }
       } else {
+        // Fresh spawns: suppress heuristic session file resolution so the agent
+        // starts with blank chat history. Only authoritative sources (lsof, session
+        // ID from process args) are used during the grace period. The identity hook
+        // will pin the correct session once it fires on the first prompt.
+        const isFreshSpawn = this.telemetry.isRecentSpawn(proc.tty);
+
         // Priority 0: content-based match (ground truth from identity hook in JSONL).
         // Overrides all heuristics because it matches TTY↔file using actual content.
         // Skip for non-Claude workers: markers in ~/.hive/sessions/ are written by Claude's
         // identity.sh hook, which never fires for Codex or OpenClaw. Any marker found for
         // a non-Claude worker's TTY is stale from a previous Claude session — using it
         // would map the wrong chat history (the old Claude session instead of the current one).
-        if (proc.tty && proc.model === "claude") {
+        // Also skip for fresh spawns: marker may be stale from the previous session on this TTY.
+        if (proc.tty && proc.model === "claude" && !isFreshSpawn) {
           const contentMatch = ttyToFile.get(proc.tty);
           if (contentMatch && !claimedFiles.has(contentMatch)) {
             sessionFile = contentMatch;
@@ -374,6 +381,7 @@ end tell
           // Claude-specific heuristics: session ID match and birthtime fallback.
           // Skip for non-Claude models — these search .claude/projects/ and can
           // grab stale Claude JSONL files, cross-contaminating the session mapping.
+          // Skip birthtime fallback for fresh spawns — it picks up old JSONL files.
           if (!sessionFile && (!proc.model || proc.model === "claude")) {
             if (proc.sessionIds.length > 0) {
               sessionFile = this.streamer.findSessionFile(proc.sessionIds);
@@ -383,7 +391,8 @@ end tell
               }
             }
             // Fallback: match JSONL by creation time closest to process start.
-            if (!sessionFile) {
+            // Skip for fresh spawns — birthtime heuristic grabs stale files.
+            if (!sessionFile && !isFreshSpawn) {
               sessionFile = this.findSessionFileByStartTime(proc.cwd, proc.startedAt, claimedFiles);
             }
           }
@@ -393,8 +402,9 @@ end tell
         // the old JSONL stops being written to. If the cached file is stale
         // (>2min), search for a successor JSONL in the same directory.
         // Only for Claude — non-Claude models have their own session file finders.
+        // Skip for fresh spawns — no stale file to recover from.
         const effectiveFile = sessionFile || this.streamer.getSessionFile(id);
-        if (effectiveFile && (!proc.model || proc.model === "claude")) {
+        if (effectiveFile && (!proc.model || proc.model === "claude") && !isFreshSpawn) {
           try {
             const age = Date.now() - statSync(effectiveFile).mtimeMs;
             if (age > 120_000) {
@@ -900,16 +910,17 @@ end tell
           if (ctx.latestAction) existing.lastAction = ctx.latestAction;
           this.checkTransition(id, tty, "idle", `JSONL tail idle, already idle (count=${idleCount}) cpu=${cpuPct.toFixed(1)}%`, tailCtx);
         }
-      } else if (ctx.fileAgeMs < 120_000 && idleCount < 2 && (hookAge < 30_000 || (existing.model && existing.model !== "claude"))) {
+      } else if (ctx.fileAgeMs < 120_000 && idleCount < 2 && (hookAge < 30_000 || existing.model === "codex")) {
         // File written in last 2 min AND first idle signal AND either hooks
-        // recently active OR non-Claude worker — stay GREEN.
+        // recently active OR Codex worker — stay GREEN.
         //   - fileAgeMs < 120s: covers subagent chains (30-90s JSONL gaps)
         //   - idleCount < 2: hysteresis prevents single-scan flapping
         //   - hookAge < 30s: ensures hooks confirm the agent is actually working.
         //     Without this, noise JSONL writes keep fileAge fresh → phantom green.
-        //   - Non-Claude (Codex): has no hooks, so hookAge is always stale.
-        //     JSONL freshness + hysteresis is sufficient — task_complete provides
-        //     high-confidence idle when actually done.
+        //   - Codex only (not all non-Claude): Codex has no hooks and no JSONL
+        //     idle patterns — only task_complete provides reliable idle.
+        //     OpenClaw writes JSONL with clear assistant-at-tail idle patterns
+        //     (like Claude), so it should trust its JSONL analysis.
         existing.status = "working";
         existing.currentAction = ctx.latestAction || "Thinking...";
         existing.lastAction = ctx.latestAction || existing.lastAction;
@@ -924,7 +935,12 @@ end tell
         // confidence idle) overrides this cooldown immediately when done.
         const lastWorking = this.lastConfirmedWorking.get(id) || 0;
         const workingCooldown = Date.now() - lastWorking;
-        if (workingCooldown < 25_000 && existing.status === "working") {
+        // Skip cooldown for models with reliable JSONL idle signals (OpenClaw).
+        // The 25s cooldown covers the "thinking gap" (user→API→no JSONL) but
+        // OpenClaw writes assistant messages at the tail when done, so JSONL
+        // idle is definitive — no need to wait.
+        const hasJsonlIdleSignal = existing.model === "openclaw";
+        if (workingCooldown < 25_000 && existing.status === "working" && !hasJsonlIdleSignal) {
           existing.currentAction = ctx.latestAction || "Thinking...";
           existing.lastAction = ctx.latestAction || existing.lastAction;
           existing.lastActionAt = Date.now();
@@ -1204,9 +1220,10 @@ end tell
 
     const codexDir = join(HOME, ".codex", "sessions");
     try {
-      let bestFile: string | null = null;
-      let bestMtime = 0;
+      let birthtimeMatch: string | null = null;
       let bestBirthtimeDiff = Infinity;
+      let mtimeMatch: string | null = null;
+      let bestMtime = 0;
 
       // Walk YYYY/MM/DD subdirectories
       for (const year of readdirSync(codexDir)) {
@@ -1229,13 +1246,12 @@ end tell
                       const birthtimeDiff = Math.abs(stat.birthtimeMs - startedAt);
                       if (birthtimeDiff < 120_000 && birthtimeDiff < bestBirthtimeDiff) {
                         bestBirthtimeDiff = birthtimeDiff;
-                        bestFile = fullPath;
-                        bestMtime = stat.mtimeMs;
+                        birthtimeMatch = fullPath;
                       }
-                      // Fallback: most recently modified
-                      if (!bestFile && stat.mtimeMs > bestMtime) {
+                      // Track most recently modified as fallback
+                      if (stat.mtimeMs > bestMtime) {
                         bestMtime = stat.mtimeMs;
-                        bestFile = fullPath;
+                        mtimeMatch = fullPath;
                       }
                     } catch { /* skip */ }
                   }
@@ -1246,6 +1262,7 @@ end tell
         } catch { /* skip */ }
       }
 
+      const bestFile = birthtimeMatch || mtimeMatch;
       this.codexSessionCache.set(pid, { file: bestFile, checkedAt: Date.now() });
       return bestFile;
     } catch {
@@ -1267,9 +1284,12 @@ end tell
 
     const agentsDir = join(HOME, ".openclaw", "agents");
     try {
-      let bestFile: string | null = null;
-      let bestMtime = 0;
+      // Track birthtime match (within 120s of process start) and mtime match (most recently modified) separately.
+      // Prefer birthtime match; fall back to mtime-based selection.
+      let birthtimeMatch: string | null = null;
       let bestBirthtimeDiff = Infinity;
+      let mtimeMatch: string | null = null;
+      let bestMtime = 0;
 
       for (const agentId of readdirSync(agentsDir)) {
         const sessionsDir = join(agentsDir, agentId, "sessions");
@@ -1282,18 +1302,18 @@ end tell
               const birthtimeDiff = Math.abs(stat.birthtimeMs - startedAt);
               if (birthtimeDiff < 120_000 && birthtimeDiff < bestBirthtimeDiff) {
                 bestBirthtimeDiff = birthtimeDiff;
-                bestFile = fullPath;
-                bestMtime = stat.mtimeMs;
+                birthtimeMatch = fullPath;
               }
-              if (!bestFile && stat.mtimeMs > bestMtime) {
+              if (stat.mtimeMs > bestMtime) {
                 bestMtime = stat.mtimeMs;
-                bestFile = fullPath;
+                mtimeMatch = fullPath;
               }
             } catch { /* skip */ }
           }
         } catch { /* skip */ }
       }
 
+      const bestFile = birthtimeMatch || mtimeMatch;
       this.openclawSessionCache.set(pid, { file: bestFile, checkedAt: Date.now() });
       return bestFile;
     } catch {
@@ -1869,7 +1889,8 @@ end tell
       // to find the actual conversation state buried underneath the noise.
       const hasRealEntry = /"type"\s*:\s*"(assistant|user)"/.test(tail) ||
         /"type"\s*:\s*"(user_message|agent_message)"/.test(tail) ||
-        /"role"\s*:\s*"assistant"/.test(tail);
+        /"role"\s*:\s*"assistant"/.test(tail) ||
+        /"role"\s*:\s*"user"/.test(tail);
       if (!hasRealEntry) {
         tail = readTail(filePath, 500_000);
       }
@@ -1906,7 +1927,12 @@ end tell
         l.includes('"type":"token_count"') ||
         l.includes('"type":"session_meta"') ||
         l.includes('"type":"reasoning"') ||
-        l.includes('"type":"turn_context"');
+        l.includes('"type":"turn_context"') ||
+        // OpenClaw noise: custom events (cache-ttl, etc.), session metadata, model/thinking changes
+        l.includes('"type":"custom"') ||
+        l.includes('"type":"session"') ||
+        l.includes('"type":"model_change"') ||
+        l.includes('"type":"thinking_level_change"');
       const lines = rawLines.filter(l => !isNoiseLine(l));
 
       // Check if the file's mtime freshness is from noise writes (progress,
@@ -1924,6 +1950,7 @@ end tell
       // Extract last human direction — the most recent user-typed message.
       // Claude: "type":"user" with content as a plain string.
       // Codex: "type":"user_message" in event_msg with "message" field.
+      // OpenClaw: "type":"message" with "role":"user" and content as [{type:"text",text:"..."}].
       // Tool results also have "type":"user" but content is an array.
       for (let i = lines.length - 1; i >= Math.max(0, lines.length - 80); i--) {
         const line = lines[i];
@@ -1936,6 +1963,28 @@ end tell
             if (direction.length > 60) direction = direction.slice(0, 57) + "...";
             result.lastDirection = direction;
             break;
+          }
+        }
+
+        // OpenClaw user message: {"type":"message",...,"message":{"role":"user","content":[{"type":"text","text":"..."}]}}
+        if (line.includes('"type":"message"') && line.includes('"role":"user"')) {
+          const textMatch = line.match(/"type":"text","text":"((?:[^"\\]|\\.)*)"/);
+          if (textMatch) {
+            // Decode JSON escapes first, then strip routing prefix
+            let direction = textMatch[1]
+              .replace(/\\n/g, "\n")
+              .replace(/\\"/g, '"')
+              .replace(/\\\\/g, "\\");
+            // Strip OpenClaw gateway routing prefix (sender metadata block + timestamp)
+            direction = direction.replace(/^Sender \(untrusted metadata\):[\s\S]*?\n\n/, "");
+            // Strip timestamp prefix like [Wed 2026-03-18 01:34 EDT]
+            direction = direction.replace(/^\[.*?\]\s*/, "").trim();
+            if (direction.startsWith("Read HEARTBEAT.md")) continue;
+            if (direction.length > 60) direction = direction.slice(0, 57) + "...";
+            if (direction.length >= 3) {
+              result.lastDirection = direction;
+              break;
+            }
           }
         }
 
@@ -2003,13 +2052,15 @@ end tell
         }
 
         // Pattern 1: tool in flight (tool_use/function_call without result after it)
-        // Claude: "tool_result" | Codex: "function_call_output"
-        if (line.includes('"tool_result"') || line.includes('"function_call_output"')) {
+        // Claude: "tool_result" | Codex: "function_call_output" | OpenClaw: "role":"toolResult"
+        if (line.includes('"tool_result"') || line.includes('"function_call_output"') ||
+            line.includes('"role":"toolResult"')) {
           foundAnyPattern = true;
           lastUser = true;
           break;
         }
         // Claude: tool_use in assistant message | Codex: function_call response_item
+        // OpenClaw: "toolCall" in assistant message
         if (!lastAssistant && line.includes('"tool_use"') && line.includes('"assistant"')) {
           result.status = "working";
           result.highConfidence = true;
@@ -2020,19 +2071,28 @@ end tell
           result.highConfidence = true;
           return result;
         }
+        if (!lastAssistant && line.includes('"toolCall"') && line.includes('"role":"assistant"')) {
+          result.status = "working";
+          result.highConfidence = true;
+          return result;
+        }
 
         // Pattern 2: thinking — track last message type
         // Claude: "type":"user" / "type":"assistant"
         // Codex: "type":"user_message" (event_msg) / "role":"assistant" (response_item)
+        // OpenClaw: "type":"message" with "role":"user" / "role":"assistant"
         // Skip Codex "agent_message" events — they accompany assistant responses, not user input.
         if (!lastUser && !lastAssistant) {
           if ((line.includes('"type":"user"') || line.includes('"type": "user"') ||
-              line.includes('"type":"user_message"')) && !line.includes('"agent_message"')) {
+              line.includes('"type":"user_message"') ||
+              (line.includes('"type":"message"') && line.includes('"role":"user"'))) &&
+              !line.includes('"agent_message"')) {
             lastUser = true;
             sawNewerTurnActivity = true;
             foundAnyPattern = true;
           } else if (line.includes('"type":"assistant"') || line.includes('"type": "assistant"') ||
-                     (line.includes('"role":"assistant"') && line.includes('"response_item"'))) {
+                     (line.includes('"role":"assistant"') && line.includes('"response_item"')) ||
+                     (line.includes('"type":"message"') && line.includes('"role":"assistant"'))) {
             lastAssistant = true;
             foundAnyPattern = true;
           }
@@ -2120,6 +2180,32 @@ end tell
               return "Asking you a question";
             default:
               return toolName.replace(/^mcp__\w+__/, "");
+          }
+        }
+      }
+
+      // ── OpenClaw format: toolCall in assistant message ──
+      if (line.includes('"toolCall"') && line.includes('"role":"assistant"')) {
+        const toolMatch = line.match(/"type":"toolCall"[^}]*?"name"\s*:\s*"([^"]+)"/);
+        if (toolMatch) {
+          // OpenClaw uses lowercase tool names — capitalize for describeAction
+          const name = toolMatch[1].charAt(0).toUpperCase() + toolMatch[1].slice(1);
+          const fileMatch = line.match(/"file_path"\s*:\s*"([^"]+)"/);
+          const descMatch = line.match(/"description"\s*:\s*"([^"]{1,60})"/);
+          const cmdMatch = line.match(/"command"\s*:\s*"([^"]{1,60})"/);
+          switch (name) {
+            case "Bash":
+              if (descMatch) return descMatch[1];
+              if (cmdMatch) return describeBashCommand(cmdMatch[1]);
+              return "Running command";
+            case "Edit":
+              return fileMatch ? `Editing ${basename(fileMatch[1])}` : "Editing file";
+            case "Write":
+              return fileMatch ? `Writing ${basename(fileMatch[1])}` : "Writing file";
+            case "Read":
+              return fileMatch ? `Reading ${basename(fileMatch[1])}` : "Reading file";
+            default:
+              return name;
           }
         }
       }

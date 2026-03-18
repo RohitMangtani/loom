@@ -306,7 +306,7 @@ export function registerApiRoutes(
       return;
     }
 
-    if (receiver.getAll().length >= 4) {
+    if (receiver.getAll().length >= 8) {
       res.status(409).json({ error: "All 8 slots are occupied" });
       return;
     }
@@ -321,6 +321,8 @@ export function registerApiRoutes(
       res.status(500).json({ error: result.error || "Failed to spawn terminal" });
       return;
     }
+    // Mark TTY as freshly spawned — blank chat until identity hook pins session
+    if (result.tty) receiver.markSpawn(result.tty);
     res.json({ ok: true, model, project: realPath });
   });
 

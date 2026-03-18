@@ -115,6 +115,12 @@ export class TelemetryReceiver {
     process.env.HOME || `/Users/${process.env.USER}`, ".hive", "tty-sessions.json"
   );
 
+  // Recently-spawned TTYs: suppresses heuristic session file resolution so
+  // freshly spawned agents start with blank chat history instead of inheriting
+  // stale JSONL from a previous session in the same project.
+  private recentSpawns = new Map<string, number>(); // tty → spawnTimestamp
+  private static readonly SPAWN_GRACE_PERIOD = 60_000; // 60s
+
   // Dispatch tracking
   private dispatchedTasks = new Map<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string; fromWorkerId?: string }>();
 
@@ -242,6 +248,9 @@ export class TelemetryReceiver {
       // Pin this session so discovery's registerSession doesn't overwrite it
       this.pinnedSessions.set(session_id, targetWorker.id);
       this.sessionToWorker.set(session_id, targetWorker.id);
+
+      // Clear fresh-spawn suppression — identity hook confirms the new session is live
+      this.clearSpawn(tty);
 
       // Update the session file to match this session_id
       const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
@@ -384,6 +393,31 @@ export class TelemetryReceiver {
 
   getLastHookTime(workerId: string): number | undefined {
     return this.lastHookTime.get(workerId);
+  }
+
+  /** Mark a TTY as freshly spawned so discovery skips heuristic session resolution */
+  markSpawn(tty: string): void {
+    const normalized = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+    this.recentSpawns.set(normalized, Date.now());
+  }
+
+  /** Check if a TTY was recently spawned (within grace period) */
+  isRecentSpawn(tty: string | undefined): boolean {
+    if (!tty) return false;
+    const normalized = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+    const spawnedAt = this.recentSpawns.get(normalized);
+    if (!spawnedAt) return false;
+    if (Date.now() - spawnedAt > TelemetryReceiver.SPAWN_GRACE_PERIOD) {
+      this.recentSpawns.delete(normalized);
+      return false;
+    }
+    return true;
+  }
+
+  /** Clear spawn mark (called when identity hook pins a session — authoritative source) */
+  clearSpawn(tty: string): void {
+    const normalized = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+    this.recentSpawns.delete(normalized);
   }
 
   isIdleConfirmed(workerId: string): boolean {
@@ -827,7 +861,7 @@ export class TelemetryReceiver {
   private lastPositionDetect = 0;
   // Cache: context summaries per worker, invalidated when worker state changes
   private contextCache = new Map<string, { fingerprint: string; context: WorkerContextSnapshot }>();
-  private static POSITION_DETECT_INTERVAL = 3_000; // 3s — match tick loop for fast snap-back
+  private static POSITION_DETECT_INTERVAL = 1_500; // 1.5s — fast snap-back detection
 
   writeWorkersFile(): void {
     const workers = this.getAll().sort((a, b) => a.startedAt - b.startedAt);
@@ -2035,7 +2069,7 @@ export class TelemetryReceiver {
         worker.status = "idle";
         worker.stuckMessage = undefined;
         this.toolInFlight.set(workerId, null);
-        this.idleConfirmed.set(workerId, false);
+        this.idleConfirmed.set(workerId, true);
         worker.currentAction = null;
         worker.lastAction = "Session ended";
         this.generateSuggestions(worker);
@@ -2166,6 +2200,7 @@ export class TelemetryReceiver {
       case "Stop":
         worker.status = "idle";
         this.toolInFlight.set(event.worker_id, null);
+        this.idleConfirmed.set(event.worker_id, true);
         worker.currentAction = null;
         this.generateSuggestions(worker);
         worker.lastAction = event.summary || "stopped";

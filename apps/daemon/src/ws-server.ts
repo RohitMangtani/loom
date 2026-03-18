@@ -302,6 +302,12 @@ export class WsServer {
           return;
         }
 
+        // Mark TTY as freshly spawned so discovery skips heuristic session
+        // file resolution — new agents start with blank chat history.
+        if (termResult.tty) {
+          this.telemetry.markSpawn(termResult.tty);
+        }
+
         // Create an immediate placeholder worker so the dashboard tile
         // shows content before the 3-second discovery scan picks it up.
         if (termResult.tty) {
