@@ -1317,9 +1317,10 @@ end tell
 
     const geminiDir = join(HOME, ".gemini");
     try {
-      let bestFile: string | null = null;
-      let bestMtime = 0;
-      let bestBirthtimeDiff = Infinity;
+      let birthtimeMatch: string | null = null;
+      let birthtimeBest = Infinity;
+      let mtimeFallback: string | null = null;
+      let mtimeBest = 0;
 
       // Scan ~/.gemini/tmp/<hash>/chats/ for session-*.json files (4 levels deep)
       const scanDir = (dir: string, depth: number) => {
@@ -1333,14 +1334,13 @@ end tell
                 scanDir(fullPath, depth + 1);
               } else if (entry.startsWith("session-") && entry.endsWith(".json")) {
                 const birthtimeDiff = Math.abs(stat.birthtimeMs - startedAt);
-                if (birthtimeDiff < 120_000 && birthtimeDiff < bestBirthtimeDiff) {
-                  bestBirthtimeDiff = birthtimeDiff;
-                  bestFile = fullPath;
-                  bestMtime = stat.mtimeMs;
+                if (birthtimeDiff < 120_000 && birthtimeDiff < birthtimeBest) {
+                  birthtimeBest = birthtimeDiff;
+                  birthtimeMatch = fullPath;
                 }
-                if (!bestFile && stat.mtimeMs > bestMtime) {
-                  bestMtime = stat.mtimeMs;
-                  bestFile = fullPath;
+                if (stat.mtimeMs > mtimeBest) {
+                  mtimeBest = stat.mtimeMs;
+                  mtimeFallback = fullPath;
                 }
               }
             } catch { /* skip */ }
@@ -1349,6 +1349,8 @@ end tell
       };
 
       scanDir(geminiDir, 0);
+      // Birthtime match wins. Mtime fallback only if no birthtime match.
+      const bestFile = birthtimeMatch || mtimeFallback;
       this.geminiSessionCache.set(pid, { file: bestFile, checkedAt: Date.now() });
       return bestFile;
     } catch {
