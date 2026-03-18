@@ -98,7 +98,7 @@ describe("TelemetryReceiver worker context", () => {
     });
 
     expect(message).toContain("Summarize what Q1 found");
-    expect(message).toContain("## Loom Peer Context");
+    expect(message).toContain("## Hive Peer Context");
     expect(message).toContain("Q1 (ttys000, claude)");
   });
 

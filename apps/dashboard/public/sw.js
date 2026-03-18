@@ -1,4 +1,4 @@
-const CACHE = "loom-v1";
+const CACHE = "hive-v1";
 const SHELL = ["/", "/manifest.json", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -40,14 +40,14 @@ self.addEventListener("push", (e) => {
   try {
     payload = e.data.json();
   } catch {
-    payload = { title: "Loom", body: e.data.text() };
+    payload = { title: "Hive", body: e.data.text() };
   }
 
   const options = {
     body: payload.body || "",
     icon: "/icon-192.png",
     badge: "/icon-192.png",
-    tag: payload.tag || "loom-notification",
+    tag: payload.tag || "hive-notification",
     data: payload.data || {},
     // Vibrate pattern: short buzz for task completion
     vibrate: [100, 50, 100],
@@ -55,7 +55,7 @@ self.addEventListener("push", (e) => {
     renotify: true,
   };
 
-  e.waitUntil(self.registration.showNotification(payload.title || "Loom", options));
+  e.waitUntil(self.registration.showNotification(payload.title || "Hive", options));
 });
 
 // Tap notification → open/focus the dashboard

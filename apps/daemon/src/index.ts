@@ -72,7 +72,7 @@ telemetry.writeWorkersFile();
 // Start periodic state snapshots (every 30s, separate from the 3s tick)
 stateStore.startPeriodicSave(() => telemetry.exportState());
 
-console.log("Loom daemon running.");
+console.log("Hive daemon running.");
 console.log("  Token: ~/.hive/token");
 console.log("  Telemetry: http://127.0.0.1:3001");
 console.log("  WebSocket: ws://127.0.0.1:3002");

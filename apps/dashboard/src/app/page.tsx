@@ -241,7 +241,7 @@ export default function Home() {
         onClick={() => { if (chatExpanded) { setChatExpanded(false); } }}
       >
         <div className="text-center relative">
-          <h1 className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)]">Loom</h1>
+          <h1 className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)]">Hive</h1>
           <div className="flex items-center justify-center gap-1.5 mt-1">
             <span className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-[var(--dot-active)]" : "bg-[var(--dot-offline)]"}`} />
             <span className="text-[10px] text-[var(--text-light)]">

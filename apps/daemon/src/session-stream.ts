@@ -329,10 +329,10 @@ function resolveRoutedMessage(text: string): string | null {
     const filePath = join(homeDir, ".hive", "context-messages", match[1]);
     const content = readFileSync(filePath, "utf-8");
     const lines = content.split("\n");
-    // Skip header: "# Loom Routed Message", Target, Model, Created lines
+    // Skip header: "# Hive Routed Message", Target, Model, Created lines
     let startIdx = 0;
     for (let i = 0; i < lines.length && i < 6; i++) {
-      if (lines[i].startsWith("# Loom Routed Message") ||
+      if (lines[i].startsWith("# Hive Routed Message") || lines[i].startsWith("# Loom Routed Message") ||
           lines[i].startsWith("Target:") ||
           lines[i].startsWith("Model:") ||
           lines[i].startsWith("Created:")) {

@@ -551,7 +551,7 @@ export class TelemetryReceiver {
       .filter((ctx): ctx is WorkerContextSnapshot => ctx !== null);
     if (contexts.length === 0) return content;
 
-    return `${content.trim()}\n\n## Loom Peer Context\nUse this only if it is relevant to the task.\n\n${contexts.map((ctx) => ctx.contextSummary).join("\n\n")}`;
+    return `${content.trim()}\n\n## Hive Peer Context\nUse this only if it is relevant to the task.\n\n${contexts.map((ctx) => ctx.contextSummary).join("\n\n")}`;
   }
 
   private writeContextBundle(worker: WorkerState, content: string): string {
@@ -559,7 +559,7 @@ export class TelemetryReceiver {
     const name = `msg-${Date.now()}-${randomBytes(4).toString("hex")}.md`;
     const path = join(dir, name);
     const header = [
-      "# Loom Routed Message",
+      "# Hive Routed Message",
       `Target: ${worker.quadrant ? `Q${worker.quadrant}` : worker.id}${worker.tty ? ` (${worker.tty})` : ""}`,
       `Model: ${worker.model || "claude"}`,
       `Created: ${new Date().toISOString()}`,
@@ -656,7 +656,7 @@ export class TelemetryReceiver {
             const filesSummary = files.length > 0
               ? ` Files changed: ${files.slice(-8).join(", ")}.`
               : " No files changed.";
-            const notification = `[Loom] ${receiverName} finished your task: "${dispatch.task}".${filesSummary} Verify their work didn't overwrite or conflict with yours.`;
+            const notification = `[Hive] ${receiverName} finished your task: "${dispatch.task}".${filesSummary} Verify their work didn't overwrite or conflict with yours.`;
             this.enqueueMessage(dispatch.fromWorkerId, {
               content: notification,
               source: "dispatch-callback",
@@ -701,7 +701,7 @@ export class TelemetryReceiver {
     try {
       if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
       const header = !existsSync(learningFile)
-        ? "# Loom Learnings\n\nLessons captured automatically. Every agent in this project reads this file.\n\n"
+        ? "# Hive Learnings\n\nLessons captured automatically. Every agent in this project reads this file.\n\n"
         : "";
       const timestamp = new Date().toISOString().split("T")[0];
       appendFileSync(learningFile, `${header}- [${timestamp}] ${lesson}\n`);
@@ -1435,7 +1435,7 @@ export class TelemetryReceiver {
 
     const active = others.filter(w => w.status === "working");
     if (active.length > 0) {
-      lines.push("## Loom Context");
+      lines.push("## Hive Context");
       lines.push("Other agents currently working:");
       for (const w of active) {
         const action = w.currentAction || w.lastAction;

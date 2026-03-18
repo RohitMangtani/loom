@@ -100,7 +100,7 @@ export class NotificationManager {
     const label = state.tty || workerId.slice(0, 10);
     const project = state.projectName || "unknown";
     const action = state.stuckMessage?.split("\n")[0]?.slice(0, 80) || state.currentAction || "Needs attention";
-    const title = `Loom: ${label} stuck`;
+    const title = `Hive: ${label} stuck`;
     const body = `${project} — ${action}`;
 
     try {
