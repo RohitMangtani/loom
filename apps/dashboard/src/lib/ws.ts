@@ -48,6 +48,10 @@ export function useHive(daemonUrl: string) {
   /** Subscribe to a worker's chat stream */
   const subscribeTo = useCallback(
     (workerId: string | null) => {
+      // Idempotent: skip if already subscribed to this worker.
+      // Prevents double-fire from onPointerDown + onClick racing.
+      if (workerId === subscribedRef.current) return;
+
       // Unsubscribe from previous
       if (subscribedRef.current) {
         send({ type: "unsubscribe", workerId: subscribedRef.current });
@@ -118,6 +122,11 @@ export function useHive(daemonUrl: string) {
           case "chat_history": {
             if (data.workerId && data.messages) {
               const wid = data.workerId;
+
+              // Ignore stale responses from workers we're no longer subscribed to.
+              // This prevents cross-contamination when rapidly switching agents.
+              if (wid !== subscribedRef.current) break;
+
               const newEntries = data.messages;
 
               if (data.full) {

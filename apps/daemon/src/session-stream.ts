@@ -439,6 +439,41 @@ function parseLine(line: string): ChatEntry[] | null {
       return entries.length > 0 ? entries : null;
     }
 
+    // ── OpenClaw format ──
+    // OpenClaw wraps everything in {type:"message", message:{role:"...", content:[...]}}
+    if (type === "message" && obj.message) {
+      const msg = obj.message;
+      if (msg.role === "user") {
+        let text = extractText(msg.content);
+        if (!text) return null;
+        // Strip OpenClaw gateway routing prefix (sender metadata + timestamp)
+        text = text.replace(/^Sender \(untrusted metadata\):[\s\S]*?\n\n\[.*?\]\s*/m, "");
+        const routed = resolveRoutedMessage(text);
+        if (routed !== null) text = routed;
+        text = cleanUserMessage(text);
+        if (text) return [{ role: "user", text }];
+        return null;
+      }
+      if (msg.role === "assistant") {
+        const entries: ChatEntry[] = [];
+        if (Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if (block.type === "text" && block.text?.trim()) {
+              entries.push({ role: "agent", text: block.text.trim() });
+            } else if (block.type === "toolCall") {
+              // OpenClaw uses lowercase tool names — capitalize for describeAction
+              const name = block.name ? (block.name.charAt(0).toUpperCase() + block.name.slice(1)) : undefined;
+              const desc = describeAction(name, block.arguments);
+              entries.push({ role: "tool", text: desc });
+            }
+          }
+        }
+        return entries.length > 0 ? entries : null;
+      }
+      // toolResult → skip (same as Claude tool_result)
+      return null;
+    }
+
     // ── Codex format ──
     // Codex wraps everything in {type, payload}
     const p = obj.payload;
