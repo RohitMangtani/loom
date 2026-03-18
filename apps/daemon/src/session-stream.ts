@@ -458,7 +458,10 @@ function describeCodexAction(name: string, input?: Record<string, unknown>): str
 
 /**
  * Parse a Gemini CLI session JSON file into ChatEntry objects.
- * Gemini writes: { messages: [{ type: "user"|"gemini", content: "..." }, ...] }
+ * Gemini format:
+ *   user content: array of {text: "..."} objects
+ *   gemini content: plain string
+ *   info/warning: skip (update notices, home dir warnings)
  */
 function parseGeminiSession(filePath: string): ChatEntry[] {
   try {
@@ -468,21 +471,33 @@ function parseGeminiSession(filePath: string): ChatEntry[] {
 
     const entries: ChatEntry[] = [];
     for (const msg of session.messages) {
-      if (!msg.content || typeof msg.content !== "string") continue;
-      const text = msg.content.trim();
-      if (!text) continue;
-
       if (msg.type === "user") {
-        entries.push({ role: "user", text });
+        // User content is an array: [{text: "Hi"}]
+        const text = extractGeminiUserText(msg.content);
+        if (text) entries.push({ role: "user", text });
       } else if (msg.type === "gemini") {
-        entries.push({ role: "agent", text });
+        // Agent content is a plain string
+        const text = typeof msg.content === "string" ? msg.content.trim() : null;
+        if (text) entries.push({ role: "agent", text });
       }
-      // Tool calls in Gemini show up as type "tool_use" / "tool_result" — skip for now
+      // Skip: info, warning, tool_use, tool_result
     }
     return entries;
   } catch {
     return [];
   }
+}
+
+/** Extract text from Gemini user message content (array of {text} parts) */
+function extractGeminiUserText(content: unknown): string | null {
+  if (typeof content === "string") return content.trim() || null;
+  if (Array.isArray(content)) {
+    const parts = content
+      .map((p: Record<string, unknown>) => typeof p.text === "string" ? p.text : "")
+      .filter(Boolean);
+    return parts.join(" ").trim() || null;
+  }
+  return null;
 }
 
 function extractText(content: unknown): string | null {

@@ -1348,10 +1348,11 @@ end tell
       };
 
       scanDir(geminiDir, 0);
-      // Birthtime match wins. Mtime fallback only if no birthtime match.
-      const bestFile = birthtimeMatch || mtimeFallback;
-      this.geminiSessionCache.set(pid, { file: bestFile, checkedAt: Date.now() });
-      return bestFile;
+      // Only use birthtime match. No mtime fallback — that picks old sessions
+      // and shows stale chat history when a new Gemini instance is spawned.
+      // If no birthtime match, return null and re-check on next scan.
+      this.geminiSessionCache.set(pid, { file: birthtimeMatch, checkedAt: Date.now() });
+      return birthtimeMatch;
     } catch {
       this.geminiSessionCache.set(pid, { file: null, checkedAt: Date.now() });
       return null;
