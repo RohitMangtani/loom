@@ -1022,6 +1022,7 @@ end tell
       if (lastInput > 0 && Date.now() - lastInput < 15_000) {
         this.checkTransition(id, tty, "working", "gemini: input-sent guard", ctx);
         existing.currentAction = "Thinking...";
+        existing.lastActionAt = Date.now();
         return;
       }
 
@@ -1029,6 +1030,7 @@ end tell
       if (lastType === "user" && fileAgeMs < 30_000) {
         this.checkTransition(id, tty, "working", "gemini: user at tail, file fresh", ctx);
         existing.currentAction = "Thinking...";
+        existing.lastActionAt = Date.now();
         this.lastConfirmedWorking.set(id, Date.now());
         return;
       }
@@ -1037,6 +1039,7 @@ end tell
       if (lastType === "gemini" && fileAgeMs < 4_000) {
         this.checkTransition(id, tty, "working", "gemini: response mid-stream", ctx);
         existing.currentAction = "Thinking...";
+        existing.lastActionAt = Date.now();
         return;
       }
 
@@ -1045,6 +1048,7 @@ end tell
       if (Date.now() - lastWorking < 25_000) {
         this.checkTransition(id, tty, "working", `gemini: cooldown (${Math.round((Date.now() - lastWorking) / 1000)}s)`, ctx);
         existing.currentAction = "Thinking...";
+        existing.lastActionAt = Date.now();
         return;
       }
 
@@ -1052,6 +1056,7 @@ end tell
       if (lastType === "gemini" && fileAgeMs > 4_000) {
         this.checkTransition(id, tty, "idle", "gemini: response at tail, file stale", ctx);
         existing.currentAction = null;
+        existing.lastActionAt = Date.now(); // Prevent telemetry.tick() from overriding
         return;
       }
 
