@@ -1213,7 +1213,7 @@ end tell
       let bestMtime = 0;
       let bestBirthtimeDiff = Infinity;
 
-      // Scan up to 3 levels deep for .jsonl files under ~/.gemini/
+      // Scan chats/ dirs under ~/.gemini/tmp/<hash>/chats/ for session-*.json files
       const scanDir = (dir: string, depth: number) => {
         if (depth > 3) return;
         try {
@@ -1223,7 +1223,7 @@ end tell
               const stat = statSync(fullPath);
               if (stat.isDirectory()) {
                 scanDir(fullPath, depth + 1);
-              } else if (entry.endsWith(".jsonl")) {
+              } else if (entry.startsWith("session-") && entry.endsWith(".json")) {
                 const birthtimeDiff = Math.abs(stat.birthtimeMs - startedAt);
                 if (birthtimeDiff < 120_000 && birthtimeDiff < bestBirthtimeDiff) {
                   bestBirthtimeDiff = birthtimeDiff;

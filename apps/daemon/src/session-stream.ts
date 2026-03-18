@@ -15,6 +15,8 @@ interface Subscription {
   watcher: FSWatcher | null;
   callback: (entries: ChatEntry[], full?: boolean) => void;
   nudgeTimers: ReturnType<typeof setTimeout>[];
+  /** For Gemini JSON files: track message count to detect new messages */
+  geminiMsgCount?: number;
 }
 
 interface PendingSub {
@@ -149,6 +151,12 @@ export class SessionStreamer {
     if (!filePath) return [];
 
     try {
+      // Gemini JSON format: single JSON object with messages array
+      if (filePath.endsWith(".json")) {
+        return parseGeminiSession(filePath).slice(-MAX_HISTORY);
+      }
+
+      // Claude/Codex JSONL format: one JSON object per line
       const buf = readFileSync(filePath);
       const content = buf.toString("utf-8");
       const lines = content.split("\n").filter(Boolean);
@@ -263,6 +271,20 @@ export class SessionStreamer {
     }
 
     try {
+      // Gemini JSON files: re-read whole file, diff by message count
+      if (sub.filePath.endsWith(".json")) {
+        const allEntries = parseGeminiSession(sub.filePath);
+        const prevCount = sub.geminiMsgCount ?? 0;
+        sub.geminiMsgCount = allEntries.length;
+        if (isFileChange) {
+          if (allEntries.length > 0) sub.callback(allEntries, true);
+        } else if (allEntries.length > prevCount) {
+          sub.callback(allEntries.slice(prevCount));
+        }
+        return;
+      }
+
+      // Claude/Codex JSONL: incremental byte-offset reads
       const stat = statSync(sub.filePath);
       if (stat.size <= sub.byteOffset) return;
 
@@ -431,6 +453,35 @@ function describeCodexAction(name: string, input?: Record<string, unknown>): str
       return input.path ? `Listing ${basename(input.path as string)}` : "Listing files";
     default:
       return name;
+  }
+}
+
+/**
+ * Parse a Gemini CLI session JSON file into ChatEntry objects.
+ * Gemini writes: { messages: [{ type: "user"|"gemini", content: "..." }, ...] }
+ */
+function parseGeminiSession(filePath: string): ChatEntry[] {
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    const session = JSON.parse(raw);
+    if (!session.messages || !Array.isArray(session.messages)) return [];
+
+    const entries: ChatEntry[] = [];
+    for (const msg of session.messages) {
+      if (!msg.content || typeof msg.content !== "string") continue;
+      const text = msg.content.trim();
+      if (!text) continue;
+
+      if (msg.type === "user") {
+        entries.push({ role: "user", text });
+      } else if (msg.type === "gemini") {
+        entries.push({ role: "agent", text });
+      }
+      // Tool calls in Gemini show up as type "tool_use" / "tool_result" — skip for now
+    }
+    return entries;
+  } catch {
+    return [];
   }
 }
 
