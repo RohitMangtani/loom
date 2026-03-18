@@ -1203,8 +1203,15 @@ end tell
   private findGeminiSessionFile(pid: number, startedAt: number): string | null {
     const cached = this.geminiSessionCache.get(pid);
     if (cached) {
-      if (cached.file) return cached.file;
-      if (Date.now() - cached.checkedAt < 30_000) return null;
+      // Re-check if cached file is stale (Gemini creates a new file per session)
+      if (cached.file) {
+        try {
+          const age = Date.now() - statSync(cached.file).mtimeMs;
+          if (age < 120_000) return cached.file; // Still active
+        } catch { /* file gone, re-scan */ }
+      } else {
+        if (Date.now() - cached.checkedAt < 30_000) return null;
+      }
     }
 
     const geminiDir = join(HOME, ".gemini");
@@ -1213,9 +1220,9 @@ end tell
       let bestMtime = 0;
       let bestBirthtimeDiff = Infinity;
 
-      // Scan chats/ dirs under ~/.gemini/tmp/<hash>/chats/ for session-*.json files
+      // Scan ~/.gemini/tmp/<hash>/chats/ for session-*.json files (4 levels deep)
       const scanDir = (dir: string, depth: number) => {
-        if (depth > 3) return;
+        if (depth > 4) return;
         try {
           for (const entry of readdirSync(dir)) {
             const fullPath = join(dir, entry);

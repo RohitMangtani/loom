@@ -1310,7 +1310,7 @@ export class TelemetryReceiver {
         }
       }
     } else if (worker.tty) {
-      const result = await sendInputToTtyAsync(worker.tty, payload);
+      const result = await sendInputToTtyAsync(worker.tty, payload, worker.model);
       if (!result.ok) {
         error = result.error || `Failed to send to ${worker.tty}`;
       }

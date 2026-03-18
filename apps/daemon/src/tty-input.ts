@@ -300,15 +300,76 @@ let sendMutex: Promise<void> = Promise.resolve();
  * Sends are serialized via a promise chain so concurrent callers don't race
  * over Terminal.app focus.
  */
-export function sendInputToTtyAsync(tty: string, text: string): Promise<{ ok: boolean; error?: string }> {
+export function sendInputToTtyAsync(tty: string, text: string, model?: string): Promise<{ ok: boolean; error?: string }> {
   const cleaned = text.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
   if (!cleaned) return Promise.resolve({ ok: false, error: "Empty message" });
+
+  // Gemini CLI uses ink TextInput that only reads raw keypresses,
+  // not do-script text injection. Use System Events keystroke instead.
+  if (model === "gemini") {
+    const resultPromise = sendMutex.then(() => doSendKeystrokeAsync(tty, cleaned));
+    sendMutex = resultPromise.then(() => {}, () => {});
+    return resultPromise;
+  }
 
   // Chain onto the mutex — each send waits for the previous to finish
   const resultPromise = sendMutex.then(() => doSendAsync(tty, cleaned));
   // Update the mutex to wait for this send (swallow errors so chain continues)
   sendMutex = resultPromise.then(() => {}, () => {});
   return resultPromise;
+}
+
+/**
+ * Send text via System Events keystroke (character-by-character).
+ * Required for ink-based TUIs like Gemini CLI that read raw key events
+ * instead of shell-injected text from `do script`.
+ */
+async function doSendKeystrokeAsync(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
+  const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+
+  // Escape backslashes and double quotes for AppleScript string
+  const escaped = cleaned.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+  const script = `
+tell application "Terminal"
+  set targetTTY to "${device}"
+  set targetTab to missing value
+  set targetWin to missing value
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is targetTTY then
+        set targetTab to t
+        set targetWin to w
+        exit repeat
+      end if
+    end repeat
+    if targetTab is not missing value then exit repeat
+  end repeat
+  if targetTab is missing value then error "TTY not found in Terminal.app"
+  set selected of targetTab to true
+  set index of targetWin to 1
+  activate
+end tell
+delay 0.3
+tell application "System Events"
+  tell process "Terminal"
+    keystroke "${escaped}"
+    delay 0.1
+    key code 36
+  end tell
+end tell
+`;
+
+  try {
+    await execFileAsync("/usr/bin/osascript", ["-e", script], {
+      timeout: 15000,
+      encoding: "utf-8",
+    });
+    return { ok: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `Keystroke send failed: ${msg.slice(0, 180)}` };
+  }
 }
 
 async function doSendAsync(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
