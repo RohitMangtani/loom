@@ -37,8 +37,8 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 ## What You Get
 
 - **Stoplight dashboard** — vertical stack that mirrors your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor. The tile order matches your terminal order top to bottom. Supports 1-8 agents.
-- **Multi-model** — run Claude, Codex, and OpenClaw agents side by side. Each tile shows which model is running. Spawn any from the dashboard with the "+ Agent" button. Add custom agents via `~/.hive/agents.json` and they appear in the spawn dialog automatically.
-- **Auto-discovery** — start `claude`, `codex`, or `openclaw tui` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
+- **Multi-model** — run Claude, Codex, OpenClaw, and Gemini agents side by side. Each tile shows which model is running. Spawn any from the dashboard with the "+ Agent" button. Add custom agents via `~/.hive/agents.json` and they appear in the spawn dialog automatically.
+- **Auto-discovery** — start `claude`, `codex`, `openclaw tui`, or `gemini` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
 - **Auto-pilot** — permission prompts auto-approve after a 15-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
 - **Peer awareness** — Claude agents get a one-line peer summary on every prompt, and all workers share the same dashboard/API state. No manual registration.
@@ -55,10 +55,10 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 - **macOS** (uses AppleScript + CGEvent for terminal interaction)
 - **Node.js 20+** — [nodejs.org](https://nodejs.org)
 - **Xcode Command Line Tools** — provides `swiftc` for the `send-return` helper (`xcode-select --install`)
-- **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`) and/or OpenClaw (`npm install -g openclaw`)
+- **At least one supported CLI** — Claude Code (`npm install -g @anthropic-ai/claude-code`) and/or Codex (`npm install -g @openai/codex`) and/or OpenClaw (`npm install -g openclaw`) and/or Gemini CLI (`npm install -g @google/gemini-cli`)
 - **Hosted dashboard extras** (required for the standard `npm run launch` path) — Homebrew for `cloudflared`, `python3`, and a Vercel account (`npx vercel login`). If you only want localhost, use `npm run launch:local` instead.
 
-Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection. Any other terminal agent can be added via a config file (see [Custom Agents](#custom-agents)).
+Claude, Codex, OpenClaw, and Gemini can be mixed freely. Claude gets the richest hook-based telemetry. Codex, OpenClaw, and Gemini work out of the box through session file analysis, CPU, and PTY detection. Any other terminal agent can be added via a config file (see [Custom Agents](#custom-agents)).
 
 ## Quick Start
 
@@ -88,6 +88,12 @@ or
 
 ```bash
 openclaw tui
+```
+
+or
+
+```bash
+gemini
 ```
 
 The daemon auto-discovers any supported CLI in about 3 seconds. Arrange the windows in the screen corners and the dashboard mirrors that layout automatically.
@@ -165,8 +171,12 @@ or
 ```bash
 openclaw tui
 ```
+or
+```bash
+gemini
+```
 
-Stack your terminal windows vertically on screen. The daemon detects their positions and maps each one to the matching tile in the dashboard stack. Mix `claude`, `codex`, and `openclaw` however you want. You can also spawn agents from the dashboard: tap "+ Agent", pick a model, optionally add a task, and hit Spawn. If the CLI isn't installed, the tile shows a clear error instead of silently failing.
+Stack your terminal windows vertically on screen. The daemon detects their positions and maps each one to the matching tile in the dashboard stack. Mix `claude`, `codex`, `openclaw`, and `gemini` however you want. You can also spawn agents from the dashboard: tap "+ Agent", pick a model, optionally add a task, and hit Spawn. If the CLI isn't installed, the tile shows a clear error instead of silently failing.
 
 **4. Install the app on your phone** (optional, recommended)
 
@@ -183,7 +193,7 @@ Open the dashboard URL on your phone and add it to your home screen. It runs ful
 ## How It Works
 
 ### Auto-Discovery
-Detects Claude, Codex, and OpenClaw processes within 3 seconds via `ps` + `lsof`. No configuration needed. Start `claude`, `codex`, or `openclaw tui` in any terminal and the daemon finds it. Supports up to 8 agents simultaneously. The daemon reads the vertical position of each Terminal window on your screen every 10 seconds and assigns slots to match. Move a terminal higher on screen, it moves up in the dashboard stack. Tab titles update automatically to show which slot each terminal is.
+Detects Claude, Codex, OpenClaw, and Gemini processes within 3 seconds via `ps` + `lsof`. No configuration needed. Start `claude`, `codex`, or `openclaw tui` in any terminal and the daemon finds it. Supports up to 8 agents simultaneously. The daemon reads the vertical position of each Terminal window on your screen every 10 seconds and assigns slots to match. Move a terminal higher on screen, it moves up in the dashboard stack. Tab titles update automatically to show which slot each terminal is.
 
 ### Status Tracking
 Multi-layer detection pipeline determines real-time status:
@@ -347,7 +357,7 @@ These behaviors are configured through the CLAUDE.md instructions, not hardcoded
 
 ## Custom Agents
 
-Loom ships with Claude, Codex, and OpenClaw support built in. To add any other terminal agent, create `~/.hive/agents.json`:
+Loom ships with Claude, Codex, OpenClaw, and Gemini support built in. To add any other terminal agent, create `~/.hive/agents.json`:
 
 ```json
 [
@@ -402,7 +412,7 @@ Setup generates a random token at `~/.hive/token`. All API requests require this
 
 ```
 Daemon (Node.js, port 3001 + 3002)
-├── Discovery     — finds Claude + Codex + OpenClaw processes via ps + lsof every 3s
+├── Discovery     — finds Claude + Codex + OpenClaw + Gemini processes via ps + lsof every 3s
 ├── Telemetry     — receives hook events and inferred signals, maintains worker state
 ├── Auto-pilot    — detects stuck prompts, auto-approves via send-return
 ├── Arrange       — detects terminal positions, assigns quadrants by screen location
