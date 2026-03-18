@@ -307,9 +307,12 @@ export function ChatPanel({
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    if (draft.trim()) { const sent = guardedSend(draft.trim()); if (sent) onDraftChange(""); }
+                  if (e.key === "Enter") {
+                    const desktop = window.matchMedia("(hover: hover)").matches;
+                    if ((desktop && !e.shiftKey) || e.metaKey || e.ctrlKey) {
+                      e.preventDefault();
+                      if (draft.trim()) { const sent = guardedSend(draft.trim()); if (sent) onDraftChange(""); }
+                    }
                   }
                 }}
                 onFocus={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
