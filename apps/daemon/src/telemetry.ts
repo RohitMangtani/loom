@@ -1620,6 +1620,20 @@ export class TelemetryReceiver {
       return { ok: false, error: `Worker ${workerId} not found` };
     }
 
+    // Auto-pull before delivering messages from API/dashboard so the agent
+    // works on the latest code. Same pattern as task queue dispatch.
+    // Skips internal sources (auto-pilot, task-queue — queue already pulls).
+    if (worker.project && !options.source.startsWith("auto-pilot") && options.source !== "task-queue") {
+      try {
+        const { execFile: gitPull } = require("child_process");
+        gitPull("/usr/bin/git", ["pull", "--ff-only", "--no-edit"], {
+          cwd: worker.project,
+          encoding: "utf-8",
+          timeout: 15_000,
+        });
+      } catch { /* not a git repo or no remote — skip */ }
+    }
+
     const contentWithContext = this.composeMessageWithContext(workerId, content, {
       fromWorkerId: options.fromWorkerId,
       contextWorkerIds: options.contextWorkerIds,
