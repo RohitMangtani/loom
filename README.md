@@ -78,7 +78,7 @@ Before you paste, you'll need to approve a few things as the agent works. These 
 
 Paste this into Claude Code or Codex:
 
-> Install Hive for me. Clone https://github.com/RohitMangtani/hive and run `bash scripts/install.sh` from inside the cloned directory. The script will ask me whether I want to start a new Hive environment or join an existing one on another computer. If I'm starting fresh, it handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. If I'm joining an existing Hive, it asks me for the tunnel URL and token from the other machine and connects to it. It takes a few minutes. When Vercel opens my browser (fresh install only), I'll click authorize and it continues. Give me whatever it prints at the end.
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive. Before running the install script, ask me: "Do you want to (1) start a new Hive environment with your own dashboard, or (2) join an existing Hive network on another computer?" If I choose 1, run `bash scripts/install.sh --fresh`. It handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end. If I choose 2, ask me for the tunnel URL and token from the other machine, then run `bash scripts/install.sh --connect <URL> <TOKEN>` with what I provide. Give me whatever it prints at the end.
 
 **What you need beforehand:**
 - macOS with Node.js 20+ installed

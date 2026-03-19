@@ -48,4 +48,10 @@ export class LockManager {
       path, ...lock,
     }));
   }
+
+  getLocksExcluding(excludeWorkerId: string): Array<{ path: string; workerId: string; tty?: string; lockedAt: number }> {
+    return [...this.locks.entries()]
+      .filter(([, lock]) => lock.workerId !== excludeWorkerId && this.isWorkerAlive(lock.workerId))
+      .map(([path, lock]) => ({ path, ...lock }));
+  }
 }

@@ -109,14 +109,15 @@ export function registerApiRoutes(
 
   // POST /api/queue
   app.post("/api/queue", requireAuth, (req, res) => {
-    const { task, project, priority, blockedBy, workflowId } = req.body as {
+    const { task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit } = req.body as {
       task?: string; project?: string; priority?: number; blockedBy?: string; workflowId?: string;
+      verify?: boolean; maxVerifyAttempts?: number; autoCommit?: boolean;
     };
     if (!task) {
       res.status(400).json({ error: "Missing task" });
       return;
     }
-    const queued = receiver.pushTask(task, project, priority ?? 10, blockedBy, workflowId);
+    const queued = receiver.pushTask(task, project, priority ?? 10, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit);
     res.json({ ok: true, task: queued, remaining: receiver.getTaskQueueLength() });
   });
 

@@ -11,8 +11,9 @@
 import { WebSocket } from "ws";
 import { hostname } from "os";
 import { homedir, platform } from "os";
-import { join } from "path";
-import { unlinkSync } from "fs";
+import { join, basename } from "path";
+import { unlinkSync, existsSync } from "fs";
+import { execFile } from "child_process";
 import { ProcessDiscovery } from "./discovery.js";
 import { TelemetryReceiver } from "./telemetry.js";
 import { SessionStreamer } from "./session-stream.js";
@@ -51,6 +52,8 @@ interface SatelliteDownMessage {
   initialMessage?: string;
   content?: string;
   optionIndex?: number;
+  files?: string[];       // auto-commit: file paths to commit
+  message?: string;       // auto-commit: commit message
 }
 
 export class SatelliteClient {
@@ -315,6 +318,55 @@ export class SatelliteClient {
         if (subKey) {
           this.streamer.unsubscribe(subKey);
           this.chatSubs.delete(prefixedId);
+        }
+        break;
+      }
+
+      case "satellite_autocommit": {
+        const project = msg.project || "";
+        const files = msg.files || [];
+        const commitMessage = msg.message || "Auto-commit by Hive";
+
+        if (!project || files.length === 0) {
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: "No project or files" });
+          return;
+        }
+
+        // Filter to files that exist on disk
+        const existingFiles = files.filter(f => existsSync(f));
+        if (existingFiles.length === 0) {
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: "No files exist on disk" });
+          return;
+        }
+
+        // Run git add + commit asynchronously
+        try {
+          const gitAdd = () => new Promise<void>((resolve, reject) => {
+            execFile("/usr/bin/git", ["add", ...existingFiles], { cwd: project, timeout: 10_000 },
+              (err) => err ? reject(err) : resolve());
+          });
+          const gitCommit = () => new Promise<string>((resolve, reject) => {
+            const shortTask = commitMessage.slice(0, 100);
+            const fileNames = existingFiles.map(f => basename(f)).join(", ");
+            const fullMsg = `${shortTask}\n\nFiles: ${fileNames}\n\nAuto-committed by Hive (satellite: ${this.machineId}).`;
+            execFile("/usr/bin/git", ["commit", "-m", fullMsg, "--no-verify"], { cwd: project, timeout: 15_000 },
+              (err, stdout) => err ? reject(err) : resolve(stdout));
+          });
+          const gitHash = () => new Promise<string>((resolve, reject) => {
+            execFile("/usr/bin/git", ["rev-parse", "--short", "HEAD"], { cwd: project, timeout: 3_000, encoding: "utf-8" },
+              (err, stdout) => err ? reject(err) : resolve((stdout || "").trim()));
+          });
+
+          await gitAdd();
+          await gitCommit();
+          const hash = await gitHash();
+
+          console.log(`[satellite-autocommit] Committed ${existingFiles.length} file(s) → ${hash}`);
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.log(`[satellite-autocommit] Failed: ${errMsg}`);
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: errMsg });
         }
         break;
       }

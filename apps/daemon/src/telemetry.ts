@@ -41,6 +41,9 @@ interface QueuedMessage {
   fromWorkerId?: string;
   contextWorkerIds?: string[];
   includeSenderContext?: boolean;
+  verify?: boolean;
+  maxVerifyAttempts?: number;
+  autoCommit?: boolean;
 }
 
 interface WorkerContextOptions {
@@ -122,7 +125,19 @@ export class TelemetryReceiver {
   private static readonly SPAWN_GRACE_PERIOD = 60_000; // 60s
 
   // Dispatch tracking
-  private dispatchedTasks = new Map<string, { task: string; project: string; sentAt: number; taskId?: string; workflowId?: string; fromWorkerId?: string }>();
+  private dispatchedTasks = new Map<string, {
+    task: string; project: string; sentAt: number;
+    taskId?: string; workflowId?: string; fromWorkerId?: string;
+    // Verification loop fields
+    verify?: boolean; maxVerifyAttempts?: number;
+    verifyAttempts?: number; verifyPhase?: boolean;
+    artifactsAtVerifyStart?: number;
+    // Auto-commit after completion
+    autoCommit?: boolean;
+  }>();
+
+  // Auto-commit listeners (ws-server uses this to route satellite commits)
+  private autoCommitListeners: Array<(workerId: string, project: string, files: string[], message: string) => void> = [];
 
   // Workflow handoffs: workflowId → handoff context from completed steps
   private workflowHandoffs = new Map<string, string[]>();
@@ -631,7 +646,7 @@ export class TelemetryReceiver {
 
   // --- Dispatch tracking ---
 
-  trackDispatch(workerId: string, taskBrief: string, taskId?: string, workflowId?: string, fromWorkerId?: string): void {
+  trackDispatch(workerId: string, taskBrief: string, taskId?: string, workflowId?: string, fromWorkerId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean): void {
     const worker = this.workers.get(workerId);
     const project = worker?.project || "";
     this.dispatchedTasks.set(workerId, {
@@ -641,6 +656,9 @@ export class TelemetryReceiver {
       taskId,
       workflowId,
       fromWorkerId,
+      verify,
+      maxVerifyAttempts,
+      autoCommit,
     });
   }
 
@@ -658,11 +676,89 @@ export class TelemetryReceiver {
       if (worker.status === "idle" && Date.now() - dispatch.sentAt > 10_000) {
         const artifacts = this.getArtifacts(workerId);
         const recentArtifacts = artifacts.filter(a => Date.now() - a.ts < 30 * 60 * 1000);
+        const maxVerify = dispatch.maxVerifyAttempts || 3;
+
+        // --- Verification loop ---
+        // Phase 1: Task just finished, verification enabled, not yet in verify phase
+        if (dispatch.verify && !dispatch.verifyPhase) {
+          dispatch.verifyPhase = true;
+          dispatch.verifyAttempts = 1;
+          dispatch.artifactsAtVerifyStart = artifacts.length;
+          dispatch.sentAt = Date.now();
+          const ttyLabel = worker.tty || workerId;
+          const verifyMsg = `[Hive Verify] You just completed: "${dispatch.task}". Before this is marked done, verify your work:\n1. Run the build or dev server if applicable and check for errors\n2. Review what you changed for correctness\n3. Fix any issues you find\nIf everything looks good, just say done. If you fixed something, say what. (Attempt 1/${maxVerify})`;
+          this.sendToWorker(workerId, verifyMsg, {
+            source: "verification",
+            queueIfBusy: true,
+            lastAction: "Verification check",
+          });
+          console.log(`[verify] ${ttyLabel}: verification prompt sent (attempt 1/${maxVerify})`);
+          continue;
+        }
+
+        // Phase 2: Agent went idle after a verification prompt
+        if (dispatch.verify && dispatch.verifyPhase) {
+          const currentArtifactCount = artifacts.length;
+          const madeChanges = currentArtifactCount > (dispatch.artifactsAtVerifyStart || 0);
+          const attempts = dispatch.verifyAttempts || 1;
+          const ttyLabel = worker.tty || workerId;
+
+          if (madeChanges && attempts < maxVerify) {
+            // Agent fixed something during verification — re-verify
+            dispatch.verifyAttempts = attempts + 1;
+            dispatch.sentAt = Date.now();
+            dispatch.artifactsAtVerifyStart = currentArtifactCount;
+            const verifyMsg = `[Hive Verify] You made changes during verification. Check again — run build, confirm no new errors. (Attempt ${attempts + 1}/${maxVerify})`;
+            this.sendToWorker(workerId, verifyMsg, {
+              source: "verification",
+              queueIfBusy: true,
+              lastAction: "Re-verification check",
+            });
+            console.log(`[verify] ${ttyLabel}: re-verify (made changes), attempt ${attempts + 1}/${maxVerify}`);
+            continue;
+          }
+
+          // Verification complete — either no changes (clean pass) or retry cap hit
+          if (madeChanges) {
+            console.log(`[verify] ${ttyLabel}: verification cap reached after ${attempts} attempts (still making changes)`);
+          } else {
+            console.log(`[verify] ${ttyLabel}: verification passed (no changes on attempt ${attempts})`);
+          }
+          // Fall through to normal completion
+        }
+
+        // --- Normal completion (with or without verification) ---
         const fileList = artifacts.length > 0
           ? ` Files: ${artifacts.map(a => basename(a.path)).join(", ")}`
           : "";
-        const lesson = `Completed: ${dispatch.task}${fileList}`;
+        const verifyNote = dispatch.verify
+          ? ` [verified: ${dispatch.verifyAttempts || 0} attempt(s)]`
+          : "";
+        const lesson = `Completed: ${dispatch.task}${fileList}${verifyNote}`;
         this.writeLearning(dispatch.project, lesson);
+
+        // Auto-commit: commit artifact files if explicitly enabled for this dispatch
+        if (dispatch.autoCommit && recentArtifacts.length > 0 && dispatch.project) {
+          if (worker.machine) {
+            // Satellite worker — notify listeners so ws-server can forward to satellite
+            const files = recentArtifacts
+              .filter(a => a.action === "created" || a.action === "edited" || a.action === "wrote")
+              .map(a => a.path);
+            if (files.length > 0) {
+              for (const listener of this.autoCommitListeners) {
+                listener(workerId, dispatch.project, [...new Set(files)], dispatch.task);
+              }
+              console.log(`[auto-commit] ${workerId}: satellite commit requested for ${files.length} file(s)`);
+            }
+          } else {
+            // Local worker — commit directly
+            const commitHash = this.autoCommitArtifacts(workerId, dispatch.project, dispatch.task);
+            if (commitHash) {
+              const commitLesson = `Auto-committed ${recentArtifacts.length} file(s) → ${commitHash}`;
+              this.writeLearning(dispatch.project, commitLesson);
+            }
+          }
+        }
 
         if (dispatch.taskId) {
           this.taskQueue.markCompleted(dispatch.taskId);
@@ -741,6 +837,99 @@ export class TelemetryReceiver {
       appendFileSync(learningFile, `${header}- [${timestamp}] ${lesson}\n`);
       console.log(`[auto-learn] ${lesson.slice(0, 80)}`);
     } catch { /* non-critical */ }
+  }
+
+  // --- Auto-commit ---
+
+  onAutoCommit(listener: (workerId: string, project: string, files: string[], message: string) => void): void {
+    this.autoCommitListeners.push(listener);
+  }
+
+  /**
+   * Auto-commit artifacts after a dispatched task completes.
+   * Only commits files that were created or edited (not read).
+   * Returns the commit hash on success, or null on failure.
+   */
+  autoCommitArtifacts(workerId: string, project: string, taskDescription: string): string | null {
+    const artifacts = this.getArtifacts(workerId);
+    const committableFiles = artifacts
+      .filter(a => Date.now() - a.ts < 30 * 60 * 1000)
+      .filter(a => a.action === "created" || a.action === "edited" || a.action === "wrote")
+      .map(a => a.path);
+
+    if (committableFiles.length === 0) {
+      console.log(`[auto-commit] ${workerId}: no committable artifacts, skipping`);
+      return null;
+    }
+
+    // Deduplicate
+    const uniqueFiles = [...new Set(committableFiles)];
+
+    // Execute git commands locally
+    try {
+      const { execFileSync } = require("child_process");
+
+      // Check if project is a git repo
+      try {
+        execFileSync("/usr/bin/git", ["rev-parse", "--git-dir"], {
+          cwd: project,
+          encoding: "utf-8",
+          timeout: 3000,
+        });
+      } catch {
+        console.log(`[auto-commit] ${workerId}: ${project} is not a git repo, skipping`);
+        return null;
+      }
+
+      // Stage only the specific artifact files
+      const existingFiles = uniqueFiles.filter(f => existsSync(f));
+      if (existingFiles.length === 0) {
+        console.log(`[auto-commit] ${workerId}: no artifact files exist on disk, skipping`);
+        return null;
+      }
+
+      execFileSync("/usr/bin/git", ["add", ...existingFiles], {
+        cwd: project,
+        encoding: "utf-8",
+        timeout: 10_000,
+      });
+
+      // Check if there's anything staged
+      const staged = execFileSync("/usr/bin/git", ["diff", "--cached", "--name-only"], {
+        cwd: project,
+        encoding: "utf-8",
+        timeout: 5_000,
+      }).trim();
+
+      if (!staged) {
+        console.log(`[auto-commit] ${workerId}: nothing staged after git add, skipping`);
+        return null;
+      }
+
+      // Build commit message
+      const shortTask = taskDescription.slice(0, 100);
+      const fileNames = existingFiles.map(f => basename(f)).join(", ");
+      const commitMsg = `${shortTask}\n\nFiles: ${fileNames}\n\nAuto-committed by Hive after task completion.`;
+
+      execFileSync("/usr/bin/git", ["commit", "-m", commitMsg, "--no-verify"], {
+        cwd: project,
+        encoding: "utf-8",
+        timeout: 15_000,
+      });
+
+      // Get the commit hash
+      const hash = execFileSync("/usr/bin/git", ["rev-parse", "--short", "HEAD"], {
+        cwd: project,
+        encoding: "utf-8",
+        timeout: 3000,
+      }).trim();
+
+      console.log(`[auto-commit] ${workerId}: committed ${existingFiles.length} file(s) → ${hash}`);
+      return hash;
+    } catch (err) {
+      console.log(`[auto-commit] ${workerId}: git commit failed — ${err instanceof Error ? err.message : err}`);
+      return null;
+    }
   }
 
   // --- Signal timeline ---
@@ -1146,6 +1335,9 @@ export class TelemetryReceiver {
       fromWorkerId?: string;
       contextWorkerIds?: string[];
       includeSenderContext?: boolean;
+      verify?: boolean;
+      maxVerifyAttempts?: number;
+      autoCommit?: boolean;
     },
   ): { ok: true; queued?: boolean; id?: string; position?: number } | { ok: false; error: string } {
     const worker = this.get(workerId);
@@ -1183,6 +1375,9 @@ export class TelemetryReceiver {
         fromWorkerId: options.fromWorkerId,
         contextWorkerIds: options.contextWorkerIds,
         includeSenderContext: options.includeSenderContext,
+        verify: options.verify,
+        maxVerifyAttempts: options.maxVerifyAttempts,
+        autoCommit: options.autoCommit,
       });
       return {
         ok: true,
@@ -1213,6 +1408,8 @@ export class TelemetryReceiver {
               fromWorkerId: options.fromWorkerId,
               contextWorkerIds: options.contextWorkerIds,
               includeSenderContext: options.includeSenderContext,
+              verify: options.verify,
+              maxVerifyAttempts: options.maxVerifyAttempts,
             });
             return {
               ok: true,
@@ -1256,6 +1453,9 @@ export class TelemetryReceiver {
         options.taskId,
         options.workflowId,
         options.fromWorkerId,
+        options.verify,
+        options.maxVerifyAttempts,
+        options.autoCommit,
       );
     }
     this.notifyExternal(worker);
@@ -1283,6 +1483,9 @@ export class TelemetryReceiver {
       fromWorkerId?: string;
       contextWorkerIds?: string[];
       includeSenderContext?: boolean;
+      verify?: boolean;
+      maxVerifyAttempts?: number;
+      autoCommit?: boolean;
     },
   ): Promise<{ ok: true; queued?: boolean; id?: string; position?: number } | { ok: false; error: string }> {
     const worker = this.get(workerId);
@@ -1320,6 +1523,7 @@ export class TelemetryReceiver {
         fromWorkerId: options.fromWorkerId,
         contextWorkerIds: options.contextWorkerIds,
         includeSenderContext: options.includeSenderContext,
+        autoCommit: options.autoCommit,
       });
       return {
         ok: true,
@@ -1346,6 +1550,9 @@ export class TelemetryReceiver {
         options.taskId,
         options.workflowId,
         options.fromWorkerId,
+        options.verify,
+        options.maxVerifyAttempts,
+        options.autoCommit,
       );
     }
     this.notifyExternal(worker);
@@ -1452,6 +1659,9 @@ export class TelemetryReceiver {
         fromWorkerId: msg.fromWorkerId,
         contextWorkerIds: msg.contextWorkerIds,
         includeSenderContext: msg.includeSenderContext,
+        verify: msg.verify,
+        maxVerifyAttempts: msg.maxVerifyAttempts,
+        autoCommit: msg.autoCommit,
       });
       if (result.ok && !result.queued) {
         console.log(`[queue] ${worker.tty}: drained ${msg.id} (${queue.length} remaining)`);
@@ -1467,8 +1677,8 @@ export class TelemetryReceiver {
 
   // --- Task queue facade ---
 
-  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string): QueuedTask {
-    return this.taskQueue.push(task, project, priority, blockedBy, workflowId);
+  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean): QueuedTask {
+    return this.taskQueue.push(task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit);
   }
 
   removeTask(taskId: string): boolean {
@@ -1584,6 +1794,19 @@ export class TelemetryReceiver {
 
       const brief = this.buildContextBrief(target.id, task.project);
 
+      // Conflict guard: warn about files locked or recently edited by other agents
+      let conflictWarning = "";
+      const activeLocks = this.lockManager.getLocksExcluding(target.id);
+      if (activeLocks.length > 0) {
+        const lockLines = activeLocks
+          .filter(l => !task.project || l.path.includes(task.project.split("/").pop() || ""))
+          .map(l => `  - ${l.path} (locked by ${l.tty || l.workerId})`)
+          .slice(0, 5);
+        if (lockLines.length > 0) {
+          conflictWarning = `\n\n[Hive Conflict Guard] These files are currently locked by other agents — do NOT edit them:\n${lockLines.join("\n")}`;
+        }
+      }
+
       // Inject workflow handoff if previous steps completed
       let handoff = "";
       if (task.workflowId) {
@@ -1593,7 +1816,7 @@ export class TelemetryReceiver {
         }
       }
 
-      const fullTask = task.task + handoff + brief;
+      const fullTask = task.task + handoff + conflictWarning + brief;
 
       const result = this.sendToWorker(target.id, fullTask, {
         source: "task-queue",
@@ -1603,6 +1826,9 @@ export class TelemetryReceiver {
         taskBrief: `Queue ${task.id}: ${task.task.slice(0, 150)}`,
         taskId: task.id,
         workflowId: task.workflowId,
+        verify: task.verify,
+        maxVerifyAttempts: task.maxVerifyAttempts,
+        autoCommit: task.autoCommit,
       });
       if (result.ok && !result.queued) {
         this.taskQueue.markRunning(task.id, target.id);

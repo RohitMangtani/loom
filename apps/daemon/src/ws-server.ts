@@ -76,6 +76,23 @@ export class WsServer {
       });
     });
 
+    // Auto-commit: forward satellite commit requests to the correct satellite machine
+    this.telemetry.onAutoCommit((workerId, project, files, message) => {
+      const sat = this.getSatelliteForWorker(workerId);
+      if (!sat) return; // Local workers are committed directly by telemetry
+      const parsed = this.parseSatelliteWorker(workerId);
+      if (!parsed) return;
+      this.sendToSatellite(sat, {
+        type: "satellite_autocommit",
+        requestId: `autocommit_${Date.now()}`,
+        localWorkerId: parsed.localId,
+        project,
+        files,
+        message,
+      });
+      console.log(`[auto-commit] Forwarded commit request for ${workerId} to satellite ${sat.machineId}`);
+    });
+
     this.telemetry.onRemoval(() => {
       const workers = this.telemetry.getAll();
       this.lastWorkersSnapshot = JSON.stringify(workers);

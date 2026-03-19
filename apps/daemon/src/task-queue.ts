@@ -12,6 +12,9 @@ export interface QueuedTask {
   createdAt: number;
   blockedBy?: string;
   workflowId?: string;
+  verify?: boolean;
+  maxVerifyAttempts?: number;
+  autoCommit?: boolean;
 }
 
 export interface RunningTask {
@@ -70,7 +73,7 @@ export class TaskQueue {
     } catch { /* best-effort */ }
   }
 
-  push(task: string, project?: string, priority = 10, blockedBy?: string, workflowId?: string): QueuedTask {
+  push(task: string, project?: string, priority = 10, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean): QueuedTask {
     const queued: QueuedTask = {
       id: `q${this.nextId++}`,
       task,
@@ -79,6 +82,9 @@ export class TaskQueue {
       createdAt: Date.now(),
       blockedBy,
       workflowId,
+      verify,
+      maxVerifyAttempts,
+      autoCommit,
     };
     this.tasks.push(queued);
     this.tasks.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);

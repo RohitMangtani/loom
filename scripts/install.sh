@@ -74,8 +74,25 @@ elif [ -t 0 ]; then
     PRIMARY_URL="${PRIMARY_URL/https:\/\//wss://}"
   fi
 else
-  # Non-interactive (piped from Claude Code, CI, etc.) — default to fresh
-  SATELLITE_MODE=0
+  # Non-interactive (piped from Claude Code, CI, etc.)
+  # Check environment variables for satellite mode
+  if [ -n "${HIVE_PRIMARY_URL:-}" ] && [ -n "${HIVE_PRIMARY_TOKEN:-}" ]; then
+    SATELLITE_MODE=1
+    PRIMARY_URL="${HIVE_PRIMARY_URL}"
+    PRIMARY_TOKEN="${HIVE_PRIMARY_TOKEN}"
+    PRIMARY_URL="${PRIMARY_URL/https:\/\//wss://}"
+  else
+    SATELLITE_MODE=0
+    echo "  ┌──────────────────────────────────────────────────────┐"
+    echo "  │  Running in non-interactive mode → fresh install.    │"
+    echo "  │                                                      │"
+    echo "  │  To join an existing Hive network instead, re-run:   │"
+    echo "  │  bash scripts/install.sh --connect <URL> <TOKEN>     │"
+    echo "  │                                                      │"
+    echo "  │  Or set env vars before running:                     │"
+    echo "  │  HIVE_PRIMARY_URL=wss://... HIVE_PRIMARY_TOKEN=...   │"
+    echo "  └──────────────────────────────────────────────────────┘"
+  fi
 fi
 
 echo ""
@@ -104,9 +121,17 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-token"
   echo "  ✓ Primary connection stored"
 
-  # Start satellite daemon
+  # Start satellite daemon (kill any existing daemon first — could be a leftover
+  # primary from a previous fresh install on this machine)
   if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "  ✓ Satellite already running on :3001"
+    echo "  Stopping existing daemon on :3001..."
+    kill "$(lsof -tiTCP:3001 -sTCP:LISTEN)" 2>/dev/null || true
+    sleep 2
+  fi
+  if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "  ✗ Could not free port 3001. Kill the process manually:"
+    echo "    kill \$(lsof -tiTCP:3001)"
+    exit 1
   else
     echo ""
     echo "  Starting satellite daemon..."
