@@ -713,7 +713,8 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
         // Primary tells us to pull latest code and restart.
         // Find our own repo directory, git pull, then respawn the process.
         console.log("[satellite] Received update command — pulling latest code...");
-        const repoDir = msg.project || join(homedir(), "factory/projects/hive");
+        // Derive repo root from this file's location: apps/daemon/src/satellite.ts → ../../..
+        const repoDir = msg.project || join(import.meta.dirname, "..", "..", "..");
         try {
           await new Promise<void>((resolve, reject) => {
             execFile("/usr/bin/git", ["pull", "--ff-only"], { cwd: repoDir, timeout: 30_000 },

@@ -21,7 +21,8 @@ const HOME = process.env.HOME || `/Users/${process.env.USER}`;
 const SCAN_INTERVAL_MS = 5 * 60 * 1000;
 const AUDIT_LOG_PATH = join(HOME, ".hive", "quadrant-audit.log");
 const MAX_ATTEMPTS = 3;
-const HIVE_PROJECT = process.env.HIVE_PROJECT || join(HOME, "factory/projects/hive");
+// Derive project root from this file's location: apps/daemon/src/watchdog.ts → ../../..
+const HIVE_PROJECT = process.env.HIVE_PROJECT || join(import.meta.dirname, "..", "..", "..");
 const ADAPTIVE_STATE_PATH = join(HOME, ".hive", "watchdog-adaptive.json");
 const SUPPRESS_AFTER = 3;
 const DECAY_MS = 24 * 60 * 60 * 1000;
