@@ -1217,15 +1217,15 @@ export class WsServer {
           if (approveRemote) {
             approveRemote.promptType = null;
             approveRemote.promptMessage = undefined;
-            approveRemote.status = "working";
-            approveRemote.currentAction = "Thinking...";
+            approveRemote.status = "idle";
+            approveRemote.currentAction = null;
             approveRemote.lastAction = "Prompt approved from dashboard";
             approveRemote.lastActionAt = Date.now();
             this.lastWorkersSnapshot = null;
             this.satelliteOverrides.set(`${approveSat.machineId}:${parsed.localId}`, {
               until: Date.now() + 25_000,
-              status: "working",
-              currentAction: "Thinking...",
+              status: "idle",
+              currentAction: null,
               lastAction: "Prompt approved from dashboard",
             });
           }
@@ -1248,11 +1248,14 @@ export class WsServer {
           promptWorker.promptType = null;
           promptWorker.promptMessage = undefined;
           promptWorker.status = "idle";
-          promptWorker.currentAction = "Starting...";
+          promptWorker.currentAction = null;
           promptWorker.lastAction = "Prompt approved from dashboard";
           promptWorker.lastActionAt = Date.now();
           if (this.discovery) {
             this.discovery.clearPromptCache(promptWorker.tty);
+            // Suppress prompt re-detection for 20s so discovery doesn't
+            // re-report the stale prompt text before the terminal advances.
+            this.discovery.suppressPrompt(promptWorker.tty);
           }
           this.telemetry.notifyExternal(promptWorker);
           console.log(`Prompt approved for ${promptWorker.tty}`);
