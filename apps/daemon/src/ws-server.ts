@@ -1070,7 +1070,7 @@ export class WsServer {
             selRemote.stuckMessage = undefined;
             this.lastWorkersSnapshot = null;
             this.satelliteOverrides.set(`${selSat.machineId}:${parsed.localId}`, {
-              until: Date.now() + 15_000,
+              until: Date.now() + 25_000,
               status: "working",
               currentAction: "Thinking...",
               lastAction: "User approved from dashboard",
@@ -1177,7 +1177,7 @@ export class WsServer {
             approveRemote.lastActionAt = Date.now();
             this.lastWorkersSnapshot = null;
             this.satelliteOverrides.set(`${approveSat.machineId}:${parsed.localId}`, {
-              until: Date.now() + 15_000,
+              until: Date.now() + 25_000,
               status: "working",
               currentAction: "Thinking...",
               lastAction: "Prompt approved from dashboard",

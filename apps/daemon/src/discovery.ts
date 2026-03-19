@@ -127,6 +127,8 @@ export class ProcessDiscovery {
 
   // Track TTYs we've already detected prompts for (avoid repeated AppleScript calls)
   private promptCheckedTtys = new Map<string, { checkedAt: number; result: "trust" | "sandbox" | null }>();
+  // Suppress prompt detection after dashboard approval (prevents re-detecting stale prompt text)
+  private promptSuppressed = new Map<string, number>(); // tty → suppress until timestamp
 
   constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
     this.telemetry = telemetry;
@@ -171,6 +173,13 @@ end tell
    * Returns the prompt type and a human-readable message, or null if no prompt detected.
    */
   detectPrompt(tty: string): { type: "trust" | "sandbox"; message: string; content: string } | null {
+    // Suppressed: dashboard approved this prompt, ignore until cooldown expires
+    const suppUntil = this.promptSuppressed.get(tty);
+    if (suppUntil) {
+      if (Date.now() < suppUntil) return null;
+      this.promptSuppressed.delete(tty);
+    }
+
     // Rate-limit: don't re-check the same TTY within 5 seconds
     const cached = this.promptCheckedTtys.get(tty);
     if (cached && Date.now() - cached.checkedAt < 5000) {
@@ -226,6 +235,12 @@ end tell
 
   /** Clear prompt detection cache for a TTY (call after approving) */
   clearPromptCache(tty: string): void {
+    this.promptCheckedTtys.delete(tty);
+  }
+
+  /** Suppress prompt detection for a TTY for N ms (call after dashboard approval) */
+  suppressPrompt(tty: string, durationMs = 20_000): void {
+    this.promptSuppressed.set(tty, Date.now() + durationMs);
     this.promptCheckedTtys.delete(tty);
   }
 

@@ -369,6 +369,7 @@ export class SatelliteClient {
           worker.lastActionAt = Date.now();
           worker.stuckMessage = undefined;
           this.telemetry.notifyExternal(worker);
+          this.discovery.suppressPrompt(worker.tty);
         }
         this.send({ type: "satellite_result", requestId: msg.requestId, ok: result.ok, error: result.error });
         break;
@@ -390,6 +391,9 @@ export class SatelliteClient {
           worker.lastAction = "Prompt approved from dashboard";
           worker.lastActionAt = Date.now();
           this.telemetry.notifyExternal(worker);
+          // Suppress prompt re-detection for 20s so discovery doesn't
+          // re-report the stale prompt text before the terminal advances
+          this.discovery.suppressPrompt(worker.tty);
         }
         this.send({ type: "satellite_result", requestId: msg.requestId, ok: result.ok, error: result.error });
         break;
