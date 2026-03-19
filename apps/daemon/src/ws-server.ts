@@ -153,6 +153,21 @@ export class WsServer {
     return [...local, ...remote];
   }
 
+  /** Get satellite connection diagnostics for debugging. */
+  getSatelliteDiagnostics(): Array<{ machineId: string; hostname: string; workerCount: number; connectedAt: number; wsState: number }> {
+    const diag: Array<{ machineId: string; hostname: string; workerCount: number; connectedAt: number; wsState: number }> = [];
+    for (const sat of this.satellites.values()) {
+      diag.push({
+        machineId: sat.machineId,
+        hostname: sat.hostname,
+        workerCount: sat.workers.length,
+        connectedAt: sat.connectedAt,
+        wsState: sat.ws.readyState,
+      });
+    }
+    return diag;
+  }
+
   /** Check if a worker ID belongs to a satellite (contains ':'). */
   private parseSatelliteWorker(workerId: string): { machineId: string; localId: string } | null {
     const idx = workerId.indexOf(":");
@@ -195,6 +210,9 @@ export class WsServer {
 
   /** Handle messages from a satellite connection. */
   private handleSatelliteMessage(ws: WebSocket, machineId: string, msg: Record<string, unknown>): void {
+    if (msg.type !== "satellite_workers") {
+      console.log(`[satellite] Message from "${machineId}": ${msg.type}`);
+    }
     switch (msg.type) {
       case "satellite_hello": {
         const sat: SatelliteConnection = {
@@ -213,8 +231,15 @@ export class WsServer {
 
       case "satellite_workers": {
         const sat = this.satellites.get(machineId);
-        if (!sat) return;
+        if (!sat) {
+          console.log(`[satellite] Workers from unknown satellite "${machineId}" — hello not received yet`);
+          return;
+        }
+        const prevCount = sat.workers.length;
         sat.workers = (msg.workers as WorkerState[]) || [];
+        if (sat.workers.length !== prevCount) {
+          console.log(`[satellite] "${machineId}" workers: ${prevCount} → ${sat.workers.length}`);
+        }
         // Force state push on next tick
         this.lastWorkersSnapshot = null;
         break;
@@ -361,6 +386,8 @@ export class WsServer {
       const candidate = reqUrl.searchParams.get("token") || "";
       const isAdmin = candidate ? validateToken(candidate, this.token) : false;
       const satelliteId = reqUrl.searchParams.get("satellite") || "";
+
+      console.log(`[ws] New connection: satellite=${satelliteId || "none"} admin=${isAdmin} url=${req.url?.slice(0, 80)}`);
 
       // ── Satellite connection ──────────────────────────────────
       if (satelliteId && isAdmin) {

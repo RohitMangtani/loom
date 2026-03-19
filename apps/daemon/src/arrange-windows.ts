@@ -383,7 +383,9 @@ export function spawnTerminalWindow(
   initialMessage?: string,
   currentAgentCount?: number,
 ): { ok: boolean; error?: string; tty?: string } {
-  const cdCmd = `cd "${project}"`;
+  // Expand ~ to $HOME so it works inside double quotes (shell doesn't expand ~ in quotes)
+  const resolvedProject = project === "~" ? "$HOME" : project;
+  const cdCmd = `cd "${resolvedProject}"`;
   let cliCmd: string;
   if (model === "claude") cliCmd = "claude";
   else if (model === "codex") cliCmd = "codex";
