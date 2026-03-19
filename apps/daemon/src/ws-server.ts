@@ -20,6 +20,7 @@ interface SatelliteConnection {
   hostname: string;
   workers: WorkerState[];
   connectedAt: number;
+  lastSeen: number;
   capabilities?: MachineCapabilities;
 }
 
@@ -215,14 +216,15 @@ export class WsServer {
   }
 
   /** Get satellite connection diagnostics for debugging. */
-  getSatelliteDiagnostics(): Array<{ machineId: string; hostname: string; workerCount: number; connectedAt: number; wsState: number }> {
-    const diag: Array<{ machineId: string; hostname: string; workerCount: number; connectedAt: number; wsState: number }> = [];
+  getSatelliteDiagnostics(): Array<{ machineId: string; hostname: string; workerCount: number; connectedAt: number; lastSeen: number; wsState: number }> {
+    const diag: Array<{ machineId: string; hostname: string; workerCount: number; connectedAt: number; lastSeen: number; wsState: number }> = [];
     for (const sat of this.satellites.values()) {
       diag.push({
         machineId: sat.machineId,
         hostname: sat.hostname,
         workerCount: sat.workers.length,
         connectedAt: sat.connectedAt,
+        lastSeen: sat.lastSeen,
         wsState: sat.ws.readyState,
       });
     }
@@ -385,6 +387,7 @@ export class WsServer {
           hostname: (msg.hostname as string) || machineId,
           workers: [],
           connectedAt: Date.now(),
+          lastSeen: Date.now(),
           capabilities: caps,
         };
         this.satellites.set(machineId, sat);
@@ -401,6 +404,7 @@ export class WsServer {
           console.log(`[satellite] Workers from unknown satellite "${machineId}" — hello not received yet`);
           return;
         }
+        sat.lastSeen = Date.now();
         const prevCount = sat.workers.length;
         const incoming = (msg.workers as WorkerState[]) || [];
 
@@ -746,6 +750,21 @@ export class WsServer {
    *  so the dashboard stays current even when status changes come from
    *  discovery (JSONL/CPU analysis) instead of hooks. */
   pushState(): void {
+    // Expire stale satellites: if no satellite_workers received in 30s,
+    // the machine is likely asleep or disconnected. Remove it so tiles
+    // disappear promptly instead of ghosting until the TCP close fires.
+    const now = Date.now();
+    for (const [id, sat] of this.satellites) {
+      if (now - sat.lastSeen > 30_000) {
+        console.log(`[satellite] "${id}" stale (no report in ${Math.round((now - sat.lastSeen) / 1000)}s) — removing`);
+        sat.ws.close();
+        this.satellites.delete(id);
+        this.satelliteWs.delete(sat.ws);
+        this.lastWorkersSnapshot = null;
+        this.broadcastMachines();
+      }
+    }
+
     const workers = this.getAllWorkers();
     const snapshot = JSON.stringify(workers);
     if (snapshot !== this.lastWorkersSnapshot) {
