@@ -558,7 +558,10 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           }
         }
         if (slots.length > 0) {
-          arrangeTerminalWindows(slots);
+          // Use total agent count across all machines for the formation,
+          // so satellite windows occupy the correct fraction of the screen.
+          const totalAgents = allWorkers.filter(w => w.quadrant).length;
+          arrangeTerminalWindows(slots, totalAgents);
           updateTerminalTitles(slots);
         }
         break;

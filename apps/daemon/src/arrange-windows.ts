@@ -187,24 +187,29 @@ return "SCREEN:" & midX & "," & midY & linefeed & output
  * Each terminal tab gets titled "Q{N} - {project}" and its window is moved
  * to the corresponding screen quadrant so the physical layout matches the dashboard.
  */
-export function arrangeTerminalWindows(slots: QuadrantSlot[]): void {
+export function arrangeTerminalWindows(slots: QuadrantSlot[], totalAgentCount?: number): void {
   if (slots.length === 0) return;
+
+  // totalAgentCount: use when only a subset of agents are on this machine
+  // but the formation should match the global count (e.g., satellite with 1
+  // agent that's Q4 of 4 total should use the 4-row formation, not 1-row).
+  const formationCount = totalAgentCount || slots.length;
 
   // Build a fingerprint to skip redundant calls
   const fingerprint = slots
     .map(s => `${s.quadrant}:${s.tty}:${s.projectName}`)
     .sort()
-    .join("|");
+    .join("|") + `@${formationCount}`;
   if (fingerprint === lastArrangement) return;
   lastArrangement = fingerprint;
 
   // Build AppleScript that:
   // 1. Gets screen dimensions
   // 2. For each slot, finds the tab by TTY, sets its title, and positions its window
-  const formation = getFormation(slots.length);
+  const formation = getFormation(formationCount);
 
   const tabBlocks = slots.map(slot => {
-    const pos = getSlotPosition(slot.quadrant, slots.length);
+    const pos = getSlotPosition(slot.quadrant, formationCount);
     if (!pos) return "";
     const device = slot.tty.startsWith("/dev/") ? slot.tty : `/dev/${slot.tty}`;
     const title = `Q${slot.quadrant} - ${slot.projectName}`;
