@@ -327,6 +327,9 @@ export function sendInputToTtyAsync(tty: string, text: string, model?: string): 
 async function doSendKeystrokeAsync(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
   const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
 
+  // Save frontmost app so we can restore focus after sending
+  const previousApp = await getFrontmostAppAsync();
+
   // Escape backslashes and double quotes for AppleScript string
   const escaped = cleaned.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
@@ -365,8 +368,10 @@ end tell
       timeout: 15000,
       encoding: "utf-8",
     });
+    if (previousApp) restoreFrontmostAppAsync(previousApp);
     return { ok: true };
   } catch (err: unknown) {
+    if (previousApp) restoreFrontmostAppAsync(previousApp);
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `Keystroke send failed: ${msg.slice(0, 180)}` };
   }
@@ -374,6 +379,9 @@ end tell
 
 async function doSendAsync(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
   const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+
+  // Save frontmost app so we can restore focus after sending
+  const previousApp = await getFrontmostAppAsync();
 
   const tmpFile = join(tmpdir(), `hive-input-${randomBytes(8).toString("hex")}.txt`);
   try {
@@ -414,6 +422,7 @@ end tell
     });
   } catch (err: unknown) {
     cleanup(tmpFile);
+    if (previousApp) restoreFrontmostAppAsync(previousApp);
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `Type failed: ${msg.slice(0, 180)}` };
   }
@@ -427,10 +436,12 @@ end tell
       encoding: "utf-8",
     });
   } catch (err: unknown) {
+    if (previousApp) restoreFrontmostAppAsync(previousApp);
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, error: `Enter failed: ${msg.slice(0, 180)}` };
   }
 
+  if (previousApp) restoreFrontmostAppAsync(previousApp);
   return { ok: true };
 }
 
