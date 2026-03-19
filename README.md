@@ -78,7 +78,7 @@ Before you paste, you'll need to approve a few things as the agent works. These 
 
 Paste this into Claude Code or Codex:
 
-> Install Hive for me. Clone https://github.com/RohitMangtani/hive, cd into it, and run `bash setup.sh`. After setup finishes, I need to log into Vercel — run `npx vercel login` and it will open my browser to authenticate (don't pass --non-interactive, it needs the browser). Once I'm logged in, run `npm run launch` from the hive directory. That will start the daemon, deploy the dashboard to Vercel, and print a URL. Give me that URL and the token from `~/.hive/token` when it's done.
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive and run `bash scripts/install.sh` from inside the cloned directory. It handles everything — setup, dependencies, Vercel login, starting the daemon, and deploying the dashboard. It takes a few minutes. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end.
 
 **What you need beforehand:**
 - macOS with Node.js 20+ installed
