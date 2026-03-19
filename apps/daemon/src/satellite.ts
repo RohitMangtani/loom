@@ -12,7 +12,7 @@ import { WebSocket } from "ws";
 import { hostname } from "os";
 import { homedir, platform } from "os";
 import { join, basename } from "path";
-import { unlinkSync, existsSync, writeFileSync, mkdirSync } from "fs";
+import { unlinkSync, existsSync, writeFileSync, readFileSync, mkdirSync } from "fs";
 import { execFile } from "child_process";
 import { ProcessDiscovery } from "./discovery.js";
 import { TelemetryReceiver } from "./telemetry.js";
@@ -25,7 +25,7 @@ import type { WorkerState } from "./types.js";
 
 /** Message from satellite → primary */
 interface SatelliteUpMessage {
-  type: "satellite_hello" | "satellite_workers" | "satellite_chat" | "satellite_result" | "satellite_projects";
+  type: "satellite_hello" | "satellite_workers" | "satellite_chat" | "satellite_result" | "satellite_projects" | "satellite_api_request";
   machineId?: string;
   hostname?: string;
   platform?: string;
@@ -38,6 +38,10 @@ interface SatelliteUpMessage {
   error?: string;
   tty?: string;
   projects?: string[];
+  // API relay fields
+  method?: string;
+  path?: string;
+  body?: unknown;
 }
 
 /** Message from primary → satellite */
@@ -70,6 +74,9 @@ export class SatelliteClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private chatSubs = new Map<string, string>(); // prefixed workerId → subKey
   private tickInterval: ReturnType<typeof setInterval> | null = null;
+  // API relay: pending requests awaiting response from primary
+  private pendingApiRequests = new Map<string, { resolve: (data: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
+  private apiRequestId = 0;
 
   constructor(primaryUrl: string, token: string, localToken: string) {
     this.primaryUrl = primaryUrl;
@@ -92,6 +99,9 @@ export class SatelliteClient {
     this.telemetry.registerProcessManager(this.procMgr);
     this.telemetry.setStreamer(this.streamer);
     this.telemetry.onRemoval((workerId) => this.streamer.clearWorker(workerId));
+
+    // Register API proxy routes so local agents can talk to the primary
+    this.registerApiProxy();
 
     // Initial discovery scan
     this.discovery.scan();
@@ -157,6 +167,105 @@ export class SatelliteClient {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
+  }
+
+  /** Relay an API request to the primary and wait for the response. */
+  private relayToPrimary(method: string, path: string, body?: unknown): Promise<unknown> {
+    return new Promise((resolve) => {
+      const requestId = `api_${++this.apiRequestId}_${Date.now()}`;
+      const timer = setTimeout(() => {
+        this.pendingApiRequests.delete(requestId);
+        resolve({ error: "Relay timeout" });
+      }, 10_000);
+      this.pendingApiRequests.set(requestId, { resolve, timer });
+      this.send({
+        type: "satellite_api_request",
+        requestId,
+        method,
+        path,
+        body,
+      });
+    });
+  }
+
+  /** Register API proxy routes on the satellite's local HTTP server.
+   *  Local agents call these like normal Hive API — the satellite
+   *  relays them to the primary via WebSocket. */
+  registerApiProxy(): void {
+    const app = this.telemetry.getApp();
+    const auth = this.telemetry.getAuthMiddleware();
+    if (!app || !auth) return;
+
+    // GET /api/workers — read from workers.json (updated by satellite_all_workers)
+    app.get("/api/workers", auth, (_req: import("express").Request, res: import("express").Response) => {
+      try {
+        const data = JSON.parse(readFileSync(join(homedir(), ".hive", "workers.json"), "utf-8"));
+        res.json(data.workers || []);
+      } catch {
+        // Fallback: return local workers only
+        res.json(this.telemetry.getAll());
+      }
+    });
+
+    // POST /api/message — relay to primary
+    app.post("/api/message", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const result = await this.relayToPrimary("POST", "/api/message", req.body);
+      res.json(result);
+    });
+
+    // POST /api/queue — relay to primary
+    app.post("/api/queue", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const result = await this.relayToPrimary("POST", "/api/queue", req.body);
+      res.json(result);
+    });
+
+    // POST /api/scratchpad — relay to primary
+    app.post("/api/scratchpad", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const result = await this.relayToPrimary("POST", "/api/scratchpad", req.body);
+      res.json(result);
+    });
+
+    // GET /api/scratchpad — relay to primary
+    app.get("/api/scratchpad", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const key = req.query.key as string || "";
+      const result = await this.relayToPrimary("GET", `/api/scratchpad?key=${encodeURIComponent(key)}`);
+      res.json(result);
+    });
+
+    // POST /api/learning — relay to primary
+    app.post("/api/learning", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const result = await this.relayToPrimary("POST", "/api/learning", req.body);
+      res.json(result);
+    });
+
+    // POST /api/reviews — relay to primary
+    app.post("/api/reviews", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const result = await this.relayToPrimary("POST", "/api/reviews", req.body);
+      res.json(result);
+    });
+
+    // GET /api/artifacts — relay to primary
+    app.get("/api/artifacts", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const workerId = req.query.workerId as string || "";
+      const result = await this.relayToPrimary("GET", `/api/artifacts?workerId=${encodeURIComponent(workerId)}`);
+      res.json(result);
+    });
+
+    // POST /api/locks — relay to primary
+    app.post("/api/locks", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const result = await this.relayToPrimary("POST", "/api/locks", req.body);
+      res.json(result);
+    });
+
+    // GET /api/conflicts — relay to primary
+    app.get("/api/conflicts", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const path = req.query.path as string || "";
+      const exclude = req.query.excludeWorker as string || "";
+      const result = await this.relayToPrimary("GET", `/api/conflicts?path=${encodeURIComponent(path)}&excludeWorker=${encodeURIComponent(exclude)}`);
+      res.json(result);
+    });
+
+    console.log("[satellite] API proxy routes registered (message, queue, scratchpad, learning, reviews, artifacts, locks, conflicts)");
   }
 
   /** Report all local workers to the primary with machine tag. */
@@ -398,6 +507,16 @@ export class SatelliteClient {
           const errMsg = err instanceof Error ? err.message : String(err);
           console.log(`[satellite-autocommit] Failed: ${errMsg}`);
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: errMsg });
+        }
+        break;
+      }
+
+      case "satellite_api_response": {
+        const pending = this.pendingApiRequests.get(msg.requestId || "");
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pendingApiRequests.delete(msg.requestId || "");
+          pending.resolve((msg as unknown as Record<string, unknown>).data);
         }
         break;
       }

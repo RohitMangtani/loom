@@ -46,6 +46,10 @@ export class WsServer {
   private satelliteWs = new Map<WebSocket, string>();
   // Dashboard clients subscribed to satellite workers: prefixed workerId → Set<clientWs>
   private satelliteChatClients = new Map<string, Set<WebSocket>>();
+  // Cooldown: after dashboard approves/selects a satellite worker, suppress stale
+  // promptType from incoming satellite_workers reports for a short period.
+  // Key: "machineId:localWorkerId" → expiry timestamp
+  private satelliteOverrides = new Map<string, { until: number; status: string; currentAction: string | null; lastAction: string }>();
 
   constructor(
     telemetry: TelemetryReceiver,
@@ -150,6 +154,23 @@ export class WsServer {
         });
       }
     }
+
+    // Assign quadrants to satellite workers so the dashboard renders them.
+    // Local workers already have quadrants from writeWorkersFile(); satellite
+    // workers need slots assigned here to avoid being filtered out.
+    if (remote.length > 0) {
+      const usedSlots = new Set(local.map(w => w.quadrant).filter(Boolean) as number[]);
+      for (const w of remote) {
+        for (let slot = 1; slot <= 8; slot++) {
+          if (!usedSlots.has(slot)) {
+            w.quadrant = slot;
+            usedSlots.add(slot);
+            break;
+          }
+        }
+      }
+    }
+
     return [...local, ...remote];
   }
 
@@ -236,7 +257,30 @@ export class WsServer {
           return;
         }
         const prevCount = sat.workers.length;
-        sat.workers = (msg.workers as WorkerState[]) || [];
+        const incoming = (msg.workers as WorkerState[]) || [];
+
+        // Apply overrides: after dashboard approves/selects a satellite worker,
+        // suppress stale promptType from the satellite for a cooldown period.
+        const now = Date.now();
+        for (const w of incoming) {
+          const key = `${machineId}:${w.id}`;
+          const override = this.satelliteOverrides.get(key);
+          if (override) {
+            if (now < override.until) {
+              // Override still active — clear prompt state and apply dashboard state
+              w.promptType = null;
+              w.promptMessage = undefined;
+              w.status = override.status as WorkerState["status"];
+              w.currentAction = override.currentAction;
+              w.lastAction = override.lastAction;
+            } else {
+              // Expired — satellite should have caught up by now
+              this.satelliteOverrides.delete(key);
+            }
+          }
+        }
+
+        sat.workers = incoming;
         if (sat.workers.length !== prevCount) {
           console.log(`[satellite] "${machineId}" workers: ${prevCount} → ${sat.workers.length}`);
         }
@@ -275,6 +319,141 @@ export class WsServer {
         }
         break;
       }
+
+      case "satellite_api_request": {
+        // Satellite is relaying an API call from one of its local agents.
+        // Execute it against the primary's API and send back the response.
+        const requestId = msg.requestId as string;
+        const method = (msg.method as string || "GET").toUpperCase();
+        const path = msg.path as string || "";
+        const body = msg.body as Record<string, unknown> | undefined;
+        const sat = this.satellites.get(machineId);
+        if (!sat) break;
+
+        try {
+          const result = this.handleApiRelay(method, path, body, machineId);
+          this.sendToSatellite(sat, { type: "satellite_api_response", requestId, data: result });
+        } catch (err) {
+          this.sendToSatellite(sat, { type: "satellite_api_response", requestId, data: { error: err instanceof Error ? err.message : "Unknown error" } });
+        }
+        break;
+      }
+    }
+  }
+
+  /** Handle a relayed API request from a satellite.
+   *  Executes the same logic as the primary's REST API. */
+  private handleApiRelay(method: string, path: string, body: Record<string, unknown> | undefined, fromMachine: string): unknown {
+    // Parse path and query
+    const [basePath, queryStr] = path.split("?");
+    const query = new URLSearchParams(queryStr || "");
+
+    switch (basePath) {
+      case "/api/workers":
+        return this.getAllWorkers();
+
+      case "/api/message": {
+        if (!body?.workerId || !body?.content) return { error: "Missing workerId or content" };
+        const workerId = body.workerId as string;
+        const content = body.content as string;
+
+        // Check if target is a satellite worker
+        const msgSat = this.getSatelliteForWorker(workerId);
+        if (msgSat) {
+          const parsed = this.parseSatelliteWorker(workerId)!;
+          this.sendToSatellite(msgSat, {
+            type: "satellite_message",
+            requestId: `relay_msg_${Date.now()}`,
+            workerId,
+            localWorkerId: parsed.localId,
+            content,
+          });
+          return { ok: true, relayed: true };
+        }
+
+        // Local worker
+        const result = this.telemetry.sendToWorker(workerId, content, {
+          source: `satellite:${fromMachine}`,
+          queueIfBusy: false,
+          markDashboardInput: false,
+        });
+        return result;
+      }
+
+      case "/api/queue": {
+        if (!body?.task) return { error: "Missing task" };
+        const queued = this.telemetry.pushTask(
+          body.task as string,
+          body.project as string | undefined,
+          (body.priority as number) ?? 10,
+          body.blockedBy as string | undefined,
+          body.workflowId as string | undefined,
+          body.verify as boolean | undefined,
+          body.maxVerifyAttempts as number | undefined,
+          body.autoCommit as boolean | undefined,
+        );
+        return { ok: true, task: queued, remaining: this.telemetry.getTaskQueueLength() };
+      }
+
+      case "/api/scratchpad": {
+        if (method === "POST" && body) {
+          this.telemetry.setScratchpad(
+            body.key as string,
+            body.value as string,
+            body.setBy as string || fromMachine,
+          );
+          return { ok: true };
+        }
+        // GET
+        const key = query.get("key") || "";
+        if (key) {
+          return this.telemetry.getScratchpad(key) || null;
+        }
+        return this.telemetry.getAllScratchpad();
+      }
+
+      case "/api/learning": {
+        if (body?.project && body?.lesson) {
+          this.telemetry.writeLearning(body.project as string, body.lesson as string);
+          return { ok: true };
+        }
+        return { error: "Missing project or lesson" };
+      }
+
+      case "/api/reviews": {
+        if (method === "POST" && body?.summary) {
+          this.telemetry.addReview(
+            body.summary as string,
+            fromMachine,
+            "satellite",
+            { url: body.url as string | undefined, type: body.type as "push" | "deploy" | "commit" | "pr" | "review-needed" | "general" | undefined },
+          );
+          return { ok: true };
+        }
+        return this.telemetry.getReviews();
+      }
+
+      case "/api/artifacts": {
+        const wid = query.get("workerId") || "";
+        return this.telemetry.getArtifacts(wid);
+      }
+
+      case "/api/locks": {
+        if (method === "POST" && body) {
+          const lockResult = this.telemetry.acquireLock(body.path as string, body.workerId as string);
+          return lockResult;
+        }
+        return { error: "Missing body" };
+      }
+
+      case "/api/conflicts": {
+        const conflictPath = query.get("path") || "";
+        const exclude = query.get("excludeWorker") || "";
+        return this.telemetry.checkConflicts(conflictPath, exclude);
+      }
+
+      default:
+        return { error: `Unknown API path: ${basePath}` };
     }
   }
 
@@ -829,6 +1008,15 @@ export class WsServer {
             localWorkerId: parsed.localId,
             content: msg.content,
           });
+          // Optimistic update: show working state immediately
+          const msgRemote = msgSat.workers.find(w => w.id === parsed.localId);
+          if (msgRemote) {
+            msgRemote.status = "working";
+            msgRemote.currentAction = "Thinking...";
+            msgRemote.lastAction = "Message sent from dashboard";
+            msgRemote.lastActionAt = Date.now();
+            this.lastWorkersSnapshot = null;
+          }
           break;
         }
 
@@ -872,6 +1060,22 @@ export class WsServer {
             localWorkerId: parsed.localId,
             optionIndex: msg.optionIndex,
           });
+          // Optimistic update + override
+          const selRemote = selSat.workers.find(w => w.id === parsed.localId);
+          if (selRemote) {
+            selRemote.status = "working";
+            selRemote.currentAction = "Thinking...";
+            selRemote.lastAction = "User approved from dashboard";
+            selRemote.lastActionAt = Date.now();
+            selRemote.stuckMessage = undefined;
+            this.lastWorkersSnapshot = null;
+            this.satelliteOverrides.set(`${selSat.machineId}:${parsed.localId}`, {
+              until: Date.now() + 15_000,
+              status: "working",
+              currentAction: "Thinking...",
+              lastAction: "User approved from dashboard",
+            });
+          }
           break;
         }
 
@@ -961,6 +1165,24 @@ export class WsServer {
             workerId: msg.workerId,
             localWorkerId: parsed.localId,
           });
+          // Optimistic update + override: reflect change immediately and
+          // prevent stale satellite reports from reverting it for 15s.
+          const approveRemote = approveSat.workers.find(w => w.id === parsed.localId);
+          if (approveRemote) {
+            approveRemote.promptType = null;
+            approveRemote.promptMessage = undefined;
+            approveRemote.status = "working";
+            approveRemote.currentAction = "Thinking...";
+            approveRemote.lastAction = "Prompt approved from dashboard";
+            approveRemote.lastActionAt = Date.now();
+            this.lastWorkersSnapshot = null;
+            this.satelliteOverrides.set(`${approveSat.machineId}:${parsed.localId}`, {
+              until: Date.now() + 15_000,
+              status: "working",
+              currentAction: "Thinking...",
+              lastAction: "Prompt approved from dashboard",
+            });
+          }
           break;
         }
 

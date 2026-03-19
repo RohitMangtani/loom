@@ -83,6 +83,10 @@ export class TelemetryReceiver {
   private app: ReturnType<typeof express> | null = null;
   private requireAuth: ((req: Request, res: Response, next: NextFunction) => void) | null = null;
 
+  /** Expose Express app for satellite API route registration. */
+  getApp(): ReturnType<typeof express> | null { return this.app; }
+  getAuthMiddleware(): ((req: Request, res: Response, next: NextFunction) => void) | null { return this.requireAuth; }
+
   // Hook support
   private sessionToWorker = new Map<string, string>();
   private lastHookTime = new Map<string, number>();
