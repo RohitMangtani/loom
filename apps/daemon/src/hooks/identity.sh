@@ -49,6 +49,7 @@ try:
         sys.exit(0)
     q = me.get('quadrant', '?')
     proj = me.get('projectName', '?')
+    model = me.get('model', 'claude')
     line = f'You are Q{q} ({me.get(\"tty\", \"?\")}, {proj})'
     if peers:
         parts = []
@@ -57,7 +58,9 @@ try:
             st = p.get('status', '?')
             act = (p.get('currentAction') or p.get('lastAction') or '')[:40]
             pproj = p.get('projectName', '?')
-            parts.append(f'Q{pq} {st} {pproj}: {act}' if act else f'Q{pq} {st} {pproj}')
+            pmodel = p.get('model', 'claude')
+            tag = f'[{pmodel}] ' if pmodel != 'claude' else ''
+            parts.append(f'Q{pq} {tag}{st} {pproj}: {act}' if act else f'Q{pq} {tag}{st} {pproj}')
         line += '\nPeers: ' + ' | '.join(parts)
     print(line)
 except Exception:
