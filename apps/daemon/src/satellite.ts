@@ -626,11 +626,13 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           }
         }
         if (slots.length > 0) {
-          // Use total agent count across all machines for the formation,
-          // so satellite windows occupy the correct fraction of the screen.
-          const totalAgents = allWorkers.filter(w => w.quadrant).length;
-          arrangeTerminalWindows(slots, totalAgents);
-          updateTerminalTitles(slots);
+          // Re-map to local positions: this machine's agents fill its own
+          // screen entirely. Sort by global quadrant, then assign local
+          // positions 1..N so N agents = N-row full-screen stack.
+          slots.sort((a, b) => a.quadrant - b.quadrant);
+          const localSlots = slots.map((s, i) => ({ ...s, quadrant: i + 1 }));
+          arrangeTerminalWindows(localSlots);
+          updateTerminalTitles(localSlots);
         }
         break;
       }

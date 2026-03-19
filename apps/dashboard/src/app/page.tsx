@@ -411,33 +411,34 @@ export default function Home() {
           style={!isViewer && selectedEntry ? { maxHeight: chatExpanded ? "0px" : "40vh", overflow: chatExpanded ? "hidden" : "auto", padding: chatExpanded ? "0px" : undefined, gap: chatExpanded ? "0px" : undefined } : undefined}
         >
           {machineGroups.map(({ machine, agents }) => (
-            <div key={machine || "__local"} className={`grid grid-cols-1 ${!isViewer && selectedEntry ? "gap-1.5" : "gap-3"}`}>
+            <div key={machine || "__local"} className={`flex flex-col ${!isViewer && selectedEntry ? "gap-1.5" : "gap-3"}`} style={{ flex: agents.length }}>
               {machine && (
-                <div className="flex items-center gap-2 px-1">
+                <div className="flex items-center gap-2 px-1 shrink-0">
                   <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--text-muted)]">{machine}</span>
                   <span className="flex-1 h-px bg-[var(--border)]" />
                 </div>
               )}
               {agents.map(({ worker: w, num }) => (
-                <AgentCard
-                  key={w.id}
-                  worker={w}
-                  num={num}
-                  selected={!isViewer && selectedId === w.id}
-                  flagged={flaggedIds.has(w.id)}
-                  managing={managing}
-                  onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
-                  onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
-                  onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
-                  onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
-                  onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
-                  onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
-                  onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
-                  onKill={!isViewer && managing ? () => {
-                    send({ type: "kill", workerId: w.id });
-                    if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
-                  } : undefined}
-                />
+                <div key={w.id} className="flex-1 flex flex-col min-h-0">
+                  <AgentCard
+                    worker={w}
+                    num={num}
+                    selected={!isViewer && selectedId === w.id}
+                    flagged={flaggedIds.has(w.id)}
+                    managing={managing}
+                    onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
+                    onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
+                    onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
+                    onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
+                    onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
+                    onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
+                    onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
+                    onKill={!isViewer && managing ? () => {
+                      send({ type: "kill", workerId: w.id });
+                      if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
+                    } : undefined}
+                  />
+                </div>
               ))}
             </div>
           ))}
