@@ -411,7 +411,7 @@ The daemon watches this file and reloads when it changes. No restart needed.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HIVE_PROJECT` | `~/factory/projects/hive` | Path to the Hive project root |
+| `HIVE_PROJECT` | Auto-detected | Path to the Hive project root |
 | `SEND_RETURN_BIN` | `~/send-return` | Path to the CGEvent binary for auto-pilot |
 | `NEXT_PUBLIC_WS_URL` | `ws://localhost:3002` | WebSocket URL the dashboard connects to |
 
