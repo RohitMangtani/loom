@@ -103,6 +103,9 @@ export class SatelliteClient {
     // Register API proxy routes so local agents can talk to the primary
     this.registerApiProxy();
 
+    // Install CLAUDE.md so local agents know about the Hive API
+    this.installClaudeMd();
+
     // Initial discovery scan
     this.discovery.scan();
     console.log(`[satellite] Machine ID: ${this.machineId}`);
@@ -266,6 +269,75 @@ export class SatelliteClient {
     });
 
     console.log("[satellite] API proxy routes registered (message, queue, scratchpad, learning, reviews, artifacts, locks, conflicts)");
+  }
+
+  /** Install CLAUDE.md with Hive API instructions so local agents know how to
+   *  communicate with peers across all machines. */
+  private installClaudeMd(): void {
+    const claudeDir = join(homedir(), ".claude");
+    const claudeMdPath = join(claudeDir, "CLAUDE.md");
+
+    const content = `## Hive — Production Agent
+
+You are 1 of several Claude Code agents running simultaneously across multiple computers. Daemon at 127.0.0.1:3001 coordinates status, messaging, and learnings.
+
+### Rules
+
+- NEVER use AskUserQuestion or EnterPlanMode. Make your best guess. Wrong guesses get corrected faster than questions get answered.
+- NEVER spawn new Claude instances, terminals, or agents.
+- NEVER use the Task tool to launch subagents as a workaround for dispatching.
+- Execute directly. Only dispatch to another agent when the task requires their active conversation context.
+- Before any task: \`cat {project}/.claude/hive-learnings.md 2>/dev/null\`
+- After solving anything non-obvious: write a learning back via the API. This is mandatory.
+- Sandbox blocks \`curl\` to localhost. Use \`dangerouslyDisableSandbox: true\` for daemon API calls.
+- Read-only status: \`cat ~/.hive/workers.json\`
+
+### Identity
+
+The identity hook outputs your quadrant as a system-reminder each prompt: "You are Q{N} ({tty}, {project})". Quadrants assigned by \`startedAt\` order (earliest = Q1).
+
+### APIs
+
+Daemon: http://127.0.0.1:3001 | Token: \`$(cat ~/.hive/token)\` | Auth header: \`Authorization: Bearer $TOKEN\`
+
+| Endpoint | Purpose |
+|---|---|
+| \`GET /api/workers\` | List agents (all machines) |
+| \`POST /api/message {workerId, content}\` | Send prompt to agent (any machine) |
+| \`POST /api/queue {task, project?, priority?}\` | Queue task |
+| \`POST /api/locks {workerId, path}\` | Acquire file lock |
+| \`GET /api/conflicts?path=X&excludeWorker=Y\` | Check conflicts |
+| \`POST /api/scratchpad {key, value, setBy}\` | Shared context (1hr expiry) |
+| \`GET /api/artifacts?workerId=X\` | File changes by agent |
+| \`POST /api/learning {project, lesson}\` | Persist lesson |
+| \`POST /api/reviews {summary, url?, type?}\` | Report a reviewable change |
+
+### Cross-Machine Communication
+
+All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays them to the primary automatically. You can send messages to agents on ANY machine using their workerId from \`/api/workers\`.
+
+### Self-Unstick
+
+1. Read learnings
+2. Check artifacts
+3. Try different approach (never retry same thing 3x)
+4. If truly stuck, say so — human or auto-pilot intervenes
+5. After solving: write the learning back
+`;
+
+    try {
+      if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
+      // Only write if missing or outdated (check for our marker)
+      const existing = existsSync(claudeMdPath) ? readFileSync(claudeMdPath, "utf-8") : "";
+      if (!existing.includes("Hive — Production Agent")) {
+        // Prepend Hive instructions to existing CLAUDE.md
+        const merged = existing ? content + "\n---\n\n" + existing : content;
+        writeFileSync(claudeMdPath, merged);
+        console.log("[satellite] Installed CLAUDE.md with Hive API instructions");
+      }
+    } catch (err) {
+      console.log(`[satellite] Failed to install CLAUDE.md: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /** Report all local workers to the primary with machine tag. */
