@@ -220,7 +220,7 @@ export class SatelliteClient {
     // Reconstructs the full URL (path + query string) and forwards the
     // HTTP method + body. New primary endpoints work on satellites
     // with zero additional proxy code.
-    app.all("/api/*", auth, async (req: import("express").Request, res: import("express").Response) => {
+    app.all(/^\/api\//, auth, async (req: import("express").Request, res: import("express").Response) => {
       const method = req.method;
       // Reconstruct query string
       const qs = Object.entries(req.query as Record<string, string>)
