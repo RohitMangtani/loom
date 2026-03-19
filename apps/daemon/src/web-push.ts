@@ -35,7 +35,7 @@ export class WebPushManager {
     this.subs = this.loadSubs();
 
     webpush.setVapidDetails(
-      "https://rohitmangtani.com",
+      "https://github.com/RohitMangtani/hive",
       this.vapid.publicKey,
       this.vapid.privateKey,
     );
