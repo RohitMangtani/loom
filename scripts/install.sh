@@ -125,49 +125,72 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-token"
   echo "  ✓ Primary connection stored"
 
-  # Start satellite daemon (kill any existing daemon first — could be a leftover
-  # primary from a previous fresh install on this machine)
+  # Stop any existing daemon on port 3001
   if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
     echo "  Stopping existing daemon on :3001..."
     kill "$(lsof -tiTCP:3001 -sTCP:LISTEN)" 2>/dev/null || true
     sleep 2
   fi
-  if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "  ✗ Could not free port 3001. Kill the process manually:"
-    echo "    kill \$(lsof -tiTCP:3001)"
-    exit 1
-  else
-    echo ""
-    echo "  Starting satellite daemon..."
-    # Start in background so we can healthcheck it
-    nohup npx tsx apps/daemon/src/index.ts --satellite > "$HOME/.hive/satellite.log" 2>&1 &
-    SAT_PID="$!"
-    disown "$SAT_PID" 2>/dev/null || true
 
-    # Wait for satellite to start listening on port 3001
-    SAT_OK=0
-    for _ in $(seq 1 15); do
-      if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
-        SAT_OK=1
-        break
-      fi
-      # Check if process died
-      if ! kill -0 "$SAT_PID" 2>/dev/null; then
-        break
-      fi
-      sleep 1
-    done
+  # Unload old satellite plist if present (in case of re-install)
+  launchctl bootout "gui/$(id -u)/com.hive.satellite" 2>/dev/null || true
 
-    if [ "$SAT_OK" -eq 1 ]; then
-      echo "  ✓ Satellite daemon running (pid: $SAT_PID)"
-    else
-      echo "  ✗ Satellite daemon failed to start."
-      echo "    Check the log: cat ~/.hive/satellite.log"
-      echo ""
-      echo "  Last 10 lines of log:"
-      tail -10 "$HOME/.hive/satellite.log" 2>/dev/null | sed 's/^/    /'
-      exit 1
+  # Find npx path for the plist
+  NPX_PATH="$(which npx 2>/dev/null || echo '/opt/homebrew/bin/npx')"
+
+  # Install launchd plist — survives sleep, reboot, terminal close.
+  # Auto-restarts on crash. Reads primary URL/token from stored files.
+  mkdir -p "$HOME/.hive/logs" "$HOME/Library/LaunchAgents"
+  cat > "$HOME/Library/LaunchAgents/com.hive.satellite.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hive.satellite</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd '$ROOT' &amp;&amp; '$NPX_PATH' tsx apps/daemon/src/index.ts --satellite</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>$ROOT</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>$HOME/.hive/logs/satellite.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>$HOME/.hive/logs/satellite.stderr.log</string>
+</dict>
+</plist>
+PLIST
+  echo "  ✓ Satellite service installed (com.hive.satellite)"
+
+  # Start the service
+  launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null || \
+    launchctl load "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null
+
+  # Wait for satellite to start
+  SAT_OK=0
+  for _ in $(seq 1 15); do
+    if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
+      SAT_OK=1
+      break
     fi
+    sleep 1
+  done
+
+  if [ "$SAT_OK" -eq 1 ]; then
+    echo "  ✓ Satellite daemon running"
+  else
+    echo "  ✗ Satellite daemon failed to start."
+    echo "    Log: cat ~/.hive/logs/satellite.stderr.log"
+    echo ""
+    tail -10 "$HOME/.hive/logs/satellite.stderr.log" 2>/dev/null | sed 's/^/    /'
+    exit 1
   fi
 
   echo ""
@@ -183,8 +206,13 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   echo "  Open Terminal windows and run 'claude', 'codex',"
   echo "  or any agent — the primary dashboard sees them."
   echo ""
-  echo "  Log:  cat ~/.hive/satellite.log"
-  echo "  Stop: kill \$(lsof -tiTCP:3001)"
+  echo "  The satellite runs as a background service."
+  echo "  It survives sleep, reboot, and terminal close."
+  echo "  Agents disappear from the dashboard when this"
+  echo "  computer is off and reappear when it wakes."
+  echo ""
+  echo "  Log:   cat ~/.hive/logs/satellite.stderr.log"
+  echo "  Stop:  launchctl bootout gui/$(id -u)/com.hive.satellite"
   echo ""
   echo "  ────────────────────────────────────────────────"
   echo ""
