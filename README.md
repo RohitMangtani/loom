@@ -1,54 +1,62 @@
 # Hive
 
-One screen for all your AI agents. Find My iPhone, but for terminal agents. macOS only.
+Multi-agent orchestration layer for LLM-based development workflows. One dashboard across multiple models, multiple machines, and every handoff in plain English. macOS.
 
 ![Hive stacked dashboard diagram](docs/hive-stack.svg)
 
-The dashboard maps 1:1 to your terminal layout. Terminals stack vertically on your screen, tiles stack vertically on the dashboard. Top terminal is top tile. Bottom terminal is bottom tile. Green means working. Red means done. Yellow means stuck. You look at your phone and know exactly which terminal needs attention without reading a single line of output.
+When multiple AI agents are working at the same time, the bottleneck quickly becomes coordination rather than generation. Terminal logs are manageable for a single process, but once several agents are active across different projects, it becomes difficult to track state, progress, and dependencies across sessions.
 
-The daemon reads the vertical position of each Terminal window on your screen and assigns slots to match. Move a terminal higher on screen, it moves up in the dashboard stack. The layout stays consistent because it tracks where your windows actually are, not what order you opened them.
+Hive is a lightweight visual coordination layer that mirrors active agent sessions as a grid of tiles with real-time status. The dashboard maps 1:1 to your terminal layout. Green means working. Red means done. Yellow means it needs you. You look at your phone and know exactly which terminal needs attention without reading output.
 
-You can run anywhere from 1 to 8 agents. Each agent is a full-width horizontal strip stacked top to bottom. Start with two agents and scale up as your workflow demands.
+One person. Multiple models. Multiple machines. The output of a team.
 
-One person. Up to eight agents. The output of a team.
+## Motivation
 
-## Why This Helps
+Running one AI agent is manageable. Running several at once on different tasks is where things break down. You lose track of which one finished, which one is stuck, and which one drifted. You end up alt-tabbing between terminals, re-reading output, and spending more energy tracking status than directing work.
 
-Running one AI agent is manageable. Running several at once on different tasks is where things break down. You lose track of which one finished, which one is stuck, and which one drifted from what you asked. You end up alt-tabbing between terminals, re-reading output, and spending more energy tracking status than directing work.
+As multi-agent workflows become more common, development starts to look less like writing code and more like coordinating processes. Better orchestration, visibility, and control layers become as important as model capability.
 
-The vertical stack solves this. Your brain is good at spatial memory. When you stack terminals top to bottom and the dashboard mirrors that stack, you stop thinking in terminal names and start thinking in positions. "Top is building the API, third from the top is writing tests." You glance at colored dots and know the state of everything in under a second.
+Hive was built to reduce that overhead. Once the workflow became visible, development became significantly easier to manage.
 
-**You catch problems by looking, not reading.** All green dots means everything is fine. One yellow dot and your eye goes straight to it. You do not read logs. You do not scroll. Color is faster than text because your brain processes it before you consciously look. The spatial layout tells you which terminal to switch to without thinking.
+## What It Does
 
-**You can walk away.** Start your agents, close your laptop, go to lunch. Come back and the dashboard shows you exactly what happened. Green tiles kept working. Yellow tiles are waiting for you. Red tiles finished. You pick up where things paused without re-reading anything.
+The system solves four problems at once:
 
-**Put it on any screen.** Prop up a tablet next to your laptop and leave the dashboard open. Set it on a second monitor. The colored dots sit there updating in real time while you do other things. When a dot turns yellow, you notice it in your peripheral vision without switching windows or checking anything. It is a status board for your AI fleet, the same way a wall monitor in an ops center shows system health at a glance.
+**1. Visual layer.** A stoplight dashboard that mirrors your terminal layout. Tiles stacked vertically, top to bottom, matching where your terminals sit on screen. Color tells you the state at a glance. Spatial memory replaces terminal names. You catch problems by looking, not reading.
 
-**Flag agents for later.** Each tile has a small circle in the corner. Tap it and the tile turns orange. That agent is flagged. Use it to mark which agent you want to come back to, which one has something interesting you have not reviewed yet, or which one you want to give a new task when you are ready. Tap again to unflag. It is a bookmark for your attention.
+**2. Intuitive handoffs.** One agent finishes, you tap the next tile and describe what to do with its output. Hive delivers the message. For planned sequences, a task queue carries context forward automatically, passing a summary of what the previous agent did and which files it changed.
 
-**Talk to agents from your phone.** Tap any tile, type a message, it goes straight to that agent's terminal. Direct all your agents from the couch. The grid on your phone matches your screen layout, so you always know which agent you are talking to.
+**3. Multi-model coordination.** Run Claude, Codex, and OpenClaw in the same grid. Each model does what it is best at. Claude reasons about architecture. Codex moves fast through surgical edits. Different models audit each other's blind spots. You conduct them like instruments in the same symphony.
 
-**Agents coordinate without you bridging every message.** File locks prevent two agents from editing the same file. Task queue auto-dispatches work to idle agents. Scratchpad lets agents leave notes for each other. Workflow handoff passes context from one step to the next automatically. You handle direction. They handle implementation.
+**4. Multi-machine network.** Connect multiple computers to one dashboard. A second Mac appears in the same tile stack within seconds. Each machine reports its capabilities. Route work to the right hardware. Every computer you own feeds into one control plane.
 
-**Every session makes the next one better.** Solved problems get saved to a per-project knowledge file. The next agent reads it before starting. Your fleet gets smarter over time.
+## Features
 
-**The safeguards are built in.** Auto-pilot handles permission prompts. A watchdog catches stuck loops. File locks prevent edit conflicts. You get a grace period to override from the dashboard before auto-pilot acts.
+- **Stoplight dashboard** — green/red/yellow at a glance. Open on your phone, tablet, or second monitor. Supports 1-8 agents per machine.
+- **Multi-model** — Claude, Codex, OpenClaw side by side. Spawn any from the dashboard. Add custom agents via `~/.hive/agents.json`.
+- **Multi-machine** — connect additional Macs as satellites. Agents from all machines appear in one dashboard. Messages, tasks, and coordination route transparently across the network.
+- **Auto-discovery** — start any supported agent in a terminal and it appears on the dashboard within 3 seconds. No registration, no config.
+- **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Stuck loops get caught and surfaced. Agents never sit idle.
+- **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy.
+- **Coordination** — file locks, conflict detection, task queue, scratchpad. Multiple agents on the same codebase without collisions.
+- **Workflow handoff** — tag related tasks with a workflow ID. When step 1 finishes, step 2 receives a summary of what was done before it starts.
+- **Model-aware routing** — tasks can target a specific model (`"model":"codex"`), require machine capabilities (`"requires":["gpu"]`), or prefer a specific machine.
+- **Capability detection** — each machine auto-reports CPU, RAM, GPU, installed software. Custom tags via `~/.hive/capabilities.json`.
+- **Compound learning** — every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge.
+- **State persistence** — daemon snapshots every 30 seconds. Survives restarts. Satellites run as launchd services and survive sleep and reboot.
+- **Push notifications** — macOS native alerts when agents get stuck. Web Push to your phone when agents finish. PWA installable on iOS and Android.
+- **Review queue** — auto-detects git pushes, deploys, and PRs across all agents. Slide-out drawer on the dashboard.
 
-## What You Get
+## Background
 
-- **Stoplight dashboard** — vertical stack that mirrors your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor. The tile order matches your terminal order top to bottom. Supports 1-8 agents.
-- **Multi-model** — run Claude, Codex, and OpenClaw agents side by side. Each provider builds on its own strengths, and those strengths complement each other. Claude goes deep on architecture, Codex moves fast through targeted edits, and OpenClaw gives you reach beyond any single vendor. Hive lets you conduct them like instruments in the same symphony. Spawn any from the dashboard with the "+ Agent" button. Add custom agents via `~/.hive/agents.json` and they appear in the spawn dialog automatically.
-- **Auto-discovery** — start `claude`, `codex`, or `openclaw tui` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
-- **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Agents never sit idle waiting for a click.
-- **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
-- **Peer awareness** — Claude agents get a one-line peer summary on every prompt, and all workers share the same dashboard/API state. No manual registration.
-- **Coordination** — file locks, task queue, scratchpad, conflict detection. Multiple agents working on the same codebase without stepping on each other.
-- **Workflow handoff** — tag related tasks with a workflow ID. When Agent 1 finishes "Build the API," Agent 2 automatically receives a summary of what was built and which files changed before starting "Build the UI."
-- **Compound learning** — every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge instead of a blank slate.
-- **State persistence** — daemon snapshots state every 30 seconds. Restart your computer, reopen terminals, and routing restores after one prompt per terminal.
-- **Review queue** — a slide-out drawer on the dashboard showing recent pushes, deploys, and PRs across all agents. The daemon auto-detects reviewable actions from hook events, and agents can self-report with richer summaries. Tap the three-line icon in the header to see what changed and where.
-- **Prompt approval** — when a freshly spawned agent hits a trust or sandbox prompt, the tile shows the prompt text with an approval button. Tap to approve from the dashboard without switching to the terminal.
-- **Push notifications** — when an agent goes yellow, macOS sends a native notification. When an agent finishes (green to red), Web Push sends a notification to your phone. Add the dashboard to your Home Screen on iOS or Android and tap the bell icon to subscribe. No third-party apps needed.
+Built by [Rohit Mangtani](https://rohitmangtani.com). MBA in Business Analytics and BS in Computer Information Systems from Bentley University. Currently working in fixed income operations at RBC. Background in finance, data analysis, and quantitative systems.
+
+This project came out of running multiple AI agents daily across several projects and needing a way to manage the coordination overhead. The system was built using the agents it manages: multiple Claude and Codex instances iterating on the daemon, dashboard, and each other's output simultaneously.
+
+Related writing:
+- [A Visual Workflow for AI Agents - Hive](https://rohitmangtani.com/writing/a-visual-workflow-for-ai-agents) — the motivation and four-pillar framework
+- [Hive deep dive](https://rmgtni.xyz/lab/hive) — technical architecture and multi-machine details
+- [How Hive Was Built](https://rmgtni.xyz/lab/how-hive-was-built) — the methodology and skills involved
 
 ## Prerequisites
 
@@ -599,9 +607,9 @@ npm -w apps/daemon test
 
 The project uses npm workspaces with Turbo for build orchestration. The daemon and dashboard are separate apps that share types via `packages/types/`.
 
-## How This Was Built
+## Status
 
-This was built using the agents it manages. Multiple AI agents, a mix of Claude Code and Codex, iterated on the daemon and dashboard simultaneously while a human directed architecture and resolved conflicts. The compound learning system was tested in production from day one, with each session's lessons feeding the next.
+Active personal tool, used daily. Open to feedback and ideas from others working on multi-agent workflows.
 
 ## License
 
