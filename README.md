@@ -78,7 +78,7 @@ Before you paste, you'll need to approve a few things as the agent works. These 
 
 Paste this into Claude Code or Codex:
 
-> Install Hive for me. Clone https://github.com/RohitMangtani/hive and run `bash scripts/install.sh` from inside the cloned directory. It handles everything — setup, dependencies, Vercel login, starting the daemon, and deploying the dashboard. It takes a few minutes. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end.
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive and run `bash scripts/install.sh` from inside the cloned directory. The script will ask me whether I want to start a new Hive environment or join an existing one on another computer. If I'm starting fresh, it handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. If I'm joining an existing Hive, it asks me for the tunnel URL and token from the other machine and connects to it. It takes a few minutes. When Vercel opens my browser (fresh install only), I'll click authorize and it continues. Give me whatever it prints at the end.
 
 **What you need beforehand:**
 - macOS with Node.js 20+ installed
@@ -99,6 +99,20 @@ Once setup finishes, the agent prints your token. Copy it. Open the dashboard UR
 ### Running agents
 
 Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
+
+### Connect another computer
+
+You can connect multiple Macs to the same Hive dashboard. Terminals on the second machine appear alongside your local ones — chat, close, and manage them all from one screen.
+
+On the second computer, run the same install prompt or clone and run:
+
+```bash
+bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
+```
+
+The tunnel URL and token are printed at the end of the primary install. You can also find them at `~/.hive/tunnel-url.txt` and `~/.hive/token` on the primary machine. The connect command also appears in the install output.
+
+Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the Cloudflare tunnel — the machines don't need to be on the same network.
 
 ### Local-only install (no Vercel needed)
 

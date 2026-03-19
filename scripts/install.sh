@@ -3,15 +3,16 @@
 #
 # Fresh instance:   bash scripts/install.sh
 # Join existing:    bash scripts/install.sh --connect wss://URL TOKEN
+# Non-interactive:  bash scripts/install.sh --fresh
 #
-# The daemon stays running in the background after this script exits.
+# With no flags, prompts the user to choose.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# ── Parse --connect flag ─────────────────────────────────────────────
+# ── Parse flags ──────────────────────────────────────────────────────
 
 SATELLITE_MODE=0
 PRIMARY_URL=""
@@ -32,8 +33,46 @@ if [ "${1:-}" = "--connect" ]; then
     exit 1
   fi
 
-  # Normalize URL: https → wss
   PRIMARY_URL="${PRIMARY_URL/https:\/\//wss://}"
+
+elif [ "${1:-}" = "--fresh" ]; then
+  SATELLITE_MODE=0
+
+else
+  # Interactive: ask the user what they want
+  echo ""
+  echo "  ┌─────────────────────────────────────────┐"
+  echo "  │             Hive Setup                   │"
+  echo "  │                                          │"
+  echo "  │  1) New environment                      │"
+  echo "  │     Start fresh with your own dashboard  │"
+  echo "  │                                          │"
+  echo "  │  2) Join a Hive network                  │"
+  echo "  │     Connect this Mac's terminals to an   │"
+  echo "  │     existing Hive running on another      │"
+  echo "  │     computer                             │"
+  echo "  │                                          │"
+  echo "  └─────────────────────────────────────────┘"
+  echo ""
+  printf "  Choose (1 or 2): "
+  read -r CHOICE
+
+  if [ "$CHOICE" = "2" ]; then
+    SATELLITE_MODE=1
+    echo ""
+    printf "  Tunnel URL (wss://... from primary dashboard): "
+    read -r PRIMARY_URL
+    printf "  Token (from primary dashboard): "
+    read -r PRIMARY_TOKEN
+
+    if [ -z "$PRIMARY_URL" ] || [ -z "$PRIMARY_TOKEN" ]; then
+      echo ""
+      echo "  Both URL and token are required."
+      exit 1
+    fi
+
+    PRIMARY_URL="${PRIMARY_URL/https:\/\//wss://}"
+  fi
 fi
 
 echo ""
