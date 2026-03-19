@@ -575,6 +575,7 @@ export class WsServer {
             body.autoCommit as boolean | undefined,
             body.requires as string[] | undefined,
             body.preferMachine as string | undefined,
+            body.model as string | undefined,
           );
           return { ok: true, task: queued, remaining: this.telemetry.getTaskQueueLength() };
         }
