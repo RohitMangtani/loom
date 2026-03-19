@@ -358,6 +358,34 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
         const result = spawnTerminalWindow(project, model, msg.targetQuadrant, msg.initialMessage, this.telemetry.getAll().length);
         if (result.tty) {
           this.telemetry.markSpawn(result.tty);
+          // Create spawn placeholder so the dashboard sees the tile immediately
+          // (before the 3s discovery scan) and so discovery's placeholder-resolution
+          // path forces idle on the real worker — matching primary behavior.
+          const projectName = project.split("/").pop() || project;
+          const placeholderId = `spawning_${result.tty.replace(/\//g, "_")}`;
+          this.telemetry.registerDiscovered(placeholderId, {
+            id: placeholderId,
+            pid: 0,
+            project,
+            projectName,
+            status: "waiting" as const,
+            currentAction: "Starting...",
+            lastAction: "Spawning terminal",
+            lastActionAt: Date.now(),
+            errorCount: 0,
+            startedAt: Date.now(),
+            task: null,
+            managed: false,
+            tty: result.tty,
+            model,
+          });
+          // Auto-remove placeholder after 20s if discovery hasn't replaced it
+          setTimeout(() => {
+            const still = this.telemetry.get(placeholderId);
+            if (still && still.pid === 0) {
+              this.telemetry.removeWorker(placeholderId);
+            }
+          }, 20_000);
         }
         this.send({
           type: "satellite_result",
@@ -366,6 +394,8 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           error: result.error,
           tty: result.tty,
         });
+        // Report immediately so primary sees the placeholder
+        this.reportWorkers();
         break;
       }
 

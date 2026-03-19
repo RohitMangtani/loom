@@ -608,6 +608,15 @@ end tell
       if (initialStatus === "working" && !ctx.highConfidence && processAge < 30_000) {
         initialStatus = "idle";
       }
+      // Stronger guard: if markSpawn was called for this TTY (dashboard spawn or
+      // satellite spawn), force idle regardless of JSONL confidence. Claude's
+      // initialization writes (system prompt, context) create high-confidence
+      // "user at tail" patterns that bypass the processAge guard above.
+      // The spawn grace period (60s) is cleared once the identity hook fires,
+      // which only happens on real user input — not initialization.
+      if (initialStatus === "working" && this.telemetry.isRecentSpawn(proc.tty)) {
+        initialStatus = "idle";
+      }
 
       const worker: WorkerState = {
         id,
@@ -849,6 +858,20 @@ end tell
         const hooksFresh = hookAge < 5_000;
         if (!recentInput && !hooksFresh) {
           this.checkTransition(id, tty, "idle", `JSONL tail working but low-confidence, staying idle (hookAge=${Math.round(hookAge/1000)}s)`, tailCtx);
+          return;
+        }
+      }
+      // FIX 1b — Spawn grace guard: during the 60s after markSpawn, even
+      // high-confidence JSONL "working" is from initialization (system prompt,
+      // context loading), not real user work. Suppress unless there's explicit
+      // input or fresh hooks proving the agent received a real task.
+      if (existing.status === "idle" && ctx.highConfidence && existing.tty &&
+          this.telemetry.isRecentSpawn(existing.tty)) {
+        const lastInput = this.telemetry.getLastInputSent(id);
+        const recentInput = lastInput > 0 && Date.now() - lastInput < 15_000;
+        const hooksFresh = hookAge < 5_000;
+        if (!recentInput && !hooksFresh) {
+          this.checkTransition(id, tty, "idle", `JSONL tail working (high-conf) but spawn grace active, staying idle`, tailCtx);
           return;
         }
       }
