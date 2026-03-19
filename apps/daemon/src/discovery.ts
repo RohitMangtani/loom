@@ -636,23 +636,12 @@ end tell
         model: proc.model,
       };
 
-      this.telemetry.registerDiscovered(id, worker);
-      this.discoveredPids.add(proc.pid);
-
-      // Clear stale TTY session marker so this new worker starts with
-      // fresh chat history instead of inheriting a previous session.
-      if (proc.tty) {
-        const ttyName = proc.tty.replace("/dev/", "");
-        const markerPath = join(HOME, ".hive", "sessions", ttyName);
-        try {
-          const mtime = statSync(markerPath).mtimeMs;
-          if (mtime < proc.startedAt) {
-            unlinkSync(markerPath);
-          }
-        } catch { /* marker doesn't exist — fine */ }
-      }
-
-      // Clean up any spawn placeholder for this TTY — the real worker takes over.
+      // Clean up any spawn placeholder for this TTY BEFORE registering the real
+      // worker. This must happen first to avoid a broadcast race: registerDiscovered
+      // sends worker_update (adding real) and removeWorker sends full workers list
+      // (removing placeholder). If register happens first, the dashboard briefly
+      // sees both entries. By removing the placeholder silently first, the only
+      // broadcast is the registerDiscovered worker_update — clean single transition.
       if (proc.tty) {
         const placeholderId = `spawning_${proc.tty.replace(/\//g, "_")}`;
         const placeholder = this.telemetry.get(placeholderId);
@@ -672,8 +661,26 @@ end tell
             worker.status = "idle";
             worker.currentAction = null;
           }
+          // Remove the placeholder — this triggers a worker_removed broadcast so
+          // the dashboard drops the old tile before registerDiscovered adds the new one.
           this.telemetry.removeWorker(placeholderId);
         }
+      }
+
+      this.telemetry.registerDiscovered(id, worker);
+      this.discoveredPids.add(proc.pid);
+
+      // Clear stale TTY session marker so this new worker starts with
+      // fresh chat history instead of inheriting a previous session.
+      if (proc.tty) {
+        const ttyName = proc.tty.replace("/dev/", "");
+        const markerPath = join(HOME, ".hive", "sessions", ttyName);
+        try {
+          const mtime = statSync(markerPath).mtimeMs;
+          if (mtime < proc.startedAt) {
+            unlinkSync(markerPath);
+          }
+        } catch { /* marker doesn't exist — fine */ }
       }
 
       // If the worker is idle at discovery (e.g. daemon restart while agents

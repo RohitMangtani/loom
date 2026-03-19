@@ -126,13 +126,13 @@ export class WsServer {
       console.log(`[auto-commit] Forwarded commit request for ${workerId} to satellite ${sat.machineId}`);
     });
 
-    this.telemetry.onRemoval(() => {
-      const workers = this.telemetry.getAll();
+    this.telemetry.onRemoval((removedId) => {
+      // Send targeted removal so dashboard drops the tile immediately.
+      // Also send full workers list as ground truth (handles edge cases).
+      this.broadcast({ type: "worker_removed", workerId: removedId });
+      const workers = this.getAllWorkers();
       this.lastWorkersSnapshot = JSON.stringify(workers);
-      this.broadcast({
-        type: "workers",
-        workers,
-      });
+      this.broadcast({ type: "workers", workers });
     });
 
     this.procMgr.setOutputHandler((workerId, data) => {
@@ -875,8 +875,9 @@ export class WsServer {
         // shows content before the 3-second discovery scan picks it up.
         if (termResult.tty) {
           const spawnTty = termResult.tty;
+          const normalizedTty = spawnTty.replace("/dev/", "");
           const projectName = real.split("/").pop() || real;
-          const placeholderId = `spawning_${spawnTty.replace(/\//g, "_")}`;
+          const placeholderId = `spawning_${normalizedTty.replace(/\//g, "_")}`;
           const placeholder = {
             id: placeholderId,
             pid: 0,

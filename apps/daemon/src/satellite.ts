@@ -362,7 +362,8 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           // (before the 3s discovery scan) and so discovery's placeholder-resolution
           // path forces idle on the real worker — matching primary behavior.
           const projectName = project.split("/").pop() || project;
-          const placeholderId = `spawning_${result.tty.replace(/\//g, "_")}`;
+          const normalizedTty = result.tty.replace("/dev/", "");
+          const placeholderId = `spawning_${normalizedTty.replace(/\//g, "_")}`;
           this.telemetry.registerDiscovered(placeholderId, {
             id: placeholderId,
             pid: 0,

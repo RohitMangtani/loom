@@ -120,6 +120,19 @@ export function useHive(daemonUrl: string) {
             break;
           }
 
+          case "worker_removed": {
+            if (data.workerId) {
+              const rid = data.workerId;
+              setWorkers((prev) => {
+                if (!prev.has(rid)) return prev;
+                const next = new Map(prev);
+                next.delete(rid);
+                return next;
+              });
+            }
+            break;
+          }
+
           case "chat_history": {
             if (data.workerId && data.messages) {
               const wid = data.workerId;

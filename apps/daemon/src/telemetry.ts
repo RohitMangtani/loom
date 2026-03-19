@@ -1069,6 +1069,15 @@ export class TelemetryReceiver {
   }
 
   removeWorker(id: string): void {
+    this.silentRemoveWorker(id);
+    for (const cb of this.removalListeners) {
+      cb(id);
+    }
+  }
+
+  /** Remove a worker without triggering removal listeners (no WS broadcast).
+   *  Used when atomically replacing a placeholder with a real worker. */
+  silentRemoveWorker(id: string): void {
     const trackedDispatch = this.dispatchedTasks.get(id);
     if (trackedDispatch?.taskId) {
       this.taskQueue.requeueRunningTask(id);
@@ -1087,9 +1096,6 @@ export class TelemetryReceiver {
         this.sessionToWorker.delete(sid);
         this.pendingHooks.delete(sid);
       }
-    }
-    for (const cb of this.removalListeners) {
-      cb(id);
     }
   }
 
