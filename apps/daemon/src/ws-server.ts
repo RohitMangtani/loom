@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { URL } from "url";
 import { homedir } from "os";
-import { realpathSync, unlinkSync } from "fs";
+import { realpathSync, unlinkSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { ProcessManager } from "./process-mgr.js";
@@ -392,60 +392,99 @@ export class WsServer {
   }
 
   /** Handle a relayed API request from a satellite.
-   *  Executes the same logic as the primary's REST API. */
+   *  Executes the same logic as the primary's REST API.
+   *  Full parity — every route the primary serves is available to satellites. */
   private handleApiRelay(method: string, path: string, body: Record<string, unknown> | undefined, fromMachine: string): unknown {
-    // Parse path and query
+    // Parse path and query, also extract path params (e.g. /api/reviews/:id)
     const [basePath, queryStr] = path.split("?");
     const query = new URLSearchParams(queryStr || "");
+    const segments = basePath.split("/").filter(Boolean); // ["api", "reviews", "abc123"]
 
-    switch (basePath) {
-      case "/api/workers":
+    switch (segments[1]) { // switch on the resource name (workers, message, queue, etc.)
+
+      case "workers":
         return this.getAllWorkers();
 
-      case "/api/message": {
-        if (!body?.workerId || !body?.content) return { error: "Missing workerId or content" };
-        const workerId = body.workerId as string;
-        const content = body.content as string;
+      case "message": {
+        if (method === "POST") {
+          if (!body?.workerId || !body?.content) return { error: "Missing workerId or content" };
+          const workerId = body.workerId as string;
+          const content = body.content as string;
 
-        // Check if target is a satellite worker
-        const msgSat = this.getSatelliteForWorker(workerId);
-        if (msgSat) {
-          const parsed = this.parseSatelliteWorker(workerId)!;
-          this.sendToSatellite(msgSat, {
-            type: "satellite_message",
-            requestId: `relay_msg_${Date.now()}`,
-            workerId,
-            localWorkerId: parsed.localId,
-            content,
+          // Check if target is a satellite worker
+          const msgSat = this.getSatelliteForWorker(workerId);
+          if (msgSat) {
+            const parsed = this.parseSatelliteWorker(workerId)!;
+            this.sendToSatellite(msgSat, {
+              type: "satellite_message",
+              requestId: `relay_msg_${Date.now()}`,
+              workerId,
+              localWorkerId: parsed.localId,
+              content,
+            });
+            return { ok: true, relayed: true };
+          }
+
+          // Local worker
+          return this.telemetry.sendToWorker(workerId, content, {
+            source: `satellite:${fromMachine}`,
+            queueIfBusy: false,
+            markDashboardInput: false,
           });
-          return { ok: true, relayed: true };
         }
+        return { error: "Method not supported" };
+      }
 
-        // Local worker
-        const result = this.telemetry.sendToWorker(workerId, content, {
-          source: `satellite:${fromMachine}`,
-          queueIfBusy: false,
-          markDashboardInput: false,
+      case "context": {
+        const workerId = query.get("workerId") || "";
+        const workerIds = query.get("workerIds")?.split(",").map(s => s.trim()).filter(Boolean);
+        const history = query.get("history") === "1" || query.get("history") === "true";
+        const historyLimit = Number(query.get("historyLimit") || 6);
+        const options = {
+          includeHistory: history,
+          historyLimit: Number.isFinite(historyLimit) ? Math.max(1, Math.min(12, historyLimit)) : 6,
+        };
+        if (workerId) {
+          return this.telemetry.getWorkerContext(workerId, options) || { error: `Worker ${workerId} not found` };
+        }
+        return this.telemetry.getWorkerContexts({
+          ...options,
+          ...(workerIds ? { workerIds } : {}),
         });
-        return result;
       }
 
-      case "/api/queue": {
-        if (!body?.task) return { error: "Missing task" };
-        const queued = this.telemetry.pushTask(
-          body.task as string,
-          body.project as string | undefined,
-          (body.priority as number) ?? 10,
-          body.blockedBy as string | undefined,
-          body.workflowId as string | undefined,
-          body.verify as boolean | undefined,
-          body.maxVerifyAttempts as number | undefined,
-          body.autoCommit as boolean | undefined,
-        );
-        return { ok: true, task: queued, remaining: this.telemetry.getTaskQueueLength() };
+      case "message-queue": {
+        if (method === "DELETE" && segments[2]) {
+          const cancelled = this.telemetry.cancelMessage(segments[2]);
+          return cancelled ? { ok: true, cancelled: segments[2] } : { error: `Message ${segments[2]} not found` };
+        }
+        return this.telemetry.getMessageQueueDetails();
       }
 
-      case "/api/scratchpad": {
+      case "queue": {
+        if (method === "POST") {
+          if (!body?.task) return { error: "Missing task" };
+          const queued = this.telemetry.pushTask(
+            body.task as string,
+            body.project as string | undefined,
+            (body.priority as number) ?? 10,
+            body.blockedBy as string | undefined,
+            body.workflowId as string | undefined,
+            body.verify as boolean | undefined,
+            body.maxVerifyAttempts as number | undefined,
+            body.autoCommit as boolean | undefined,
+          );
+          return { ok: true, task: queued, remaining: this.telemetry.getTaskQueueLength() };
+        }
+        if (method === "DELETE" && segments[2]) {
+          const removed = this.telemetry.removeTask(segments[2]);
+          return removed ? { ok: true } : { error: `Task ${segments[2]} not found` };
+        }
+        // GET
+        return this.telemetry.getTaskQueue();
+      }
+
+      case "scratchpad": {
         if (method === "POST" && body) {
           this.telemetry.setScratchpad(
             body.key as string,
@@ -453,6 +492,11 @@ export class WsServer {
             body.setBy as string || fromMachine,
           );
           return { ok: true };
+        }
+        if (method === "DELETE") {
+          const delKey = query.get("key") || "";
+          if (!delKey) return { error: "Missing key" };
+          return { ok: true, deleted: this.telemetry.deleteScratchpad(delKey) };
         }
         // GET
         const key = query.get("key") || "";
@@ -462,7 +506,7 @@ export class WsServer {
         return this.telemetry.getAllScratchpad();
       }
 
-      case "/api/learning": {
+      case "learning": {
         if (body?.project && body?.lesson) {
           this.telemetry.writeLearning(body.project as string, body.lesson as string);
           return { ok: true };
@@ -470,7 +514,8 @@ export class WsServer {
         return { error: "Missing project or lesson" };
       }
 
-      case "/api/reviews": {
+      case "reviews": {
+        const reviewId = segments[2]; // /api/reviews/:id
         if (method === "POST" && body?.summary) {
           this.telemetry.addReview(
             body.summary as string,
@@ -480,30 +525,115 @@ export class WsServer {
           );
           return { ok: true };
         }
-        return this.telemetry.getReviews();
-      }
-
-      case "/api/artifacts": {
-        const wid = query.get("workerId") || "";
-        return this.telemetry.getArtifacts(wid);
-      }
-
-      case "/api/locks": {
-        if (method === "POST" && body) {
-          const lockResult = this.telemetry.acquireLock(body.path as string, body.workerId as string);
-          return lockResult;
+        if (method === "PATCH" && reviewId) {
+          return { ok: this.telemetry.markReviewSeen(reviewId) };
         }
-        return { error: "Missing body" };
+        if (method === "PATCH" && !reviewId) {
+          return { ok: true, marked: this.telemetry.markAllReviewsSeen() };
+        }
+        if (method === "DELETE" && reviewId) {
+          return this.telemetry.dismissReview(reviewId) ? { ok: true } : { error: `Review ${reviewId} not found` };
+        }
+        if (method === "DELETE" && !reviewId) {
+          return { ok: true, cleared: this.telemetry.clearAllReviews() };
+        }
+        // GET
+        const unseen = query.get("unseen") === "1" || query.get("unseen") === "true";
+        return unseen ? this.telemetry.getUnseenReviews() : this.telemetry.getReviews();
       }
 
-      case "/api/conflicts": {
+      case "artifacts": {
+        const wid = query.get("workerId") || "";
+        if (wid) return this.telemetry.getArtifacts(wid);
+        // Return all artifacts
+        const all: Record<string, Array<{ path: string; action: string; ts: number }>> = {};
+        for (const w of this.telemetry.getAll()) {
+          const arts = this.telemetry.getArtifacts(w.id);
+          if (arts.length > 0) all[w.id] = arts;
+        }
+        return all;
+      }
+
+      case "locks": {
+        if (method === "POST" && body) {
+          return this.telemetry.acquireLock(body.path as string, body.workerId as string);
+        }
+        if (method === "DELETE") {
+          const lockWorker = query.get("workerId") || body?.workerId as string || "";
+          const lockPath = query.get("path") || body?.path as string || "";
+          if (!lockWorker) return { error: "Missing workerId" };
+          if (lockPath) {
+            return { ok: true, released: this.telemetry.releaseLock(lockPath, lockWorker) };
+          }
+          return { ok: true, releasedCount: this.telemetry.releaseAllLocks(lockWorker) };
+        }
+        // GET
+        return this.telemetry.getAllLocks();
+      }
+
+      case "conflicts": {
         const conflictPath = query.get("path") || "";
         const exclude = query.get("excludeWorker") || "";
-        return this.telemetry.checkConflicts(conflictPath, exclude);
+        if (!conflictPath) return { error: "Missing path" };
+        const conflicts = this.telemetry.checkConflicts(conflictPath, exclude);
+        return { path: conflictPath, conflicts, hasConflict: conflicts.length > 0 };
       }
+
+      case "audit":
+        return this.discovery ? this.discovery.getAuditLog(query.get("tty") || undefined) : [];
+
+      case "signals":
+        return this.telemetry.getSignals(query.get("workerId") || undefined);
+
+      case "debug":
+        return this.discovery ? this.telemetry.getDebugState(this.discovery) : { error: "Discovery not initialized" };
+
+      case "models":
+        return this.getModels();
+
+      case "projects":
+        return this.getProjects();
+
+      case "rearrange":
+        if (method === "POST") {
+          this.telemetry.forceRearrange();
+          return { ok: true };
+        }
+        return { error: "Method not supported" };
 
       default:
         return { error: `Unknown API path: ${basePath}` };
+    }
+  }
+
+  /** List available agent models (same logic as /api/models route). */
+  private getModels(): unknown {
+    const builtIn = [
+      { id: "claude", label: "Claude" },
+      { id: "codex", label: "Codex" },
+      { id: "openclaw", label: "OpenClaw" },
+    ];
+    const custom = ProcessDiscovery.getCustomAgents().map((a: { id: string; label: string }) => ({
+      id: a.id,
+      label: a.label,
+    }));
+    return [...builtIn, ...custom];
+  }
+
+  /** List available projects (same logic as /api/projects route). */
+  private getProjects(): unknown {
+    const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+    const projectsDir = join(HOME, "factory", "projects");
+    try {
+      const entries = readdirSync(projectsDir);
+      const projects = entries
+        .filter(name => {
+          try { return statSync(join(projectsDir, name)).isDirectory(); } catch { return false; }
+        })
+        .map(name => ({ name, path: join(projectsDir, name) }));
+      return { projects };
+    } catch {
+      return { projects: [] };
     }
   }
 

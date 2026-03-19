@@ -193,13 +193,19 @@ export class SatelliteClient {
 
   /** Register API proxy routes on the satellite's local HTTP server.
    *  Local agents call these like normal Hive API — the satellite
-   *  relays them to the primary via WebSocket. */
+   *  relays them to the primary via WebSocket.
+   *
+   *  Uses a catch-all `/api/*` relay so every current and future
+   *  primary endpoint works on satellites automatically. Only
+   *  `/api/workers` is handled locally (reads from workers.json). */
   registerApiProxy(): void {
     const app = this.telemetry.getApp();
     const auth = this.telemetry.getAuthMiddleware();
     if (!app || !auth) return;
 
     // GET /api/workers — read from workers.json (updated by satellite_all_workers)
+    // This is the only route handled locally — reading the cached full worker list
+    // is faster and works even if the primary WebSocket is momentarily down.
     app.get("/api/workers", auth, (_req: import("express").Request, res: import("express").Response) => {
       try {
         const data = JSON.parse(readFileSync(join(homedir(), ".hive", "workers.json"), "utf-8"));
@@ -210,65 +216,29 @@ export class SatelliteClient {
       }
     });
 
-    // POST /api/message — relay to primary
-    app.post("/api/message", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const result = await this.relayToPrimary("POST", "/api/message", req.body);
-      res.json(result);
+    // Catch-all: relay every other /api/* route to the primary daemon.
+    // Reconstructs the full URL (path + query string) and forwards the
+    // HTTP method + body. New primary endpoints work on satellites
+    // with zero additional proxy code.
+    app.all("/api/*", auth, async (req: import("express").Request, res: import("express").Response) => {
+      const method = req.method;
+      // Reconstruct query string
+      const qs = Object.entries(req.query as Record<string, string>)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join("&");
+      const path = qs ? `${req.path}?${qs}` : req.path;
+      const body = method === "GET" || method === "HEAD" ? undefined : req.body;
+
+      try {
+        const result = await this.relayToPrimary(method, path, body);
+        res.json(result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.status(502).json({ error: `Relay failed: ${msg.slice(0, 200)}` });
+      }
     });
 
-    // POST /api/queue — relay to primary
-    app.post("/api/queue", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const result = await this.relayToPrimary("POST", "/api/queue", req.body);
-      res.json(result);
-    });
-
-    // POST /api/scratchpad — relay to primary
-    app.post("/api/scratchpad", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const result = await this.relayToPrimary("POST", "/api/scratchpad", req.body);
-      res.json(result);
-    });
-
-    // GET /api/scratchpad — relay to primary
-    app.get("/api/scratchpad", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const key = req.query.key as string || "";
-      const result = await this.relayToPrimary("GET", `/api/scratchpad?key=${encodeURIComponent(key)}`);
-      res.json(result);
-    });
-
-    // POST /api/learning — relay to primary
-    app.post("/api/learning", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const result = await this.relayToPrimary("POST", "/api/learning", req.body);
-      res.json(result);
-    });
-
-    // POST /api/reviews — relay to primary
-    app.post("/api/reviews", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const result = await this.relayToPrimary("POST", "/api/reviews", req.body);
-      res.json(result);
-    });
-
-    // GET /api/artifacts — relay to primary
-    app.get("/api/artifacts", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const workerId = req.query.workerId as string || "";
-      const result = await this.relayToPrimary("GET", `/api/artifacts?workerId=${encodeURIComponent(workerId)}`);
-      res.json(result);
-    });
-
-    // POST /api/locks — relay to primary
-    app.post("/api/locks", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const result = await this.relayToPrimary("POST", "/api/locks", req.body);
-      res.json(result);
-    });
-
-    // GET /api/conflicts — relay to primary
-    app.get("/api/conflicts", auth, async (req: import("express").Request, res: import("express").Response) => {
-      const path = req.query.path as string || "";
-      const exclude = req.query.excludeWorker as string || "";
-      const result = await this.relayToPrimary("GET", `/api/conflicts?path=${encodeURIComponent(path)}&excludeWorker=${encodeURIComponent(exclude)}`);
-      res.json(result);
-    });
-
-    console.log("[satellite] API proxy routes registered (message, queue, scratchpad, learning, reviews, artifacts, locks, conflicts)");
+    console.log("[satellite] API proxy registered: /api/workers (local) + catch-all relay for all other /api/* routes");
   }
 
   /** Install CLAUDE.md with Hive API instructions so local agents know how to
@@ -303,14 +273,25 @@ Daemon: http://127.0.0.1:3001 | Token: \`$(cat ~/.hive/token)\` | Auth header: \
 | Endpoint | Purpose |
 |---|---|
 | \`GET /api/workers\` | List agents (all machines) |
+| \`GET /api/context?workerId=X&history=1\` | Worker conversation context |
 | \`POST /api/message {workerId, content}\` | Send prompt to agent (any machine) |
+| \`GET /api/message-queue\` | View pending messages |
 | \`POST /api/queue {task, project?, priority?}\` | Queue task |
+| \`GET /api/queue\` | View task queue |
 | \`POST /api/locks {workerId, path}\` | Acquire file lock |
+| \`GET /api/locks\` | View all locks |
+| \`DELETE /api/locks?workerId=X&path=Y\` | Release locks |
 | \`GET /api/conflicts?path=X&excludeWorker=Y\` | Check conflicts |
 | \`POST /api/scratchpad {key, value, setBy}\` | Shared context (1hr expiry) |
+| \`GET /api/scratchpad?key=X\` | Read scratchpad |
 | \`GET /api/artifacts?workerId=X\` | File changes by agent |
 | \`POST /api/learning {project, lesson}\` | Persist lesson |
 | \`POST /api/reviews {summary, url?, type?}\` | Report a reviewable change |
+| \`GET /api/reviews\` | Read all reviews |
+| \`GET /api/audit\` | Audit log |
+| \`GET /api/signals\` | Worker signals |
+| \`GET /api/models\` | Available agent models |
+| \`GET /api/projects\` | Available projects |
 
 ### Cross-Machine Communication
 

@@ -13,18 +13,6 @@ import { usePushSubscription } from "@/components/ServiceWorker";
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 const MAX_SLOTS = 8;
 
-/** Vertical stack: 1 column, agents stacked top-to-bottom matching terminal layout */
-const GRID_CLASSES: Record<number, string> = {
-  0: "grid-cols-1",
-  1: "grid-cols-1",
-  2: "grid-cols-1",
-  3: "grid-cols-1",
-  4: "grid-cols-1",
-  5: "grid-cols-1",
-  6: "grid-cols-1",
-  7: "grid-cols-1",
-  8: "grid-cols-1",
-};
 
 interface LastKnown {
   project: string;
@@ -179,6 +167,26 @@ export default function Home() {
 
   const numbered = useStableNumbering(workers);
 
+  /** Group agents by machine — local first, then each satellite hostname */
+  const machineGroups = useMemo(() => {
+    const groups: { machine: string | undefined; agents: typeof numbered }[] = [];
+    const byMachine = new Map<string | undefined, typeof numbered>();
+    for (const entry of numbered) {
+      const key = entry.worker.machine || undefined;
+      if (!byMachine.has(key)) byMachine.set(key, []);
+      byMachine.get(key)!.push(entry);
+    }
+    // Local first
+    if (byMachine.has(undefined)) {
+      groups.push({ machine: undefined, agents: byMachine.get(undefined)! });
+      byMachine.delete(undefined);
+    }
+    // Then satellites sorted by hostname
+    for (const [machine, agents] of [...byMachine.entries()].sort((a, b) => (a[0] || "").localeCompare(b[0] || ""))) {
+      groups.push({ machine, agents });
+    }
+    return groups;
+  }, [numbered]);
 
   const activeCount = numbered.filter(({ worker: w }) => w.status === "working").length;
   const stuckCount = numbered.filter(({ worker: w }) => w.status === "stuck").length;
@@ -396,32 +404,42 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Body — vertical tile stack, compresses when chat is open */}
+      {/* Body — vertical tile stack grouped by machine, compresses when chat is open */}
       {numbered.length > 0 ? (
         <div
-          className={`min-h-0 grid ${GRID_CLASSES[numbered.length] || GRID_CLASSES[4]} ${!isViewer && selectedEntry ? "gap-1.5 p-2 sm:p-3" : "gap-3 p-4 sm:p-6"} transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0" : "flex-1"}`}
+          className={`min-h-0 flex flex-col ${!isViewer && selectedEntry ? "gap-1.5 p-2 sm:p-3" : "gap-3 p-4 sm:p-6"} transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0" : "flex-1"}`}
           style={!isViewer && selectedEntry ? { maxHeight: chatExpanded ? "0px" : "40vh", overflow: chatExpanded ? "hidden" : "auto", padding: chatExpanded ? "0px" : undefined, gap: chatExpanded ? "0px" : undefined } : undefined}
         >
-          {numbered.map(({ worker: w, num }) => (
-            <AgentCard
-              key={w.id}
-              worker={w}
-              num={num}
-              selected={!isViewer && selectedId === w.id}
-              flagged={flaggedIds.has(w.id)}
-              managing={managing}
-              onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
-              onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
-              onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
-              onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
-              onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
-              onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
-              onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
-              onKill={!isViewer && managing ? () => {
-                send({ type: "kill", workerId: w.id });
-                if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
-              } : undefined}
-            />
+          {machineGroups.map(({ machine, agents }) => (
+            <div key={machine || "__local"} className={`grid grid-cols-1 ${!isViewer && selectedEntry ? "gap-1.5" : "gap-3"}`}>
+              {machine && (
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--text-muted)]">{machine}</span>
+                  <span className="flex-1 h-px bg-[var(--border)]" />
+                </div>
+              )}
+              {agents.map(({ worker: w, num }) => (
+                <AgentCard
+                  key={w.id}
+                  worker={w}
+                  num={num}
+                  selected={!isViewer && selectedId === w.id}
+                  flagged={flaggedIds.has(w.id)}
+                  managing={managing}
+                  onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
+                  onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
+                  onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
+                  onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
+                  onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
+                  onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
+                  onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
+                  onKill={!isViewer && managing ? () => {
+                    send({ type: "kill", workerId: w.id });
+                    if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
+                  } : undefined}
+                />
+              ))}
+            </div>
           ))}
         </div>
       ) : (
