@@ -1823,8 +1823,8 @@ export class TelemetryReceiver {
 
   // --- Task queue facade ---
 
-  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean, requires?: string[], preferMachine?: string): QueuedTask {
-    return this.taskQueue.push(task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit, requires, preferMachine);
+  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean, requires?: string[], preferMachine?: string, model?: string): QueuedTask {
+    return this.taskQueue.push(task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit, requires, preferMachine, model);
   }
 
   removeTask(taskId: string): boolean {
@@ -1951,6 +1951,13 @@ export class TelemetryReceiver {
         });
         if (capableWorkers.length === 0) continue; // no capable machine idle — skip, try next tick
         eligibleWorkers = capableWorkers;
+      }
+
+      // Model routing: if task specifies a model, only dispatch to agents running that model
+      if (task.model) {
+        const modelMatch = eligibleWorkers.filter(w => w.model === task.model);
+        if (modelMatch.length === 0) continue; // no idle agent with that model — skip, try next tick
+        eligibleWorkers = modelMatch;
       }
 
       // Preferred machine routing
