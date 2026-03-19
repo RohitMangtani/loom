@@ -124,6 +124,10 @@ export class TelemetryReceiver {
   private recentSpawns = new Map<string, number>(); // tty → spawnTimestamp
   private static readonly SPAWN_GRACE_PERIOD = 60_000; // 60s
 
+  // Satellite workers injected by ws-server for inclusion in workers.json
+  // so the primary's identity hook shows cross-machine peers.
+  private satelliteSlots: Array<{ quadrant: number; id: string; pid: number; tty?: string; project: string; projectName: string; status: string; currentAction: string | null; lastAction: string; startedAt: number; model: string; machine?: string }> = [];
+
   // Dispatch tracking
   private dispatchedTasks = new Map<string, {
     task: string; project: string; sentAt: number;
@@ -925,6 +929,19 @@ export class TelemetryReceiver {
       }).trim();
 
       console.log(`[auto-commit] ${workerId}: committed ${existingFiles.length} file(s) → ${hash}`);
+
+      // Auto-push to keep repos in sync across machines
+      try {
+        execFileSync("/usr/bin/git", ["push"], {
+          cwd: project,
+          encoding: "utf-8",
+          timeout: 30_000,
+        });
+        console.log(`[auto-commit] ${workerId}: pushed to remote`);
+      } catch (pushErr) {
+        console.log(`[auto-commit] ${workerId}: push failed (commit preserved) — ${pushErr instanceof Error ? pushErr.message : pushErr}`);
+      }
+
       return hash;
     } catch (err) {
       console.log(`[auto-commit] ${workerId}: git commit failed — ${err instanceof Error ? err.message : err}`);
@@ -1180,12 +1197,16 @@ export class TelemetryReceiver {
       });
     }
     slots.sort((a, b) => a.quadrant - b.quadrant);
+
+    // Merge satellite workers so the primary's identity hook shows cross-machine peers
+    const allSlots = [...slots, ...this.satelliteSlots];
+
     try {
       const hiveDir = join(HOME, ".hive");
       if (!existsSync(hiveDir)) mkdirSync(hiveDir, { recursive: true });
       writeFileSync(
         join(hiveDir, "workers.json"),
-        JSON.stringify({ updatedAt: Date.now(), workers: slots }, null, 2) + "\n"
+        JSON.stringify({ updatedAt: Date.now(), workers: allSlots }, null, 2) + "\n"
       );
       writeFileSync(
         join(hiveDir, "contexts.json"),
@@ -1675,6 +1696,11 @@ export class TelemetryReceiver {
     }
   }
 
+  /** Set satellite worker slots for inclusion in workers.json (called by ws-server). */
+  setSatelliteSlots(slots: typeof this.satelliteSlots): void {
+    this.satelliteSlots = slots;
+  }
+
   // --- Task queue facade ---
 
   pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean): QueuedTask {
@@ -1793,6 +1819,18 @@ export class TelemetryReceiver {
       if (!target?.tty) continue;
 
       const brief = this.buildContextBrief(target.id, task.project);
+
+      // Git pull before dispatch: ensure agent starts with latest code
+      if (task.project) {
+        try {
+          const { execFileSync } = require("child_process");
+          execFileSync("/usr/bin/git", ["pull", "--ff-only", "--no-edit"], {
+            cwd: task.project,
+            encoding: "utf-8",
+            timeout: 15_000,
+          });
+        } catch { /* not a git repo or no remote — skip */ }
+      }
 
       // Conflict guard: warn about files locked or recently edited by other agents
       let conflictWarning = "";

@@ -12,7 +12,7 @@ import { WebSocket } from "ws";
 import { hostname } from "os";
 import { homedir, platform } from "os";
 import { join, basename } from "path";
-import { unlinkSync, existsSync } from "fs";
+import { unlinkSync, existsSync, writeFileSync, mkdirSync } from "fs";
 import { execFile } from "child_process";
 import { ProcessDiscovery } from "./discovery.js";
 import { TelemetryReceiver } from "./telemetry.js";
@@ -54,6 +54,7 @@ interface SatelliteDownMessage {
   optionIndex?: number;
   files?: string[];       // auto-commit: file paths to commit
   message?: string;       // auto-commit: commit message
+  workers?: unknown[];    // satellite_all_workers: full worker list from primary
 }
 
 export class SatelliteClient {
@@ -322,6 +323,22 @@ export class SatelliteClient {
         break;
       }
 
+      case "satellite_all_workers": {
+        // Primary sends the full merged worker list (local + all satellites).
+        // Write to ~/.hive/workers.json so the identity hook on this machine
+        // shows cross-machine peers in its peer summary.
+        try {
+          const hiveDir = join(homedir(), ".hive");
+          if (!existsSync(hiveDir)) mkdirSync(hiveDir, { recursive: true });
+          const allWorkers = msg.workers || [];
+          writeFileSync(
+            join(hiveDir, "workers.json"),
+            JSON.stringify({ updatedAt: Date.now(), workers: allWorkers }, null, 2) + "\n"
+          );
+        } catch { /* non-critical */ }
+        break;
+      }
+
       case "satellite_autocommit": {
         const project = msg.project || "";
         const files = msg.files || [];
@@ -362,6 +379,18 @@ export class SatelliteClient {
           const hash = await gitHash();
 
           console.log(`[satellite-autocommit] Committed ${existingFiles.length} file(s) → ${hash}`);
+
+          // Auto-push to keep repos in sync across machines
+          try {
+            await new Promise<void>((resolve, reject) => {
+              execFile("/usr/bin/git", ["push"], { cwd: project, timeout: 30_000 },
+                (err) => err ? reject(err) : resolve());
+            });
+            console.log(`[satellite-autocommit] Pushed to remote`);
+          } catch (pushErr) {
+            console.log(`[satellite-autocommit] Push failed (commit preserved) — ${pushErr instanceof Error ? pushErr.message : pushErr}`);
+          }
+
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);

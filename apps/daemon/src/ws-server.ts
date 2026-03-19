@@ -235,13 +235,78 @@ export class WsServer {
    *  so the dashboard stays current even when status changes come from
    *  discovery (JSONL/CPU analysis) instead of hooks. */
   pushState(): void {
-    if (this.clients.size === 0) return;
     const workers = this.getAllWorkers();
     const snapshot = JSON.stringify(workers);
     if (snapshot !== this.lastWorkersSnapshot) {
       this.lastWorkersSnapshot = snapshot;
-      this.broadcast({ type: "workers", workers });
+      if (this.clients.size > 0) {
+        this.broadcast({ type: "workers", workers });
+      }
+      // Broadcast formatted worker slots to all satellites so their identity hooks
+      // show cross-machine peers. Build slot format matching workers.json structure.
+      if (this.satellites.size > 0) {
+        const localWorkers = this.telemetry.getAll();
+        const peerSlots: Array<Record<string, unknown>> = [];
+        let slot = 1;
+        for (const w of localWorkers) {
+          peerSlots.push({
+            quadrant: w.quadrant || slot++,
+            id: w.id, tty: w.tty, project: w.project,
+            projectName: w.projectName, status: w.status,
+            currentAction: w.currentAction, lastAction: w.lastAction,
+            startedAt: w.startedAt, model: w.model || "claude",
+          });
+        }
+        // Also include satellite workers from OTHER satellites
+        let satSlot = peerSlots.length + 1;
+        for (const sat of this.satellites.values()) {
+          for (const w of sat.workers) {
+            peerSlots.push({
+              quadrant: satSlot++,
+              id: `${sat.machineId}:${w.id}`, tty: w.tty,
+              project: w.project, projectName: w.projectName,
+              status: w.status, currentAction: w.currentAction,
+              lastAction: w.lastAction, startedAt: w.startedAt,
+              model: w.model || "claude", machine: sat.machineId,
+            });
+          }
+        }
+        const allWorkersMsg = JSON.stringify({ type: "satellite_all_workers", workers: peerSlots });
+        for (const sat of this.satellites.values()) {
+          if (sat.ws.readyState === WebSocket.OPEN) {
+            sat.ws.send(allWorkersMsg);
+          }
+        }
+      }
     }
+    // Push satellite worker slots to telemetry for inclusion in workers.json
+    // so the primary's identity hook shows cross-machine peers.
+    if (this.satellites.size > 0) {
+      const satSlots: Array<{ quadrant: number; id: string; pid: number; tty?: string; project: string; projectName: string; status: string; currentAction: string | null; lastAction: string; startedAt: number; model: string; machine?: string }> = [];
+      let nextSatSlot = 5; // Satellite workers get slots 5-8 (primary uses 1-4)
+      for (const sat of this.satellites.values()) {
+        for (const w of sat.workers) {
+          satSlots.push({
+            quadrant: nextSatSlot++,
+            id: `${sat.machineId}:${w.id}`,
+            pid: w.pid,
+            tty: w.tty,
+            project: w.project,
+            projectName: w.projectName,
+            status: w.status,
+            currentAction: w.currentAction,
+            lastAction: w.lastAction,
+            startedAt: w.startedAt,
+            model: w.model || "claude",
+            machine: sat.machineId,
+          });
+        }
+      }
+      this.telemetry.setSatelliteSlots(satSlots);
+    } else {
+      this.telemetry.setSatelliteSlots([]);
+    }
+
     // Check if available models changed (custom agents added/removed)
     const models = this.getAvailableModels();
     const modelsSnapshot = JSON.stringify(models);
