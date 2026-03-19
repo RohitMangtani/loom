@@ -38,8 +38,8 @@ if [ "${1:-}" = "--connect" ]; then
 elif [ "${1:-}" = "--fresh" ]; then
   SATELLITE_MODE=0
 
-else
-  # Interactive: ask the user what they want
+elif [ -t 0 ]; then
+  # Interactive terminal: ask the user what they want
   echo ""
   echo "  ┌─────────────────────────────────────────┐"
   echo "  │             Hive Setup                   │"
@@ -73,6 +73,9 @@ else
 
     PRIMARY_URL="${PRIMARY_URL/https:\/\//wss://}"
   fi
+else
+  # Non-interactive (piped from Claude Code, CI, etc.) — default to fresh
+  SATELLITE_MODE=0
 fi
 
 echo ""
