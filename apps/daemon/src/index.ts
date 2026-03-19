@@ -58,6 +58,14 @@ if (satFlagIdx !== -1) {
   console.log(`  Primary: ${primaryUrl}`);
   console.log("  Local hooks: http://127.0.0.1:3001");
 
+  // Prevent crashes from unhandled errors — log and continue
+  process.on("uncaughtException", (err) => {
+    console.log(`[satellite] Uncaught exception: ${err.message}`);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.log(`[satellite] Unhandled rejection: ${reason instanceof Error ? reason.message : reason}`);
+  });
+
   const shutdown = () => {
     console.log("\nShutting down satellite...");
     satellite.stop();

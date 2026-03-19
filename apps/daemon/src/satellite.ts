@@ -136,8 +136,10 @@ export class SatelliteClient {
     this.ws.on("message", (raw) => {
       try {
         const msg: SatelliteDownMessage = JSON.parse(raw.toString());
-        this.handleMessage(msg);
-      } catch { /* malformed message */ }
+        this.handleMessage(msg).catch((err) => {
+          console.log(`[satellite] Error handling ${msg.type}: ${err instanceof Error ? err.message : err}`);
+        });
+      } catch { /* malformed JSON */ }
     });
 
     this.ws.on("close", () => {
@@ -170,7 +172,7 @@ export class SatelliteClient {
   private async handleMessage(msg: SatelliteDownMessage): Promise<void> {
     switch (msg.type) {
       case "satellite_spawn": {
-        const project = msg.project || homedir();
+        const project = (!msg.project || msg.project === "~") ? homedir() : msg.project;
         const model = msg.model || "claude";
         const result = spawnTerminalWindow(project, model, msg.targetQuadrant, msg.initialMessage, this.telemetry.getAll().length);
         if (result.tty) {
