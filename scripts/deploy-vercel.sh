@@ -70,6 +70,12 @@ if ! npx vercel whoami >/dev/null 2>&1; then
 fi
 
 cd "$ROOT"
+
+# Link project on first deploy so Vercel knows which scope/team to use
+if [ ! -f "$ROOT_VERCEL_DIR/project.json" ]; then
+  echo "Linking Vercel project..."
+  npx vercel link --yes
+fi
 DEPLOY_LOG="$(mktemp)"
 npx vercel deploy --prod --yes \
   -b "NEXT_PUBLIC_WS_URL=$WS_URL" \
