@@ -689,7 +689,10 @@ export class WsServer {
     // so the primary's identity hook shows cross-machine peers.
     if (this.satellites.size > 0) {
       const satSlots: Array<{ quadrant: number; id: string; pid: number; tty?: string; project: string; projectName: string; status: string; currentAction: string | null; lastAction: string; startedAt: number; model: string; machine?: string }> = [];
-      let nextSatSlot = 5; // Satellite workers get slots 5-8 (primary uses 1-4)
+      // Start satellite slots after the highest local quadrant (no gaps)
+      const localWorkers = this.telemetry.getAll();
+      const maxLocalSlot = localWorkers.reduce((max, w) => Math.max(max, w.quadrant || 0), 0);
+      let nextSatSlot = Math.max(maxLocalSlot + 1, localWorkers.length + 1);
       for (const sat of this.satellites.values()) {
         for (const w of sat.workers) {
           satSlots.push({
