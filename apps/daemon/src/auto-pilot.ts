@@ -19,8 +19,10 @@ import { readTail } from "./utils.js";
 // Grace period: how long to wait before auto-selecting.
 // Gives the human time to see yellow and manually pick an option.
 // If the user selects before this expires, auto-pilot never fires.
-const GRACE_PERIOD_MS = 15_000;
-const COOLDOWN_MS = 4_000;
+// 3s is the sweet spot: long enough to intervene from the dashboard,
+// short enough that agents don't sit yellow for ages.
+const GRACE_PERIOD_MS = 3_000;
+const COOLDOWN_MS = 2_000;
 
 export class AutoPilot {
   private telemetry: TelemetryReceiver;

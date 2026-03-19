@@ -39,7 +39,7 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 - **Stoplight dashboard** — vertical stack that mirrors your terminal layout. Green/red/yellow at a glance. Open on your phone, tablet, or second monitor. The tile order matches your terminal order top to bottom. Supports 1-8 agents.
 - **Multi-model** — run Claude, Codex, and OpenClaw agents side by side. Each provider builds on its own strengths, and those strengths complement each other. Claude goes deep on architecture, Codex moves fast through targeted edits, and OpenClaw gives you reach beyond any single vendor. Hive lets you conduct them like instruments in the same symphony. Spawn any from the dashboard with the "+ Agent" button. Add custom agents via `~/.hive/agents.json` and they appear in the spawn dialog automatically.
 - **Auto-discovery** — start `claude`, `codex`, or `openclaw tui` in any terminal and it appears on the dashboard within 3 seconds. Quadrants are assigned by where the terminal sits on your screen, not by start order. No registration, no config.
-- **Auto-pilot** — permission prompts auto-approve after a 15-second grace window. Agents never sit idle waiting for a click.
+- **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Agents never sit idle waiting for a click.
 - **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy and drain automatically when it is ready.
 - **Peer awareness** — Claude agents get a one-line peer summary on every prompt, and all workers share the same dashboard/API state. No manual registration.
 - **Coordination** — file locks, task queue, scratchpad, conflict detection. Multiple agents working on the same codebase without stepping on each other.
@@ -225,7 +225,7 @@ Multi-layer detection pipeline determines real-time status:
 4. **PTY output** — detects terminal output flow for agents actively generating text
 
 ### Auto-Pilot
-Auto-approves permission prompts so agents never sit idle waiting for you. The daemon detects when an agent is stuck on a prompt, waits a 15-second grace window (so you can override from the dashboard), then sends a Return keystroke via the `send-return` binary.
+Auto-approves permission prompts so agents never sit idle waiting for you. The daemon detects when an agent is stuck on a prompt, waits a 3-second grace window (so you can override from the dashboard), then sends a Return keystroke via the `send-return` binary.
 
 This is how you run agents unattended. You give them tasks and walk away. Auto-pilot keeps them moving.
 
