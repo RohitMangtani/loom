@@ -489,18 +489,21 @@ end tell
             }
             // No known prompt — leave tile clean (no raw terminal noise)
           } else if (proc.tty && existing.status === "idle" && !existing.promptType && Date.now() - proc.startedAt < 600_000) {
-            // Young idle agent (<3min) — check for trust/sandbox prompts.
-            // Only young agents need this; older agents have prompt text in
-            // their terminal history but aren't actually waiting for input.
-            const prompt = this.detectPrompt(proc.tty);
-            if (prompt) {
-              existing.status = "waiting";
-              existing.promptType = prompt.type;
-              existing.promptMessage = prompt.message;
-              existing.currentAction = prompt.message;
-              existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
-              this.telemetry.notifyExternal(existing);
-              continue;
+            // Young idle agent — check for trust/sandbox prompts.
+            // Skip if hooks have been received: the agent is established and
+            // any prompt text in the terminal is stale from initialization.
+            const lastHook = this.telemetry.getLastHookTime(id);
+            if (!lastHook) {
+              const prompt = this.detectPrompt(proc.tty);
+              if (prompt) {
+                existing.status = "waiting";
+                existing.promptType = prompt.type;
+                existing.promptMessage = prompt.message;
+                existing.currentAction = prompt.message;
+                existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
+                this.telemetry.notifyExternal(existing);
+                continue;
+              }
             }
           }
 
