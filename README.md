@@ -54,6 +54,7 @@ The vertical stack solves this. Your brain is good at spatial memory. When you s
 
 - **macOS** (uses AppleScript + CGEvent for terminal interaction)
 - **Node.js 20+** — [nodejs.org](https://nodejs.org)
+- **Homebrew** — [brew.sh](https://brew.sh) (for installing Cloudflare tunnel and other optional dependencies)
 
 That's it. Everything else is optional and the setup script handles it gracefully:
 
@@ -301,8 +302,39 @@ All endpoints require the auth token from `~/.hive/token` via the `Authorization
 | Method | Endpoint | Body | Description |
 |--------|----------|------|-------------|
 | `GET` | `/api/queue` | — | View all queued tasks |
-| `POST` | `/api/queue` | `{task, project?, priority?, blockedBy?, workflowId?}` | Push a task. Auto-dispatched to next idle agent. Add `workflowId` to link related tasks for automatic handoff. |
+| `POST` | `/api/queue` | `{task, project?, priority?, blockedBy?, workflowId?, requires?, preferMachine?, model?}` | Push a task. Auto-dispatched to next idle agent. Add `workflowId` to link related tasks for automatic handoff. Add `requires` for capability routing (see below). Add `model` to target a specific agent type. |
 | `DELETE` | `/api/queue/:id` | — | Remove a queued task |
+
+**Capability routing:** Tasks can target specific machines or agent types:
+
+```bash
+# Only dispatch to machines with GPU and ffmpeg
+curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"task":"Render the video","requires":["gpu","ffmpeg"]}' \
+  http://localhost:3001/api/queue
+
+# Prefer a specific machine, fall back to any capable one
+curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"task":"Train the model","requires":["pytorch","gpu"],"preferMachine":"desktop-gpu"}' \
+  http://localhost:3001/api/queue
+
+# Only dispatch to Codex agents
+curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"task":"Review this PR","model":"codex"}' \
+  http://localhost:3001/api/queue
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requires` | `string[]` | Capability keys the machine must have. Matches auto-detected capabilities (gpu, ffmpeg, docker, python, pytorch, tensorflow) and custom tags from `~/.hive/capabilities.json`. Task waits in queue until a capable machine has an idle agent. |
+| `preferMachine` | `string` | Machine ID to prefer. If that machine has an idle agent, it gets the task. Otherwise falls back to any capable machine. Use `"local"` for the primary. |
+| `model` | `string` | Agent model to target (e.g. `"claude"`, `"codex"`, `"openclaw"`). Task only dispatches to agents running that model. |
+
+Satellites auto-detect their capabilities on startup and report them to the primary. Add custom tags by creating `~/.hive/capabilities.json`:
+
+```json
+{ "tags": ["vpn", "prod-access", "large-disk"] }
+```
 
 ### File Coordination
 | Method | Endpoint | Body / Query | Description |
