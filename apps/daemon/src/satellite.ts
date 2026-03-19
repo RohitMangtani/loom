@@ -18,7 +18,7 @@ import { ProcessDiscovery } from "./discovery.js";
 import { TelemetryReceiver } from "./telemetry.js";
 import { SessionStreamer } from "./session-stream.js";
 import { ProcessManager } from "./process-mgr.js";
-import { spawnTerminalWindow, closeTerminalWindow } from "./arrange-windows.js";
+import { spawnTerminalWindow, closeTerminalWindow, arrangeTerminalWindows, updateTerminalTitles } from "./arrange-windows.js";
 import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
 import { patchHookUrls } from "./auth.js";
 import type { WorkerState } from "./types.js";
@@ -526,15 +526,41 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
         // Primary sends the full merged worker list (local + all satellites).
         // Write to ~/.hive/workers.json so the identity hook on this machine
         // shows cross-machine peers in its peer summary.
+        const allWorkers = (msg.workers || []) as Array<{ quadrant?: number; id?: string; tty?: string; projectName?: string; model?: string; machine?: string }>;
         try {
           const hiveDir = join(homedir(), ".hive");
           if (!existsSync(hiveDir)) mkdirSync(hiveDir, { recursive: true });
-          const allWorkers = msg.workers || [];
           writeFileSync(
             join(hiveDir, "workers.json"),
             JSON.stringify({ updatedAt: Date.now(), workers: allWorkers }, null, 2) + "\n"
           );
         } catch { /* non-critical */ }
+
+        // Arrange local terminal windows to match primary-assigned quadrants.
+        // Extract workers on this machine, map their prefixed IDs back to
+        // local workers to get TTYs, then arrange + title them.
+        const localWorkers = this.telemetry.getAll();
+        const slots: Array<{ quadrant: number; tty: string; projectName: string; model: string }> = [];
+        for (const remoteW of allWorkers) {
+          if (!remoteW.machine || remoteW.machine !== this.machineId) continue;
+          if (!remoteW.quadrant || !remoteW.id) continue;
+          // remoteW.id is "machineId:localId" — extract localId
+          const colonIdx = remoteW.id.indexOf(":");
+          const localId = colonIdx >= 0 ? remoteW.id.slice(colonIdx + 1) : remoteW.id;
+          const local = localWorkers.find(w => w.id === localId);
+          if (local?.tty) {
+            slots.push({
+              quadrant: remoteW.quadrant,
+              tty: local.tty,
+              projectName: local.projectName || "agent",
+              model: local.model || "claude",
+            });
+          }
+        }
+        if (slots.length > 0) {
+          arrangeTerminalWindows(slots);
+          updateTerminalTitles(slots);
+        }
         break;
       }
 
