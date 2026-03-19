@@ -15,6 +15,12 @@ export interface QueuedTask {
   verify?: boolean;
   maxVerifyAttempts?: number;
   autoCommit?: boolean;
+  /** Required capabilities — task only dispatches to machines that have ALL of these.
+   *  Strings match MachineCapabilities keys (gpu, ffmpeg, docker, pytorch, etc.)
+   *  or custom tags. Example: ["gpu", "ffmpeg"] means the machine needs both. */
+  requires?: string[];
+  /** Preferred machine — soft preference (dispatch here if idle, else anywhere capable). */
+  preferMachine?: string;
 }
 
 export interface RunningTask {
@@ -73,7 +79,7 @@ export class TaskQueue {
     } catch { /* best-effort */ }
   }
 
-  push(task: string, project?: string, priority = 10, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean): QueuedTask {
+  push(task: string, project?: string, priority = 10, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean, requires?: string[], preferMachine?: string): QueuedTask {
     const queued: QueuedTask = {
       id: `q${this.nextId++}`,
       task,
@@ -85,6 +91,8 @@ export class TaskQueue {
       verify,
       maxVerifyAttempts,
       autoCommit,
+      requires,
+      preferMachine,
     };
     this.tasks.push(queued);
     this.tasks.sort((a, b) => a.priority - b.priority || a.createdAt - b.createdAt);

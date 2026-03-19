@@ -120,15 +120,16 @@ export function registerApiRoutes(
 
   // POST /api/queue
   app.post("/api/queue", requireAuth, (req, res) => {
-    const { task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit } = req.body as {
+    const { task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit, requires, preferMachine } = req.body as {
       task?: string; project?: string; priority?: number; blockedBy?: string; workflowId?: string;
       verify?: boolean; maxVerifyAttempts?: number; autoCommit?: boolean;
+      requires?: string[]; preferMachine?: string;
     };
     if (!task) {
       res.status(400).json({ error: "Missing task" });
       return;
     }
-    const queued = receiver.pushTask(task, project, priority ?? 10, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit);
+    const queued = receiver.pushTask(task, project, priority ?? 10, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit, requires, preferMachine);
     res.json({ ok: true, task: queued, remaining: receiver.getTaskQueueLength() });
   });
 
@@ -456,5 +457,13 @@ export function registerApiRoutes(
     res.json({ ok: true });
   });
 
-  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange");
+  // GET /api/capabilities — list all machine capabilities across the swarm
+  app.get("/api/capabilities", requireAuth, (_req, res) => {
+    // This is handled by the catch-all satellite relay for satellites,
+    // and by the ws-server's handleApiRelay for the primary.
+    // For now, return local capabilities + note that satellite caps come via WS.
+    res.json({ note: "Use WS relay or satellite /api/capabilities for full swarm view" });
+  });
+
+  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange, /api/capabilities");
 }

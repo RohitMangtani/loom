@@ -10,7 +10,7 @@ import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
 import { spawnTerminalWindow, closeTerminalWindow } from "./arrange-windows.js";
 import { validateToken } from "./auth.js";
 import { ProcessDiscovery } from "./discovery.js";
-import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState, ConnectedMachine } from "./types.js";
+import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState, ConnectedMachine, MachineCapabilities } from "./types.js";
 import type { WebPushManager } from "./web-push.js";
 
 /** Satellite connection state */
@@ -20,6 +20,7 @@ interface SatelliteConnection {
   hostname: string;
   workers: WorkerState[];
   connectedAt: number;
+  capabilities?: MachineCapabilities;
 }
 
 export class WsServer {
@@ -107,6 +108,12 @@ export class WsServer {
       },
       () => this.getAllWorkers(),
       (repoDir) => this.updateAllSatellites(repoDir),
+    );
+
+    // Capability-based routing: let telemetry query machine capabilities for task dispatch
+    this.telemetry.setCapabilityRouter(
+      (machineId, requires) => this.machineHasCapabilities(machineId, requires),
+      (requires, preferMachine) => this.findCapableMachine(requires, preferMachine),
     );
 
     // Auto-commit: forward satellite commit requests to the correct satellite machine
@@ -256,9 +263,99 @@ export class WsServer {
         id: sat.machineId,
         hostname: sat.hostname,
         workerCount: sat.workers.length,
+        capabilities: sat.capabilities,
       });
     }
     return machines;
+  }
+
+  /** Check if a machine (by machineId) has all required capabilities. */
+  machineHasCapabilities(machineId: string, requires: string[]): boolean {
+    if (requires.length === 0) return true;
+    const sat = this.satellites.get(machineId);
+    if (!sat?.capabilities) return false;
+    const caps = sat.capabilities;
+    for (const req of requires) {
+      // Check boolean capability keys (gpu, ffmpeg, docker, etc.)
+      if (req in caps && (caps as Record<string, unknown>)[req] === true) continue;
+      // Check custom tags
+      if (caps.tags?.includes(req)) continue;
+      return false;
+    }
+    return true;
+  }
+
+  /** Find the best machine for a task with required capabilities. Returns machineId or undefined. */
+  findCapableMachine(requires: string[], preferMachine?: string): string | undefined {
+    // Check preferred machine first
+    if (preferMachine) {
+      if (this.machineHasCapabilities(preferMachine, requires)) {
+        const sat = this.satellites.get(preferMachine);
+        if (sat && sat.workers.some(w => w.status === "idle")) return preferMachine;
+      }
+    }
+    // Check all satellites
+    for (const sat of this.satellites.values()) {
+      if (this.machineHasCapabilities(sat.machineId, requires)) {
+        if (sat.workers.some(w => w.status === "idle")) return sat.machineId;
+      }
+    }
+    return undefined;
+  }
+
+  /** Get capabilities for all machines (local + satellites). */
+  getAllCapabilities(): Record<string, MachineCapabilities> {
+    const result: Record<string, MachineCapabilities> = {};
+    // Local machine
+    result["local"] = this.detectLocalCapabilities();
+    // Satellites
+    for (const sat of this.satellites.values()) {
+      if (sat.capabilities) result[sat.machineId] = sat.capabilities;
+    }
+    return result;
+  }
+
+  /** Detect local machine capabilities (same logic as satellite but for primary). */
+  private localCapabilities: MachineCapabilities | null = null;
+  private detectLocalCapabilities(): MachineCapabilities {
+    if (this.localCapabilities) return this.localCapabilities;
+    const { execFileSync } = require("child_process");
+    const { cpus, totalmem, platform, arch } = require("os");
+    const caps: MachineCapabilities = {
+      platform: platform(),
+      arch: arch(),
+      cpuCores: cpus().length,
+      ramGb: Math.round(totalmem() / (1024 ** 3)),
+      node: true,
+    };
+    const check = (cmd: string, args: string[]): boolean => {
+      try { execFileSync(cmd, args, { timeout: 3000, encoding: "utf-8", stdio: "pipe" }); return true; }
+      catch { return false; }
+    };
+    try {
+      if (platform() === "darwin") {
+        const sp = execFileSync("/usr/sbin/system_profiler", ["SPDisplaysDataType"], { timeout: 5000, encoding: "utf-8" });
+        caps.gpu = true;
+        const m = sp.match(/Chipset Model:\s*(.+)/i) || sp.match(/Chip:\s*(.+)/i);
+        caps.gpuName = m?.[1]?.trim() || "Apple GPU";
+      }
+    } catch { caps.gpu = false; }
+    caps.ffmpeg = check("ffmpeg", ["-version"]);
+    caps.docker = check("docker", ["--version"]);
+    caps.python = check("python3", ["--version"]);
+    if (caps.python) {
+      caps.pytorch = check("python3", ["-c", "import torch"]);
+      caps.tensorflow = check("python3", ["-c", "import tensorflow"]);
+    }
+    try {
+      const capFile = join(require("os").homedir(), ".hive", "capabilities.json");
+      if (require("fs").existsSync(capFile)) {
+        const custom = JSON.parse(require("fs").readFileSync(capFile, "utf-8"));
+        if (custom.tags) caps.tags = custom.tags;
+      }
+    } catch { /* skip */ }
+    this.localCapabilities = caps;
+    return caps;
   }
 
   /** Broadcast connected machines list to all dashboard clients. */
@@ -281,15 +378,18 @@ export class WsServer {
     }
     switch (msg.type) {
       case "satellite_hello": {
+        const caps = msg.capabilities as MachineCapabilities | undefined;
         const sat: SatelliteConnection = {
           ws,
           machineId,
           hostname: (msg.hostname as string) || machineId,
           workers: [],
           connectedAt: Date.now(),
+          capabilities: caps,
         };
         this.satellites.set(machineId, sat);
-        console.log(`[satellite] "${machineId}" registered (hostname: ${sat.hostname})`);
+        const capSummary = caps ? Object.entries(caps).filter(([, v]) => v === true).map(([k]) => k).join(", ") : "none";
+        console.log(`[satellite] "${machineId}" registered (hostname: ${sat.hostname}, capabilities: ${capSummary})`);
         // Notify dashboard clients about the new satellite
         this.broadcastMachines();
         break;
@@ -473,6 +573,8 @@ export class WsServer {
             body.verify as boolean | undefined,
             body.maxVerifyAttempts as number | undefined,
             body.autoCommit as boolean | undefined,
+            body.requires as string[] | undefined,
+            body.preferMachine as string | undefined,
           );
           return { ok: true, task: queued, remaining: this.telemetry.getTaskQueueLength() };
         }
@@ -593,6 +695,9 @@ export class WsServer {
 
       case "projects":
         return this.getProjects();
+
+      case "capabilities":
+        return this.getAllCapabilities();
 
       case "rearrange":
         if (method === "POST") {

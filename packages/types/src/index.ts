@@ -51,11 +51,37 @@ export interface TelemetryEvent {
   timestamp: number;
 }
 
+/** Hardware/software capabilities a machine can advertise. */
+export interface MachineCapabilities {
+  /** Hardware */
+  gpu?: boolean;
+  gpuName?: string;
+  ramGb?: number;
+  cpuCores?: number;
+  diskFreeGb?: number;
+  /** Software — true means the tool is installed and accessible */
+  ffmpeg?: boolean;
+  docker?: boolean;
+  python?: boolean;
+  node?: boolean;
+  /** Python ML/AI libraries */
+  pytorch?: boolean;
+  tensorflow?: boolean;
+  /** Custom tags — user-defined capabilities (e.g., "vpn", "prod-access", "gpu-render") */
+  tags?: string[];
+  /** OS platform */
+  platform?: string;
+  /** Architecture (arm64, x86_64) */
+  arch?: string;
+}
+
 /** A connected satellite machine (sent to dashboard for spawn routing). */
 export interface ConnectedMachine {
   id: string;
   hostname: string;
   workerCount: number;
+  /** Auto-detected and user-defined capabilities */
+  capabilities?: MachineCapabilities;
 }
 
 export interface DaemonMessage {

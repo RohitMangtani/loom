@@ -855,6 +855,8 @@ export class TelemetryReceiver {
   // --- Satellite relay (for REST API → satellite worker routing) ---
 
   private satelliteUpdateFn: ((repoDir?: string) => void) | null = null;
+  private capabilityChecker: ((machineId: string, requires: string[]) => boolean) | null = null;
+  private capableMachineFinder: ((requires: string[], preferMachine?: string) => string | undefined) | null = null;
 
   setSatelliteRelay(
     relay: (workerId: string, content: string, from?: string) => Promise<{ ok: boolean; error?: string }>,
@@ -864,6 +866,15 @@ export class TelemetryReceiver {
     this.satelliteMessageRelay = relay;
     this.satelliteAllWorkersGetter = allWorkers;
     this.satelliteUpdateFn = updateAll || null;
+  }
+
+  /** Register capability-based routing functions from ws-server. */
+  setCapabilityRouter(
+    checker: (machineId: string, requires: string[]) => boolean,
+    finder: (requires: string[], preferMachine?: string) => string | undefined,
+  ): void {
+    this.capabilityChecker = checker;
+    this.capableMachineFinder = finder;
   }
 
   /** Tell all connected satellites to pull and restart. */
@@ -1798,8 +1809,8 @@ export class TelemetryReceiver {
 
   // --- Task queue facade ---
 
-  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean): QueuedTask {
-    return this.taskQueue.push(task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit);
+  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean, requires?: string[], preferMachine?: string): QueuedTask {
+    return this.taskQueue.push(task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit, requires, preferMachine);
   }
 
   removeTask(taskId: string): boolean {
@@ -1899,19 +1910,47 @@ export class TelemetryReceiver {
     if (this.taskQueue.length === 0) return;
 
     const now = Date.now();
-    const idleWorkers = this.getAll().filter(w =>
+    const localIdleWorkers = this.getAll().filter(w =>
       w.status === "idle" && w.tty && (now - w.lastActionAt > 15_000)
     );
-    if (idleWorkers.length === 0) return;
+    // Also consider satellite idle workers (via the all-workers getter)
+    const allWorkers = this.satelliteAllWorkersGetter ? this.satelliteAllWorkersGetter() : this.getAll();
+    const allIdleWorkers = allWorkers.filter(w =>
+      w.status === "idle" && (now - w.lastActionAt > 15_000)
+    );
+    if (allIdleWorkers.length === 0) return;
 
     // Snapshot the queue — iterate all eligible tasks, remove dispatched ones by ID.
     const tasks = this.taskQueue.getAll();
     for (const task of tasks) {
       if (task.blockedBy && !this.taskQueue.isCompleted(task.blockedBy)) continue;
 
-      let target = idleWorkers.find(w => task.project && w.project.includes(task.project));
-      if (!target) target = idleWorkers[0];
-      if (!target?.tty) continue;
+      // Capability-based routing: if task has `requires`, filter to capable machines
+      let eligibleWorkers = localIdleWorkers;
+      if (task.requires && task.requires.length > 0 && this.capabilityChecker) {
+        // Local machine always has id undefined/no machine field
+        // Check if local machine satisfies requirements
+        const localCapable = this.capabilityChecker("local", task.requires);
+        const capableWorkers = allIdleWorkers.filter(w => {
+          if (!w.machine) return localCapable; // local worker
+          return this.capabilityChecker!(w.machine, task.requires!);
+        });
+        if (capableWorkers.length === 0) continue; // no capable machine idle — skip, try next tick
+        eligibleWorkers = capableWorkers;
+      }
+
+      // Preferred machine routing
+      if (task.preferMachine) {
+        const preferred = eligibleWorkers.filter(w =>
+          task.preferMachine === "local" ? !w.machine : w.machine === task.preferMachine
+        );
+        if (preferred.length > 0) eligibleWorkers = preferred;
+      }
+
+      // Try to match by project first, then fall back to any eligible worker
+      let target = eligibleWorkers.find(w => task.project && w.project.includes(task.project));
+      if (!target) target = eligibleWorkers[0];
+      if (!target) continue;
 
       const brief = this.buildContextBrief(target.id, task.project);
 
@@ -1968,9 +2007,11 @@ export class TelemetryReceiver {
         console.log(`[task-queue] Dispatched ${task.id} to ${target.tty} (${this.taskQueue.length} remaining)`);
 
         // One task per worker per tick
-        const targetIdx = idleWorkers.indexOf(target);
-        if (targetIdx >= 0) idleWorkers.splice(targetIdx, 1);
-        if (idleWorkers.length === 0) break;
+        const targetIdx = allIdleWorkers.indexOf(target);
+        if (targetIdx >= 0) allIdleWorkers.splice(targetIdx, 1);
+        const localIdx = localIdleWorkers.indexOf(target);
+        if (localIdx >= 0) localIdleWorkers.splice(localIdx, 1);
+        if (allIdleWorkers.length === 0) break;
       }
     }
   }

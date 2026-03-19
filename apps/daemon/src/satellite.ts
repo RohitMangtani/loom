@@ -10,10 +10,11 @@
 
 import { WebSocket } from "ws";
 import { hostname } from "os";
-import { homedir, platform } from "os";
+import { homedir, platform, arch, cpus, totalmem } from "os";
 import { join, basename } from "path";
 import { unlinkSync, existsSync, writeFileSync, readFileSync, mkdirSync } from "fs";
-import { execFile } from "child_process";
+import { execFile, execFileSync } from "child_process";
+import type { MachineCapabilities } from "@hive/types";
 import { ProcessDiscovery } from "./discovery.js";
 import { TelemetryReceiver } from "./telemetry.js";
 import { SessionStreamer } from "./session-stream.js";
@@ -29,6 +30,7 @@ interface SatelliteUpMessage {
   machineId?: string;
   hostname?: string;
   platform?: string;
+  capabilities?: MachineCapabilities;
   workers?: WorkerState[];
   workerId?: string;
   messages?: unknown[];
@@ -61,10 +63,72 @@ interface SatelliteDownMessage {
   workers?: unknown[];    // satellite_all_workers: full worker list from primary
 }
 
+/** Probe this machine for hardware and software capabilities. */
+function detectCapabilities(): MachineCapabilities {
+  const caps: MachineCapabilities = {
+    platform: platform(),
+    arch: arch(),
+    cpuCores: cpus().length,
+    ramGb: Math.round(totalmem() / (1024 ** 3)),
+  };
+
+  // GPU detection (macOS: system_profiler, Linux: nvidia-smi)
+  try {
+    if (platform() === "darwin") {
+      const sp = execFileSync("/usr/sbin/system_profiler", ["SPDisplaysDataType"], { timeout: 5000, encoding: "utf-8" });
+      caps.gpu = true;
+      const nameMatch = sp.match(/Chipset Model:\s*(.+)/i) || sp.match(/Chip:\s*(.+)/i);
+      caps.gpuName = nameMatch?.[1]?.trim() || "Apple GPU";
+    } else {
+      const nv = execFileSync("nvidia-smi", ["--query-gpu=name", "--format=csv,noheader"], { timeout: 5000, encoding: "utf-8" });
+      caps.gpu = true;
+      caps.gpuName = nv.trim().split("\n")[0] || "NVIDIA GPU";
+    }
+  } catch {
+    caps.gpu = false;
+  }
+
+  // Disk free space
+  try {
+    const df = execFileSync("/bin/df", ["-g", homedir()], { timeout: 3000, encoding: "utf-8" });
+    const parts = df.split("\n")[1]?.split(/\s+/);
+    if (parts?.[3]) caps.diskFreeGb = parseInt(parts[3], 10);
+  } catch { /* skip */ }
+
+  // Software detection — check if commands exist
+  const check = (cmd: string, args: string[] = ["--version"]): boolean => {
+    try { execFileSync(cmd, args, { timeout: 3000, encoding: "utf-8", stdio: "pipe" }); return true; }
+    catch { return false; }
+  };
+
+  caps.ffmpeg = check("ffmpeg", ["-version"]);
+  caps.docker = check("docker", ["--version"]);
+  caps.python = check("python3", ["--version"]);
+  caps.node = check("node", ["--version"]);
+
+  // Python ML libraries
+  if (caps.python) {
+    caps.pytorch = check("python3", ["-c", "import torch"]);
+    caps.tensorflow = check("python3", ["-c", "import tensorflow"]);
+  }
+
+  // Load custom tags from ~/.hive/capabilities.json
+  try {
+    const capFile = join(homedir(), ".hive", "capabilities.json");
+    if (existsSync(capFile)) {
+      const custom = JSON.parse(readFileSync(capFile, "utf-8")) as { tags?: string[] };
+      if (custom.tags) caps.tags = custom.tags;
+    }
+  } catch { /* skip */ }
+
+  return caps;
+}
+
 export class SatelliteClient {
   private primaryUrl: string;
   private token: string;
   private machineId: string;
+  private capabilities: MachineCapabilities;
   private ws: WebSocket | null = null;
   private telemetry: TelemetryReceiver;
   private discovery: ProcessDiscovery;
@@ -82,6 +146,9 @@ export class SatelliteClient {
     this.primaryUrl = primaryUrl;
     this.token = token;
     this.machineId = hostname().toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 24) || "satellite";
+    this.capabilities = detectCapabilities();
+
+    console.log(`[satellite] Capabilities: ${JSON.stringify(this.capabilities)}`);
 
     // Local telemetry server (receives hooks from local Claude instances)
     this.telemetry = new TelemetryReceiver(3001, localToken);
@@ -134,13 +201,14 @@ export class SatelliteClient {
       console.log(`[satellite] Connected to primary as "${this.machineId}"`);
       this.reconnectDelay = 1000;
 
-      // Send hello
+      // Send hello with capabilities
       this.send({
         type: "satellite_hello",
         machineId: this.machineId,
         hostname: hostname(),
         platform: platform(),
-      });
+        capabilities: this.capabilities,
+      } as SatelliteUpMessage);
 
       // Send initial worker list
       this.reportWorkers();
