@@ -70,6 +70,12 @@ Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-ba
 
 ## Install
 
+Before you paste, you'll need to approve a few things as the agent works. These are all one-time prompts from your CLI and macOS — say yes to each and the agent continues on its own:
+
+1. **Allow shell commands** — Claude Code or Codex will ask permission to run terminal commands. Approve it.
+2. **Allow file access to `~/`** — the agent needs to write to `~/.hive/` for config and tokens. When it asks to expand scope beyond the project directory, approve it.
+3. **Sandbox mode** — if your CLI asks, select **full sandbox** so the agent can run commands without pausing on every action.
+
 Paste this into Claude Code or Codex:
 
 > Install Hive for me. Clone https://github.com/RohitMangtani/hive, cd into it, and run `bash setup.sh`. After setup finishes, I need to log into Vercel — run `npx vercel login` and it will open my browser to authenticate (don't pass --non-interactive, it needs the browser). Once I'm logged in, run `npm run launch` from the hive directory. That will start the daemon, deploy the dashboard to Vercel, and print a URL. Give me that URL and the token from `~/.hive/token` when it's done.
@@ -79,15 +85,12 @@ Paste this into Claude Code or Codex:
 - A free [Vercel](https://vercel.com) account (the dashboard deploys here so you can access it from any device)
 - At least one AI CLI installed: `claude`, `codex`, or `openclaw`
 
-### First-time approvals
+### After install — one-time macOS approvals
 
-The agent handles the install, but macOS and the AI CLIs will ask you to approve a few things the first time. These are all one-time — say yes and the agent keeps going:
+Once the agent finishes and Hive is running, macOS may ask for a couple more permissions the first time you use certain features:
 
-1. **Terminal/shell access** — Claude Code and Codex ask for permission to run shell commands. Approve so the agent can run `git clone`, `npm install`, etc.
-2. **Sandbox mode** — when launching Claude Code or Codex, select **full sandbox** so agents can run commands and edit files without pausing on every action.
-3. **Vercel login** — opens a browser tab to sign in. Click authorize and the agent continues.
-4. **Automation permission** — the first time the daemon starts, macOS will ask "osascript wants to control Terminal.app." Click **OK**. This is required for Hive to send messages to agents, close terminals from the dashboard, and detect window positions. If you accidentally click Don't Allow, go to System Settings → Privacy & Security → Automation and enable Terminal for the process.
-5. **Accessibility permission** (optional) — if Xcode Command Line Tools are installed, setup compiles an auto-pilot binary and opens System Settings + Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip this if you prefer to approve manually.
+4. **Automation permission** — macOS asks "Terminal wants to control Terminal." Click **OK**. This lets Hive send messages to agents and close terminals from the dashboard. If you miss it: System Settings → Privacy & Security → Automation.
+5. **Accessibility permission** (optional) — if setup compiled the auto-pilot binary, it opens System Settings and Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip if you prefer manual approval.
 
 ### Using your token
 
