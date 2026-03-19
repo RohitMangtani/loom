@@ -135,8 +135,11 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   # Unload old satellite plist if present (in case of re-install)
   launchctl bootout "gui/$(id -u)/com.hive.satellite" 2>/dev/null || true
 
-  # Find npx path for the plist
+  # Find npx/node paths for the plist. Capture the full PATH so launchd
+  # can find node even when installed via nvm, volta, or homebrew.
   NPX_PATH="$(which npx 2>/dev/null || echo '/opt/homebrew/bin/npx')"
+  NODE_DIR="$(dirname "$(which node 2>/dev/null || echo '/opt/homebrew/bin/node')")"
+  CURRENT_PATH="$NODE_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
   # Install launchd plist — survives sleep, reboot, terminal close.
   # Auto-restarts on crash. Reads primary URL/token from stored files.
@@ -156,6 +159,13 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   </array>
   <key>WorkingDirectory</key>
   <string>$ROOT</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>$CURRENT_PATH</string>
+    <key>HOME</key>
+    <string>$HOME</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
