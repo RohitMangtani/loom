@@ -31,6 +31,8 @@ export interface WorkerState {
   promptMessage?: string;
   /** Raw terminal output for agents with no session yet (shows CLI prompts). */
   terminalPreview?: string;
+  /** Machine hostname — set for satellite (remote) workers, undefined for local. */
+  machine?: string;
 }
 
 export interface TelemetryEvent {

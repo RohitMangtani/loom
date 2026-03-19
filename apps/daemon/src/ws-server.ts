@@ -10,8 +10,17 @@ import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
 import { spawnTerminalWindow, closeTerminalWindow } from "./arrange-windows.js";
 import { validateToken } from "./auth.js";
 import { ProcessDiscovery } from "./discovery.js";
-import type { DaemonMessage, DaemonResponse } from "./types.js";
+import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState } from "./types.js";
 import type { WebPushManager } from "./web-push.js";
+
+/** Satellite connection state */
+interface SatelliteConnection {
+  ws: WebSocket;
+  machineId: string;
+  hostname: string;
+  workers: WorkerState[];
+  connectedAt: number;
+}
 
 export class WsServer {
   private wss: WebSocketServer | null = null;
@@ -29,6 +38,13 @@ export class WsServer {
   private lastWorkersSnapshot: string | null = null;
   private lastModelsSnapshot: string | null = null;
   private pushMgr: WebPushManager | null = null;
+
+  // Satellite connections: machineId → connection
+  private satellites = new Map<string, SatelliteConnection>();
+  // Satellite WebSocket → machineId (reverse lookup)
+  private satelliteWs = new Map<WebSocket, string>();
+  // Dashboard clients subscribed to satellite workers: prefixed workerId → Set<clientWs>
+  private satelliteChatClients = new Map<string, Set<WebSocket>>();
 
   constructor(
     telemetry: TelemetryReceiver,
@@ -102,12 +118,108 @@ export class WsServer {
     this.pushMgr = mgr;
   }
 
+  /** Get all workers: local + satellite, merged into one list. */
+  private getAllWorkers(): WorkerState[] {
+    const local = this.telemetry.getAll();
+    const remote: WorkerState[] = [];
+    for (const sat of this.satellites.values()) {
+      for (const w of sat.workers) {
+        remote.push({
+          ...w,
+          // Prefix ID to ensure global uniqueness
+          id: `${sat.machineId}:${w.id}`,
+          machine: sat.machineId,
+        });
+      }
+    }
+    return [...local, ...remote];
+  }
+
+  /** Check if a worker ID belongs to a satellite (contains ':'). */
+  private parseSatelliteWorker(workerId: string): { machineId: string; localId: string } | null {
+    const idx = workerId.indexOf(":");
+    if (idx < 0) return null;
+    return { machineId: workerId.slice(0, idx), localId: workerId.slice(idx + 1) };
+  }
+
+  /** Get the satellite connection for a worker ID, or null if local. */
+  private getSatelliteForWorker(workerId: string): SatelliteConnection | null {
+    const parsed = this.parseSatelliteWorker(workerId);
+    if (!parsed) return null;
+    return this.satellites.get(parsed.machineId) || null;
+  }
+
+  /** Forward a command to a satellite. */
+  private sendToSatellite(sat: SatelliteConnection, msg: Record<string, unknown>): void {
+    if (sat.ws.readyState === WebSocket.OPEN) {
+      sat.ws.send(JSON.stringify(msg));
+    }
+  }
+
+  /** Handle messages from a satellite connection. */
+  private handleSatelliteMessage(ws: WebSocket, machineId: string, msg: Record<string, unknown>): void {
+    switch (msg.type) {
+      case "satellite_hello": {
+        const sat: SatelliteConnection = {
+          ws,
+          machineId,
+          hostname: (msg.hostname as string) || machineId,
+          workers: [],
+          connectedAt: Date.now(),
+        };
+        this.satellites.set(machineId, sat);
+        console.log(`[satellite] "${machineId}" registered (hostname: ${sat.hostname})`);
+        break;
+      }
+
+      case "satellite_workers": {
+        const sat = this.satellites.get(machineId);
+        if (!sat) return;
+        sat.workers = (msg.workers as WorkerState[]) || [];
+        // Force state push on next tick
+        this.lastWorkersSnapshot = null;
+        break;
+      }
+
+      case "satellite_chat": {
+        // Forward chat data to dashboard clients subscribed to this satellite worker
+        const workerId = msg.workerId as string;
+        if (!workerId) return;
+
+        const subscribers = this.satelliteChatClients.get(workerId);
+        if (!subscribers) return;
+
+        const data: DaemonResponse = {
+          type: "chat_history",
+          workerId,
+          messages: msg.messages as ChatEntry[],
+          ...(msg.full ? { full: true } : {}),
+        };
+        const json = JSON.stringify(data);
+        for (const client of subscribers) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(json);
+          }
+        }
+        break;
+      }
+
+      case "satellite_result": {
+        // Command results — currently fire-and-forget, logged for debugging
+        if (!(msg as Record<string, unknown>).ok) {
+          console.log(`[satellite] Command failed on "${machineId}": ${msg.error || "unknown"}`);
+        }
+        break;
+      }
+    }
+  }
+
   /** Push full worker list to all clients. Call from the main tick loop
    *  so the dashboard stays current even when status changes come from
    *  discovery (JSONL/CPU analysis) instead of hooks. */
   pushState(): void {
     if (this.clients.size === 0) return;
-    const workers = this.telemetry.getAll();
+    const workers = this.getAllWorkers();
     const snapshot = JSON.stringify(workers);
     if (snapshot !== this.lastWorkersSnapshot) {
       this.lastWorkersSnapshot = snapshot;
@@ -133,15 +245,41 @@ export class WsServer {
     console.log(`  WebSocket server listening on 127.0.0.1:${this.port}`);
 
     this.wss.on("connection", (ws, req) => {
-      // Auth: admin token = full access, no token / wrong token = view-only
       const reqUrl = new URL(req.url || "/", "http://localhost");
       const candidate = reqUrl.searchParams.get("token") || "";
       const isAdmin = candidate ? validateToken(candidate, this.token) : false;
+      const satelliteId = reqUrl.searchParams.get("satellite") || "";
 
+      // ── Satellite connection ──────────────────────────────────
+      if (satelliteId && isAdmin) {
+        console.log(`[satellite] "${satelliteId}" connected`);
+        this.satelliteWs.set(ws, satelliteId);
+
+        ws.on("message", (raw) => {
+          try {
+            const msg = JSON.parse(raw.toString());
+            this.handleSatelliteMessage(ws, satelliteId, msg);
+          } catch { /* malformed */ }
+        });
+
+        ws.on("close", () => {
+          console.log(`[satellite] "${satelliteId}" disconnected`);
+          this.satellites.delete(satelliteId);
+          this.satelliteWs.delete(ws);
+          // Force a state push so dashboard drops the satellite's workers
+          this.lastWorkersSnapshot = null;
+          this.pushState();
+        });
+
+        ws.on("error", () => ws.close());
+        return;
+      }
+
+      // ── Dashboard / viewer connection ─────────────────────────
       this.clients.add(ws);
       if (!isAdmin) this.readOnlyClients.add(ws);
-      // Send current workers list — quadrants are already stamped by the 3s tick loop.
-      const workers = this.telemetry.getAll();
+      // Send current workers list (local + satellite merged)
+      const workers = this.getAllWorkers();
       this.lastWorkersSnapshot = JSON.stringify(workers);
       this.send(ws, { type: "workers", workers });
       this.send(ws, { type: "auth", admin: isAdmin });
@@ -181,6 +319,18 @@ export class WsServer {
     const subId = this.clientSubs.get(ws);
     if (subId) {
       this.streamer.unsubscribe(subId + "_" + this.clientId(ws));
+      // Clean up satellite chat subscription
+      const satClients = this.satelliteChatClients.get(subId);
+      if (satClients) {
+        satClients.delete(ws);
+        if (satClients.size === 0) {
+          this.satelliteChatClients.delete(subId);
+          const sat = this.getSatelliteForWorker(subId);
+          if (sat) {
+            this.sendToSatellite(sat, { type: "satellite_unsubscribe", workerId: subId });
+          }
+        }
+      }
       this.clientSubs.delete(ws);
     }
     this.clients.delete(ws);
@@ -214,14 +364,49 @@ export class WsServer {
           return;
         }
 
-        // Unsubscribe from previous
+        // Unsubscribe from previous (local or satellite)
         const prevSub = this.clientSubs.get(ws);
         if (prevSub) {
+          // Unsubscribe from local streamer
           this.streamer.unsubscribe(prevSub + "_" + this.clientId(ws));
+          // Remove from satellite chat clients
+          const prevClients = this.satelliteChatClients.get(prevSub);
+          if (prevClients) {
+            prevClients.delete(ws);
+            if (prevClients.size === 0) {
+              this.satelliteChatClients.delete(prevSub);
+              // Tell satellite to unsubscribe
+              const prevSat = this.getSatelliteForWorker(prevSub);
+              if (prevSat) {
+                this.sendToSatellite(prevSat, {
+                  type: "satellite_unsubscribe",
+                  workerId: prevSub,
+                });
+              }
+            }
+          }
         }
 
         const workerId = msg.workerId;
         this.clientSubs.set(ws, workerId);
+
+        // Route to satellite if this is a remote worker
+        const subSat = this.getSatelliteForWorker(workerId);
+        if (subSat) {
+          const parsed = this.parseSatelliteWorker(workerId)!;
+          // Track this dashboard client as subscribed to this satellite worker
+          if (!this.satelliteChatClients.has(workerId)) {
+            this.satelliteChatClients.set(workerId, new Set());
+          }
+          this.satelliteChatClients.get(workerId)!.add(ws);
+          // Tell satellite to start streaming chat
+          this.sendToSatellite(subSat, {
+            type: "satellite_subscribe",
+            workerId,
+            localWorkerId: parsed.localId,
+          });
+          break;
+        }
 
         // Verify session file mapping against TTY marker before reading history.
         // This prevents chat cross-contamination when multiple workers share a project.
@@ -242,8 +427,6 @@ export class WsServer {
           }
         });
 
-        // Also register the session file mapping in the streamer
-        // (discovery already does this, but just in case)
         break;
       }
 
@@ -408,6 +591,24 @@ export class WsServer {
           this.send(ws, { type: "error", error: "Missing workerId" });
           return;
         }
+
+        // Route to satellite if this is a remote worker
+        const killSat = this.getSatelliteForWorker(msg.workerId);
+        if (killSat) {
+          const parsed = this.parseSatelliteWorker(msg.workerId)!;
+          this.sendToSatellite(killSat, {
+            type: "satellite_kill",
+            requestId: `kill_${Date.now()}`,
+            workerId: msg.workerId,
+            localWorkerId: parsed.localId,
+          });
+          // Remove from satellite's worker list immediately
+          killSat.workers = killSat.workers.filter(w => w.id !== parsed.localId);
+          this.lastWorkersSnapshot = null;
+          console.log(`Killed satellite worker ${msg.workerId}`);
+          break;
+        }
+
         // Grab PID and TTY BEFORE any removal (procMgr.kill removes from telemetry)
         const killWorker = this.telemetry.get(msg.workerId);
         const killPid = killWorker?.pid;
@@ -456,6 +657,20 @@ export class WsServer {
           return;
         }
 
+        // Route to satellite if this is a remote worker
+        const msgSat = this.getSatelliteForWorker(msg.workerId);
+        if (msgSat) {
+          const parsed = this.parseSatelliteWorker(msg.workerId)!;
+          this.sendToSatellite(msgSat, {
+            type: "satellite_message",
+            requestId: `msg_${Date.now()}`,
+            workerId: msg.workerId,
+            localWorkerId: parsed.localId,
+            content: msg.content,
+          });
+          break;
+        }
+
         const extra = msg as DaemonMessage & {
           from?: string;
           contextWorkerIds?: string[];
@@ -484,6 +699,21 @@ export class WsServer {
           this.send(ws, { type: "error", error: "Missing workerId" });
           return;
         }
+
+        // Route to satellite if this is a remote worker
+        const selSat = this.getSatelliteForWorker(msg.workerId);
+        if (selSat) {
+          const parsed = this.parseSatelliteWorker(msg.workerId)!;
+          this.sendToSatellite(selSat, {
+            type: "satellite_selection",
+            requestId: `sel_${Date.now()}`,
+            workerId: msg.workerId,
+            localWorkerId: parsed.localId,
+            optionIndex: msg.optionIndex,
+          });
+          break;
+        }
+
         const selWorker = this.telemetry.get(msg.workerId);
         if (!selWorker?.tty) {
           this.send(ws, { type: "error", error: `Worker ${msg.workerId} not found or no TTY` });
@@ -559,6 +789,20 @@ export class WsServer {
           this.send(ws, { type: "error", error: "Missing workerId" });
           return;
         }
+
+        // Route to satellite if this is a remote worker
+        const approveSat = this.getSatelliteForWorker(msg.workerId);
+        if (approveSat) {
+          const parsed = this.parseSatelliteWorker(msg.workerId)!;
+          this.sendToSatellite(approveSat, {
+            type: "satellite_approve",
+            requestId: `approve_${Date.now()}`,
+            workerId: msg.workerId,
+            localWorkerId: parsed.localId,
+          });
+          break;
+        }
+
         const promptWorker = this.telemetry.get(msg.workerId);
         if (!promptWorker?.tty) {
           this.send(ws, { type: "error", error: `Worker ${msg.workerId} not found or no TTY` });

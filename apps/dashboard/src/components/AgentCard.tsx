@@ -269,6 +269,11 @@ export function AgentCard({
       <div className={`flex items-center gap-2.5 mb-1.5 ${onFlag ? "pr-5" : ""}`}>
         <span className="text-lg font-bold tabular-nums text-[var(--text)]">{num}</span>
         <span className="text-[9px] font-mono text-[var(--text-muted)] uppercase tracking-wider">{modelLabel(worker)}</span>
+        {worker.machine && (
+          <span className="text-[8px] font-mono px-1 py-px rounded" style={{ background: "rgba(96,165,250,0.12)", color: "#93bbfd" }}>
+            {worker.machine}
+          </span>
+        )}
         <span
           className={`w-2 h-2 rounded-full shrink-0 ${hasPrompt ? "animate-pulse" : stuck ? "animate-pulse" : ""}`}
           style={{ background: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}

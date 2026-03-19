@@ -1,4 +1,7 @@
 import { execFile } from "child_process";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
 import { TelemetryReceiver } from "./telemetry.js";
 import { ProcessManager } from "./process-mgr.js";
 import { SessionStreamer } from "./session-stream.js";
@@ -12,87 +15,143 @@ import { WebPushManager } from "./web-push.js";
 import { Collector } from "./collector.js";
 import { OutboxScanner } from "./outbox.js";
 import { loadOrCreateToken, deriveViewerToken, patchHookUrls } from "./auth.js";
+import { SatelliteClient } from "./satellite.js";
 
-// Probe Automation permission early — macOS shows the approval dialog on first
-// use, so we trigger it at startup rather than waiting for the user to click X.
-execFile("/usr/bin/osascript", ["-e",
-  'tell application "Terminal" to get name of first window'
-], { timeout: 5000 }, () => { /* result doesn't matter — the dialog is the point */ });
+// ── Satellite mode ──────────────────────────────────────────────────
+// Usage: npx tsx apps/daemon/src/index.ts --satellite wss://URL TOKEN
 
-const token = loadOrCreateToken();
-const viewerToken = deriveViewerToken(token);
-patchHookUrls(token);
+const satFlagIdx = process.argv.indexOf("--satellite");
+if (satFlagIdx !== -1) {
+  let primaryUrl = process.argv[satFlagIdx + 1] || "";
+  let primaryToken = process.argv[satFlagIdx + 2] || "";
 
-const telemetry = new TelemetryReceiver(3001, token);
-const procMgr = new ProcessManager(telemetry);
-const streamer = new SessionStreamer();
-const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken);
-const discovery = new ProcessDiscovery(telemetry, streamer);
-const pushMgr = new WebPushManager();
-const notifications = new NotificationManager();
-notifications.setPushManager(pushMgr);
-ws.setDiscovery(discovery);
-ws.setPushManager(pushMgr);
-const autoPilot = new AutoPilot(telemetry, streamer);
-const watchdog = new Watchdog(telemetry);
-const collector = new Collector();
-const outbox = new OutboxScanner(telemetry);
-const stateStore = new StateStore();
-
-telemetry.start();
-telemetry.registerProcessManager(procMgr);
-telemetry.registerApi(procMgr, discovery);
-telemetry.registerCollector(collector);
-telemetry.setStreamer(streamer);
-telemetry.onRemoval((workerId) => streamer.clearWorker(workerId));
-ws.start();
-
-// Restore state from previous daemon run (if fresh enough)
-const snapshot = StateStore.load();
-if (snapshot) {
-  telemetry.importState(snapshot);
-}
-
-// Register push notifications on stuck transitions
-notifications.register(telemetry);
-
-// Initial scan for existing Claude processes
-discovery.scan();
-console.log(`  Found ${telemetry.getAll().length} existing Claude instance(s)`);
-
-// Periodic: status updates + re-scan for new/dead processes + auto-respond
-setInterval(() => {
-  telemetry.tick();
-  procMgr.tick();
-  discovery.scan();
-  telemetry.writeWorkersFile();
-  ws.pushState();
-  autoPilot.tick();
-  watchdog.tick();
-  collector.tick();
-  outbox.tick();
-}, 3_000);
-
-// Write initial workers file immediately after first scan
-telemetry.writeWorkersFile();
-
-// Start periodic state snapshots (every 30s, separate from the 3s tick)
-stateStore.startPeriodicSave(() => telemetry.exportState());
-
-console.log("Hive daemon running.");
-console.log("  Token: ~/.hive/token");
-console.log("  Telemetry: http://127.0.0.1:3001");
-console.log("  WebSocket: ws://127.0.0.1:3002");
-
-const shutdown = () => {
-  console.log("\nShutting down...");
-  stateStore.save();
-  stateStore.stop();
-  for (const id of procMgr.listIds()) {
-    procMgr.kill(id);
+  // Fall back to stored config
+  const hiveDir = join(homedir(), ".hive");
+  if (!primaryUrl) {
+    try { primaryUrl = readFileSync(join(hiveDir, "primary-url"), "utf-8").trim(); } catch { /* */ }
   }
-  setTimeout(() => process.exit(0), 2000);
-};
+  if (!primaryToken) {
+    try { primaryToken = readFileSync(join(hiveDir, "primary-token"), "utf-8").trim(); } catch { /* */ }
+  }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+  if (!primaryUrl || !primaryToken) {
+    console.error("Usage: --satellite <wss://primary-url> <token>");
+    console.error("  Or store in ~/.hive/primary-url and ~/.hive/primary-token");
+    process.exit(1);
+  }
+
+  // Convert https:// to wss:// if needed
+  if (primaryUrl.startsWith("https://")) {
+    primaryUrl = primaryUrl.replace("https://", "wss://");
+  }
+
+  // Probe Automation permission
+  execFile("/usr/bin/osascript", ["-e",
+    'tell application "Terminal" to get name of first window'
+  ], { timeout: 5000 }, () => { });
+
+  const localToken = loadOrCreateToken();
+  const satellite = new SatelliteClient(primaryUrl, primaryToken, localToken);
+  satellite.start();
+
+  console.log("Hive satellite running.");
+  console.log(`  Primary: ${primaryUrl}`);
+  console.log("  Local hooks: http://127.0.0.1:3001");
+
+  const shutdown = () => {
+    console.log("\nShutting down satellite...");
+    satellite.stop();
+    setTimeout(() => process.exit(0), 1000);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+} else {
+
+  // ── Primary mode (default) ──────────────────────────────────────────
+
+  // Probe Automation permission early — macOS shows the approval dialog on first
+  // use, so we trigger it at startup rather than waiting for the user to click X.
+  execFile("/usr/bin/osascript", ["-e",
+    'tell application "Terminal" to get name of first window'
+  ], { timeout: 5000 }, () => { /* result doesn't matter — the dialog is the point */ });
+
+  const token = loadOrCreateToken();
+  const viewerToken = deriveViewerToken(token);
+  patchHookUrls(token);
+
+  const telemetry = new TelemetryReceiver(3001, token);
+  const procMgr = new ProcessManager(telemetry);
+  const streamer = new SessionStreamer();
+  const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken);
+  const discovery = new ProcessDiscovery(telemetry, streamer);
+  const pushMgr = new WebPushManager();
+  const notifications = new NotificationManager();
+  notifications.setPushManager(pushMgr);
+  ws.setDiscovery(discovery);
+  ws.setPushManager(pushMgr);
+  const autoPilot = new AutoPilot(telemetry, streamer);
+  const watchdog = new Watchdog(telemetry);
+  const collector = new Collector();
+  const outbox = new OutboxScanner(telemetry);
+  const stateStore = new StateStore();
+
+  telemetry.start();
+  telemetry.registerProcessManager(procMgr);
+  telemetry.registerApi(procMgr, discovery);
+  telemetry.registerCollector(collector);
+  telemetry.setStreamer(streamer);
+  telemetry.onRemoval((workerId) => streamer.clearWorker(workerId));
+  ws.start();
+
+  // Restore state from previous daemon run (if fresh enough)
+  const snapshot = StateStore.load();
+  if (snapshot) {
+    telemetry.importState(snapshot);
+  }
+
+  // Register push notifications on stuck transitions
+  notifications.register(telemetry);
+
+  // Initial scan for existing Claude processes
+  discovery.scan();
+  console.log(`  Found ${telemetry.getAll().length} existing Claude instance(s)`);
+
+  // Periodic: status updates + re-scan for new/dead processes + auto-respond
+  setInterval(() => {
+    telemetry.tick();
+    procMgr.tick();
+    discovery.scan();
+    telemetry.writeWorkersFile();
+    ws.pushState();
+    autoPilot.tick();
+    watchdog.tick();
+    collector.tick();
+    outbox.tick();
+  }, 3_000);
+
+  // Write initial workers file immediately after first scan
+  telemetry.writeWorkersFile();
+
+  // Start periodic state snapshots (every 30s, separate from the 3s tick)
+  stateStore.startPeriodicSave(() => telemetry.exportState());
+
+  console.log("Hive daemon running.");
+  console.log("  Token: ~/.hive/token");
+  console.log("  Telemetry: http://127.0.0.1:3001");
+  console.log("  WebSocket: ws://127.0.0.1:3002");
+
+  const shutdown = () => {
+    console.log("\nShutting down...");
+    stateStore.save();
+    stateStore.stop();
+    for (const id of procMgr.listIds()) {
+      procMgr.kill(id);
+    }
+    setTimeout(() => process.exit(0), 2000);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}

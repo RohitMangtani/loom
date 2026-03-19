@@ -1,15 +1,47 @@
 #!/bin/bash
-# One-shot Hive install: setup → vercel login → daemon → deploy → done.
+# One-shot Hive install.
+#
+# Fresh instance:   bash scripts/install.sh
+# Join existing:    bash scripts/install.sh --connect wss://URL TOKEN
+#
 # The daemon stays running in the background after this script exits.
-# Run from the Hive repo root: bash scripts/install.sh
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# ── Parse --connect flag ─────────────────────────────────────────────
+
+SATELLITE_MODE=0
+PRIMARY_URL=""
+PRIMARY_TOKEN=""
+
+if [ "${1:-}" = "--connect" ]; then
+  SATELLITE_MODE=1
+  PRIMARY_URL="${2:-}"
+  PRIMARY_TOKEN="${3:-}"
+
+  if [ -z "$PRIMARY_URL" ] || [ -z "$PRIMARY_TOKEN" ]; then
+    echo ""
+    echo "  Usage: bash scripts/install.sh --connect <tunnel-url> <token>"
+    echo ""
+    echo "  Get these from your primary Hive dashboard (the machine"
+    echo "  that's already running Hive)."
+    echo ""
+    exit 1
+  fi
+
+  # Normalize URL: https → wss
+  PRIMARY_URL="${PRIMARY_URL/https:\/\//wss://}"
+fi
+
 echo ""
-echo "  Installing Hive..."
+if [ "$SATELLITE_MODE" -eq 1 ]; then
+  echo "  Connecting to Hive network..."
+else
+  echo "  Installing Hive..."
+fi
 echo ""
 
 # ── 1. Setup ──────────────────────────────────────────────────────────
@@ -19,6 +51,56 @@ if [ ! -f "$HOME/.hive/token" ]; then
 else
   echo "  ✓ Already set up"
 fi
+
+# ── Satellite: store config + start ───────────────────────────────────
+
+if [ "$SATELLITE_MODE" -eq 1 ]; then
+  # Store primary connection info
+  mkdir -p "$HOME/.hive"
+  echo "$PRIMARY_URL" > "$HOME/.hive/primary-url"
+  echo "$PRIMARY_TOKEN" > "$HOME/.hive/primary-token"
+  chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-token"
+  echo "  ✓ Primary connection stored"
+
+  # Start satellite daemon
+  if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "  ✓ Satellite already running on :3001"
+  else
+    echo ""
+    echo "  Starting satellite daemon..."
+    if osascript -e "tell application \"Terminal\" to do script \"cd '$ROOT' && npx tsx apps/daemon/src/index.ts --satellite\"" 2>/dev/null; then
+      echo "  ✓ Satellite started in a new Terminal window"
+    else
+      echo "  Starting in background..."
+      nohup npx tsx apps/daemon/src/index.ts --satellite > "$HOME/.hive/satellite.log" 2>&1 &
+      disown "$!" 2>/dev/null || true
+      echo "  ✓ Satellite started in background (log: ~/.hive/satellite.log)"
+    fi
+  fi
+
+  echo ""
+  echo "  ────────────────────────────────────────────────"
+  echo ""
+  echo "  Connected to Hive network."
+  echo ""
+  echo "  Primary: $PRIMARY_URL"
+  echo ""
+  echo "  Your terminals will appear on the primary's"
+  echo "  dashboard within a few seconds."
+  echo ""
+  echo "  Open Terminal windows and run 'claude', 'codex',"
+  echo "  or any agent — the primary dashboard sees them."
+  echo ""
+  echo "  Stop: kill \$(lsof -tiTCP:3001)"
+  echo ""
+  echo "  ────────────────────────────────────────────────"
+  echo ""
+  exit 0
+fi
+
+# ══════════════════════════════════════════════════════════════════════
+# Primary mode (default) — unchanged from original install flow
+# ══════════════════════════════════════════════════════════════════════
 
 # ── 2. Cloudflared ────────────────────────────────────────────────────
 
@@ -99,6 +181,7 @@ npm run deploy:dashboard
 
 TOKEN="$(cat "$HOME/.hive/token" 2>/dev/null || echo '(not found)')"
 DASHBOARD_URL="$(grep -Eo 'https://[[:alnum:].-]+\.vercel\.app' "$HOME/.hive/dashboard-url.txt" 2>/dev/null | tail -1 || echo '(check deploy output above)')"
+WS_URL="${TUNNEL_URL/https:\/\//wss://}"
 
 echo ""
 echo "  ────────────────────────────────────────────────"
@@ -110,6 +193,11 @@ echo "  Token:     $TOKEN"
 echo ""
 echo "  Open the dashboard, paste your token, and start"
 echo "  running agents in Terminal windows."
+echo ""
+echo "  ── Connect another machine ──"
+echo ""
+echo "  On the other computer, clone Hive and run:"
+echo "  bash scripts/install.sh --connect $WS_URL $TOKEN"
 echo ""
 echo "  The daemon runs in the background."
 echo "  Log: ~/.hive/daemon.log"
