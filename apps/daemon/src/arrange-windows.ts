@@ -492,8 +492,9 @@ end tell
     return { ok: true };
   } catch (err: unknown) {
     // osascript failed — likely missing Automation permission.
-    // Fallback: SIGHUP all processes on the TTY so the shell exits
-    // and Terminal.app auto-closes the window ("Close if shell exited cleanly").
+    // Fallback: SIGKILL all remaining processes on the TTY (the agent
+    // is already dead from the kill handler). This kills the shell too,
+    // and Terminal.app auto-closes the tab when no processes remain.
     try {
       const output = execFileSync("/usr/sbin/lsof", ["-t", device], {
         timeout: 3000,
@@ -507,7 +508,7 @@ end tell
         .filter((p) => !isNaN(p) && p !== process.pid);
       for (const pid of pids) {
         try {
-          process.kill(pid, "SIGHUP");
+          process.kill(pid, "SIGKILL");
         } catch {
           /* already gone */
         }

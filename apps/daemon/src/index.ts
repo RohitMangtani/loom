@@ -1,3 +1,4 @@
+import { execFile } from "child_process";
 import { TelemetryReceiver } from "./telemetry.js";
 import { ProcessManager } from "./process-mgr.js";
 import { SessionStreamer } from "./session-stream.js";
@@ -11,6 +12,12 @@ import { WebPushManager } from "./web-push.js";
 import { Collector } from "./collector.js";
 import { OutboxScanner } from "./outbox.js";
 import { loadOrCreateToken, deriveViewerToken, patchHookUrls } from "./auth.js";
+
+// Probe Automation permission early — macOS shows the approval dialog on first
+// use, so we trigger it at startup rather than waiting for the user to click X.
+execFile("/usr/bin/osascript", ["-e",
+  'tell application "Terminal" to get name of first window'
+], { timeout: 5000 }, () => { /* result doesn't matter — the dialog is the point */ });
 
 const token = loadOrCreateToken();
 const viewerToken = deriveViewerToken(token);
