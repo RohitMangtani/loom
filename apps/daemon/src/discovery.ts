@@ -636,12 +636,11 @@ end tell
         model: proc.model,
       };
 
-      // Clean up any spawn placeholder for this TTY BEFORE registering the real
-      // worker. This must happen first to avoid a broadcast race: registerDiscovered
-      // sends worker_update (adding real) and removeWorker sends full workers list
-      // (removing placeholder). If register happens first, the dashboard briefly
-      // sees both entries. By removing the placeholder silently first, the only
-      // broadcast is the registerDiscovered worker_update — clean single transition.
+      // Clean up any spawn placeholder for this TTY and register the real worker
+      // as a single atomic operation. Using silentRemoveWorker + registerDiscoveredAtomic
+      // ensures only ONE "workers" broadcast goes out with the final state — no
+      // intermediate frame where both placeholder and real worker coexist.
+      let replacedPlaceholder = false;
       if (proc.tty) {
         const placeholderId = `spawning_${proc.tty.replace(/\//g, "_")}`;
         const placeholder = this.telemetry.get(placeholderId);
@@ -657,17 +656,26 @@ end tell
             worker.terminalPreview = placeholder.terminalPreview;
           } else {
             // Freshly spawned agent — start as idle (red) until it receives work.
-            // Prevents false green from stale JSONL or no-pattern fallback.
             worker.status = "idle";
             worker.currentAction = null;
           }
-          // Remove the placeholder — this triggers a worker_removed broadcast so
-          // the dashboard drops the old tile before registerDiscovered adds the new one.
-          this.telemetry.removeWorker(placeholderId);
+          // Silent remove: no broadcast, no onRemoval listeners
+          this.telemetry.silentRemoveWorker(placeholderId);
+          replacedPlaceholder = true;
         }
       }
 
-      this.telemetry.registerDiscovered(id, worker);
+      // Register real worker. If replacing a placeholder, use atomic variant
+      // that suppresses the individual worker_update notification — the full
+      // workers list broadcast below is the only message the dashboard sees.
+      if (replacedPlaceholder) {
+        this.telemetry.registerDiscoveredSilent(id, worker);
+        // Force a single full-state broadcast so the dashboard atomically
+        // swaps placeholder → real worker with no intermediate state.
+        this.telemetry.forceFullBroadcast();
+      } else {
+        this.telemetry.registerDiscovered(id, worker);
+      }
       this.discoveredPids.add(proc.pid);
 
       // Clear stale TTY session marker so this new worker starts with

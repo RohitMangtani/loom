@@ -127,9 +127,14 @@ export class WsServer {
     });
 
     this.telemetry.onRemoval((removedId) => {
-      // Send targeted removal so dashboard drops the tile immediately.
-      // Also send full workers list as ground truth (handles edge cases).
       this.broadcast({ type: "worker_removed", workerId: removedId });
+      const workers = this.getAllWorkers();
+      this.lastWorkersSnapshot = JSON.stringify(workers);
+      this.broadcast({ type: "workers", workers });
+    });
+
+    // Atomic placeholder→real worker swap: single full-state broadcast
+    this.telemetry.onFullBroadcast(() => {
       const workers = this.getAllWorkers();
       this.lastWorkersSnapshot = JSON.stringify(workers);
       this.broadcast({ type: "workers", workers });

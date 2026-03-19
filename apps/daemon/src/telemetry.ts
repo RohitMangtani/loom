@@ -1068,6 +1068,55 @@ export class TelemetryReceiver {
     this.notify(worker);
   }
 
+  /** Register a discovered worker WITHOUT broadcasting a worker_update.
+   *  Used when atomically replacing a placeholder — the caller handles the broadcast. */
+  registerDiscoveredSilent(id: string, worker: WorkerState): void {
+    this.workers.set(id, worker);
+    if (!this.lastHookTime.has(id)) {
+      this.lastHookTime.set(id, Date.now());
+    }
+    // Replay pending register-tty corrections (same as registerDiscovered)
+    if (worker.tty && worker.model !== "codex") {
+      const pendingSession = this.pendingTtyRegistrations.get(worker.tty);
+      if (pendingSession) {
+        console.log(`[register-tty] Replaying queued correction: tty=${worker.tty} session=${pendingSession} → ${id}`);
+        this.pinnedSessions.set(pendingSession, id);
+        this.sessionToWorker.set(pendingSession, id);
+        const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+        const projectsDir = join(homeDir, ".claude", "projects");
+        const encodings = [
+          worker.project.replace(/\//g, "-"),
+          (homeDir).replace(/\//g, "-"),
+        ];
+        for (const encoded of encodings) {
+          const candidateFile = join(projectsDir, encoded, `${pendingSession}.jsonl`);
+          if (existsSync(candidateFile)) {
+            this.streamer?.setSessionFile(id, candidateFile);
+            break;
+          }
+        }
+        this.pendingTtyRegistrations.delete(worker.tty);
+        this.replayPendingHooks(pendingSession, id);
+      }
+    }
+    // No notify() — caller will broadcast
+  }
+
+  private fullBroadcastListeners: Array<() => void> = [];
+
+  /** Register a callback for forced full-state broadcasts. */
+  onFullBroadcast(callback: () => void): void {
+    this.fullBroadcastListeners.push(callback);
+  }
+
+  /** Force a full workers broadcast to all dashboard clients.
+   *  Used after atomic placeholder→real worker swap. */
+  forceFullBroadcast(): void {
+    for (const cb of this.fullBroadcastListeners) {
+      cb();
+    }
+  }
+
   removeWorker(id: string): void {
     this.silentRemoveWorker(id);
     for (const cb of this.removalListeners) {
