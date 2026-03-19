@@ -47,17 +47,26 @@ if ! npx vercel whoami >/dev/null 2>&1; then
 fi
 echo "  ✓ Vercel authenticated"
 
-# ── 4. Start daemon + tunnel (detached — survives script exit) ───────
+# ── 4. Start daemon + tunnel ──────────────────────────────────────────
 
 if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
   echo "  ✓ Daemon already running on :3001"
 else
   echo ""
   echo "  Starting daemon + tunnel..."
-  nohup npm start > "$HOME/.hive/daemon.log" 2>&1 &
-  DAEMON_PID=$!
-  disown "$DAEMON_PID" 2>/dev/null || true
-  echo "  ✓ Daemon started (PID $DAEMON_PID, log: ~/.hive/daemon.log)"
+  # Start in a new Terminal window so the daemon runs as a Terminal.app
+  # child process. This is required for osascript Automation permission
+  # (closing terminals from the dashboard). macOS may show an approval
+  # dialog the first time — click OK.
+  if osascript -e "tell application \"Terminal\" to do script \"cd '$ROOT' && npm start\"" 2>/dev/null; then
+    echo "  ✓ Daemon started in a new Terminal window"
+  else
+    # Fallback: background process (X button won't close terminal windows)
+    echo "  Could not open Terminal window — starting in background..."
+    nohup npm start > "$HOME/.hive/daemon.log" 2>&1 &
+    disown "$!" 2>/dev/null || true
+    echo "  ✓ Daemon started in background (log: ~/.hive/daemon.log)"
+  fi
 fi
 
 # ── 5. Wait for tunnel URL ───────────────────────────────────────────

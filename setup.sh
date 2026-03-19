@@ -98,18 +98,6 @@ if [ "$HAS_SWIFT" -eq 1 ]; then
   fi
 fi
 
-# ── Trigger Terminal automation permission (needed for X button) ──────
-
-echo ""
-echo "  Checking Terminal automation permission..."
-echo "  (If macOS asks to allow, click OK — needed to close agents from the dashboard)"
-if osascript -e 'tell application "Terminal" to get name' &>/dev/null; then
-  echo "  ✓ Terminal automation permitted"
-else
-  echo "  • Terminal automation not granted — you can enable later in"
-  echo "    System Settings → Privacy & Security → Automation"
-fi
-
 # ── Create Hive auth token ───────────────────────────────────────────
 
 echo ""
