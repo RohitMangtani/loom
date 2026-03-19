@@ -127,8 +127,11 @@ export class ProcessDiscovery {
 
   // Track TTYs we've already detected prompts for (avoid repeated AppleScript calls)
   private promptCheckedTtys = new Map<string, { checkedAt: number; result: "trust" | "sandbox" | null }>();
-  // Suppress prompt detection after dashboard approval (prevents re-detecting stale prompt text)
-  private promptSuppressed = new Map<string, number>(); // tty → suppress until timestamp
+  // Suppress prompt detection after dashboard approval (prevents re-detecting stale prompt text).
+  // Permanent per TTY — once approved, the terminal buffer retains stale prompt text
+  // indefinitely, so time-based expiry doesn't work. TTYs are unique per terminal tab,
+  // so a new agent in a new tab gets a fresh TTY and won't be affected.
+  private promptSuppressed = new Set<string>(); // tty
 
   constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
     this.telemetry = telemetry;
@@ -173,12 +176,8 @@ end tell
    * Returns the prompt type and a human-readable message, or null if no prompt detected.
    */
   detectPrompt(tty: string): { type: "trust" | "sandbox"; message: string; content: string } | null {
-    // Suppressed: dashboard approved this prompt, ignore until cooldown expires
-    const suppUntil = this.promptSuppressed.get(tty);
-    if (suppUntil) {
-      if (Date.now() < suppUntil) return null;
-      this.promptSuppressed.delete(tty);
-    }
+    // Suppressed: dashboard approved this prompt — permanent per TTY
+    if (this.promptSuppressed.has(tty)) return null;
 
     // Rate-limit: don't re-check the same TTY within 5 seconds
     const cached = this.promptCheckedTtys.get(tty);
@@ -238,9 +237,11 @@ end tell
     this.promptCheckedTtys.delete(tty);
   }
 
-  /** Suppress prompt detection for a TTY for N ms (call after dashboard approval) */
-  suppressPrompt(tty: string, durationMs = 20_000): void {
-    this.promptSuppressed.set(tty, Date.now() + durationMs);
+  /** Permanently suppress prompt detection for a TTY (call after dashboard approval).
+   *  Permanent because the terminal buffer retains stale prompt text indefinitely.
+   *  Each terminal tab has a unique TTY, so new agents aren't affected. */
+  suppressPrompt(tty: string): void {
+    this.promptSuppressed.add(tty);
     this.promptCheckedTtys.delete(tty);
   }
 
