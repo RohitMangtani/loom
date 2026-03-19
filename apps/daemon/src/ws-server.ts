@@ -81,6 +81,34 @@ export class WsServer {
       });
     });
 
+    // Satellite relay: let the REST API route messages to satellite workers
+    this.telemetry.setSatelliteRelay(
+      async (workerId, content, from) => {
+        const sat = this.getSatelliteForWorker(workerId);
+        if (!sat) return { ok: false, error: `Satellite for "${workerId}" not connected` };
+        const parsed = this.parseSatelliteWorker(workerId)!;
+        this.sendToSatellite(sat, {
+          type: "satellite_message",
+          requestId: `api_msg_${Date.now()}`,
+          workerId,
+          localWorkerId: parsed.localId,
+          content,
+        });
+        // Optimistic update
+        const remote = sat.workers.find(w => w.id === parsed.localId);
+        if (remote) {
+          remote.status = "working";
+          remote.currentAction = "Thinking...";
+          remote.lastAction = from ? `Message from ${from}` : "Message via API";
+          remote.lastActionAt = Date.now();
+        }
+        this.lastWorkersSnapshot = null;
+        return { ok: true };
+      },
+      () => this.getAllWorkers(),
+      (repoDir) => this.updateAllSatellites(repoDir),
+    );
+
     // Auto-commit: forward satellite commit requests to the correct satellite machine
     this.telemetry.onAutoCommit((workerId, project, files, message) => {
       const sat = this.getSatelliteForWorker(workerId);
@@ -201,6 +229,18 @@ export class WsServer {
     const parsed = this.parseSatelliteWorker(workerId);
     if (!parsed) return null;
     return this.satellites.get(parsed.machineId) || null;
+  }
+
+  /** Tell all connected satellites to pull latest code and restart. */
+  updateAllSatellites(repoDir?: string): void {
+    for (const sat of this.satellites.values()) {
+      console.log(`[satellite-update] Sending update command to "${sat.machineId}"`);
+      this.sendToSatellite(sat, {
+        type: "satellite_update",
+        requestId: `update_${Date.now()}`,
+        project: repoDir,
+      });
+    }
   }
 
   /** Build the list of connected satellite machines for the dashboard. */

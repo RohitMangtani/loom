@@ -147,6 +147,11 @@ export class TelemetryReceiver {
   // Auto-commit listeners (ws-server uses this to route satellite commits)
   private autoCommitListeners: Array<(workerId: string, project: string, files: string[], message: string) => void> = [];
 
+  // Satellite relay: ws-server registers this so the REST API can route
+  // messages to satellite workers (workerId contains "machineId:localId").
+  private satelliteMessageRelay: ((workerId: string, content: string, from?: string) => Promise<{ ok: boolean; error?: string }>) | null = null;
+  private satelliteAllWorkersGetter: (() => WorkerState[]) | null = null;
+
   // Workflow handoffs: workflowId → handoff context from completed steps
   private workflowHandoffs = new Map<string, string[]>();
 
@@ -845,6 +850,37 @@ export class TelemetryReceiver {
       appendFileSync(learningFile, `${header}- [${timestamp}] ${lesson}\n`);
       console.log(`[auto-learn] ${lesson.slice(0, 80)}`);
     } catch { /* non-critical */ }
+  }
+
+  // --- Satellite relay (for REST API → satellite worker routing) ---
+
+  private satelliteUpdateFn: ((repoDir?: string) => void) | null = null;
+
+  setSatelliteRelay(
+    relay: (workerId: string, content: string, from?: string) => Promise<{ ok: boolean; error?: string }>,
+    allWorkers: () => WorkerState[],
+    updateAll?: (repoDir?: string) => void,
+  ): void {
+    this.satelliteMessageRelay = relay;
+    this.satelliteAllWorkersGetter = allWorkers;
+    this.satelliteUpdateFn = updateAll || null;
+  }
+
+  /** Tell all connected satellites to pull and restart. */
+  updateSatellites(repoDir?: string): void {
+    if (this.satelliteUpdateFn) this.satelliteUpdateFn(repoDir);
+  }
+
+  /** Relay a message to a satellite worker. Returns null if workerId is local. */
+  async relaySatelliteMessage(workerId: string, content: string, from?: string): Promise<{ ok: boolean; error?: string } | null> {
+    if (!workerId.includes(":") || !this.satelliteMessageRelay) return null;
+    return this.satelliteMessageRelay(workerId, content, from);
+  }
+
+  /** Get all workers including satellite workers (for REST API). */
+  getAllWorkersIncludingSatellites(): WorkerState[] {
+    if (this.satelliteAllWorkersGetter) return this.satelliteAllWorkersGetter();
+    return this.getAll();
   }
 
   // --- Auto-commit ---
@@ -2089,6 +2125,11 @@ export class TelemetryReceiver {
       const summary = this.buildReviewSummary("pushed", worker, repoName, branch);
       console.log(`[review] Auto-detected push by ${worker.tty || workerId} in ${repoName}`);
       this.addReview(summary, workerId, repoName, { type: "push", url: gitUrl, artifacts });
+      // Auto-update satellites when the hive repo itself is pushed
+      if (repoName === "hive" && this.satelliteUpdateFn) {
+        console.log(`[satellite-update] Hive repo pushed — triggering satellite updates`);
+        this.satelliteUpdateFn();
+      }
       return;
     }
 

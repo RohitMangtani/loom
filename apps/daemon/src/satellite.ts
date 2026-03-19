@@ -627,6 +627,33 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
         break;
       }
 
+      case "satellite_update": {
+        // Primary tells us to pull latest code and restart.
+        // Find our own repo directory, git pull, then respawn the process.
+        console.log("[satellite] Received update command — pulling latest code...");
+        const repoDir = msg.project || join(homedir(), "factory/projects/hive");
+        try {
+          await new Promise<void>((resolve, reject) => {
+            execFile("/usr/bin/git", ["pull", "--ff-only"], { cwd: repoDir, timeout: 30_000 },
+              (err, stdout) => {
+                if (err) reject(err);
+                else { console.log(`[satellite] git pull: ${(stdout || "").trim()}`); resolve(); }
+              });
+          });
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
+          // Restart: give time for the result to send, then exit.
+          // The process supervisor (launchd/systemd/pm2) or install.sh wrapper
+          // should restart us automatically.
+          console.log("[satellite] Restarting in 2 seconds...");
+          setTimeout(() => process.exit(0), 2000);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.log(`[satellite] Update failed: ${errMsg}`);
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: errMsg });
+        }
+        break;
+      }
+
       // Ignore messages meant for dashboard clients (workers, auth, etc.)
       default:
         break;

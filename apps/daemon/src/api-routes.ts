@@ -15,13 +15,13 @@ export function registerApiRoutes(
   discovery: ProcessDiscovery,
 ): void {
 
-  // GET /api/workers
+  // GET /api/workers — includes satellite workers when available
   app.get("/api/workers", requireAuth, (_req, res) => {
-    res.json(receiver.getAll());
+    res.json(receiver.getAllWorkersIncludingSatellites());
   });
 
-  // POST /api/message
-  app.post("/api/message", requireAuth, (req, res) => {
+  // POST /api/message — routes to satellite workers transparently
+  app.post("/api/message", requireAuth, async (req, res) => {
     const {
       workerId,
       content,
@@ -40,7 +40,19 @@ export function registerApiRoutes(
       return;
     }
 
-    receiver.sendToWorkerAsync(workerId, content, {
+    // Try satellite relay first (workerId contains "machineId:localId")
+    const satelliteResult = await receiver.relaySatelliteMessage(workerId, content, from);
+    if (satelliteResult) {
+      if (!satelliteResult.ok) {
+        res.status(502).json({ error: satelliteResult.error });
+      } else {
+        res.json(satelliteResult);
+      }
+      return;
+    }
+
+    // Local worker
+    const result = await receiver.sendToWorkerAsync(workerId, content, {
       source: from ? `api:message:from:${from}` : "api:message",
       withIdentity: true,
       trackDispatch: true,
@@ -48,14 +60,13 @@ export function registerApiRoutes(
       fromWorkerId: from,
       contextWorkerIds,
       includeSenderContext,
-    }).then((result) => {
-      if (!result.ok) {
-        const worker = receiver.get(workerId);
-        res.status(worker ? 500 : 404).json({ error: result.error });
-        return;
-      }
-      res.json(result);
     });
+    if (!result.ok) {
+      const worker = receiver.get(workerId);
+      res.status(worker ? 500 : 404).json({ error: result.error });
+      return;
+    }
+    res.json(result);
   });
 
   // GET /api/context
@@ -281,6 +292,12 @@ export function registerApiRoutes(
   // GET /api/debug
   app.get("/api/debug", requireAuth, (_req, res) => {
     res.json(receiver.getDebugState(discovery));
+  });
+
+  // POST /api/update-satellites — tell all satellites to pull and restart
+  app.post("/api/update-satellites", requireAuth, (_req, res) => {
+    receiver.updateSatellites();
+    res.json({ ok: true });
   });
 
   // POST /api/spawn
