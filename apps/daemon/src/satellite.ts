@@ -325,6 +325,7 @@ You are 1 of several Claude Code agents running simultaneously across multiple c
 - NEVER spawn new Claude instances, terminals, or agents.
 - NEVER use the Task tool to launch subagents as a workaround for dispatching.
 - Execute directly. Only dispatch to another agent when the task requires their active conversation context.
+- **Dispatch rule:** Never direct-message a specific agent for work unless that agent has context the others don't. For context-free tasks (SVGs, research, file edits in other repos), use \`POST /api/queue\` and let the daemon route to the next idle agent.
 - Before any task: \`cat {project}/.claude/hive-learnings.md 2>/dev/null\`
 - After solving anything non-obvious: write a learning back via the API. This is mandatory.
 - Sandbox blocks \`curl\` to localhost. Use \`dangerouslyDisableSandbox: true\` for daemon API calls.
