@@ -145,7 +145,7 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
 
@@ -500,8 +500,9 @@ export default function Home() {
       {showSpawnDialog && (
         <SpawnDialog
           models={models}
-          onSpawn={(project, task, model) => {
-            send({ type: "spawn", project, model, task: task || undefined });
+          machines={machines}
+          onSpawn={(project, task, model, machine) => {
+            send({ type: "spawn", project, model, task: task || undefined, machine });
             setShowSpawnDialog(false);
           }}
           onClose={() => setShowSpawnDialog(false)}

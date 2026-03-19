@@ -6,4 +6,5 @@ export type {
   DaemonMessage,
   ChatEntry,
   DaemonResponse,
+  ConnectedMachine,
 } from "@hive/types";

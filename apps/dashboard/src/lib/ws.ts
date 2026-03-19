@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentModel, ChatEntry, DaemonMessage, DaemonResponse, ReviewItem, WorkerState } from "@/lib/types";
+import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, ReviewItem, WorkerState } from "@/lib/types";
 
-/** Extended response type until shared types package adds "models" */
+/** Extended response type for message types beyond the base DaemonResponse union */
 type ExtendedResponse = DaemonResponse | { type: "models"; models?: AgentModel[] } | { type: "vapid_key"; vapidKey?: string } | { type: "push_status"; subscribed?: boolean };
 
 const MAX_CHAT_ENTRIES = 150;
@@ -23,6 +23,7 @@ export function useHive(daemonUrl: string) {
     { id: "openclaw", label: "OpenClaw" },
   ]);
   const [vapidKey, setVapidKey] = useState<string | null>(null);
+  const [machines, setMachines] = useState<ConnectedMachine[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -248,6 +249,13 @@ export function useHive(daemonUrl: string) {
             break;
           }
 
+          case "machines": {
+            if (data.machines && Array.isArray(data.machines)) {
+              setMachines(data.machines);
+            }
+            break;
+          }
+
           case "auth": {
             setIsAdmin(data.admin ?? false);
             break;
@@ -367,6 +375,6 @@ export function useHive(daemonUrl: string) {
 
   return {
     connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect,
-    reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey,
+    reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines,
   };
 }

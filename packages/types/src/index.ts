@@ -51,6 +51,13 @@ export interface TelemetryEvent {
   timestamp: number;
 }
 
+/** A connected satellite machine (sent to dashboard for spawn routing). */
+export interface ConnectedMachine {
+  id: string;
+  hostname: string;
+  workerCount: number;
+}
+
 export interface DaemonMessage {
   type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe";
   workerId?: string;
@@ -61,6 +68,8 @@ export interface DaemonMessage {
   model?: string;
   /** Target slot (1-8) for spawn. If set, places the terminal in this slot. */
   targetQuadrant?: number;
+  /** Target machine for spawn. Omit or "local" for this computer. */
+  machine?: string;
   optionIndex?: number;
   /** Phase 4: which suggestion label was applied */
   appliedLabel?: string;
@@ -100,9 +109,11 @@ export interface ReviewItem {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status";
+  type: "workers" | "worker_update" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines";
   workers?: WorkerState[];
   worker?: WorkerState;
+  /** Connected satellite machines (for spawn dialog machine picker). */
+  machines?: ConnectedMachine[];
   workerId?: string;
   content?: string;
   messages?: ChatEntry[];

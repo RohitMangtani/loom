@@ -10,7 +10,7 @@ import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
 import { spawnTerminalWindow, closeTerminalWindow } from "./arrange-windows.js";
 import { validateToken } from "./auth.js";
 import { ProcessDiscovery } from "./discovery.js";
-import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState } from "./types.js";
+import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState, ConnectedMachine } from "./types.js";
 import type { WebPushManager } from "./web-push.js";
 
 /** Satellite connection state */
@@ -37,6 +37,7 @@ export class WsServer {
   private clientSubs = new Map<WebSocket, string>();
   private lastWorkersSnapshot: string | null = null;
   private lastModelsSnapshot: string | null = null;
+  private lastMachinesSnapshot: string | null = null;
   private pushMgr: WebPushManager | null = null;
 
   // Satellite connections: machineId → connection
@@ -166,6 +167,25 @@ export class WsServer {
     return this.satellites.get(parsed.machineId) || null;
   }
 
+  /** Build the list of connected satellite machines for the dashboard. */
+  private getConnectedMachines(): ConnectedMachine[] {
+    const machines: ConnectedMachine[] = [];
+    for (const sat of this.satellites.values()) {
+      machines.push({
+        id: sat.machineId,
+        hostname: sat.hostname,
+        workerCount: sat.workers.length,
+      });
+    }
+    return machines;
+  }
+
+  /** Broadcast connected machines list to all dashboard clients. */
+  private broadcastMachines(): void {
+    const machines = this.getConnectedMachines();
+    this.broadcast({ type: "machines", machines });
+  }
+
   /** Forward a command to a satellite. */
   private sendToSatellite(sat: SatelliteConnection, msg: Record<string, unknown>): void {
     if (sat.ws.readyState === WebSocket.OPEN) {
@@ -186,6 +206,8 @@ export class WsServer {
         };
         this.satellites.set(machineId, sat);
         console.log(`[satellite] "${machineId}" registered (hostname: ${sat.hostname})`);
+        // Notify dashboard clients about the new satellite
+        this.broadcastMachines();
         break;
       }
 
@@ -319,6 +341,14 @@ export class WsServer {
         }
       }
     }
+
+    // Check if connected machines changed (worker counts update)
+    const machinesData = this.getConnectedMachines();
+    const machinesSnapshot = JSON.stringify(machinesData);
+    if (machinesSnapshot !== this.lastMachinesSnapshot) {
+      this.lastMachinesSnapshot = machinesSnapshot;
+      this.broadcast({ type: "machines", machines: machinesData });
+    }
   }
 
   start(): void {
@@ -351,6 +381,8 @@ export class WsServer {
           // Force a state push so dashboard drops the satellite's workers
           this.lastWorkersSnapshot = null;
           this.pushState();
+          // Notify dashboard clients that satellite list changed
+          this.broadcastMachines();
         });
 
         ws.on("error", () => ws.close());
@@ -371,6 +403,8 @@ export class WsServer {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "models", models: this.getAvailableModels() }));
       }
+      // Send connected satellite machines for spawn dialog machine picker
+      this.send(ws, { type: "machines", machines: this.getConnectedMachines() });
       // Send VAPID public key for Web Push subscription
       if (this.pushMgr) {
         this.send(ws, { type: "vapid_key", vapidKey: this.pushMgr.getPublicKey() });
@@ -522,6 +556,24 @@ export class WsServer {
       }
 
       case "spawn": {
+        // Route to satellite if a remote machine is specified
+        if (msg.machine && msg.machine !== "local") {
+          const targetSat = this.satellites.get(msg.machine);
+          if (!targetSat) {
+            this.send(ws, { type: "error", error: `Machine "${msg.machine}" not connected` });
+            return;
+          }
+          this.sendToSatellite(targetSat, {
+            type: "satellite_spawn",
+            requestId: `spawn_${Date.now()}`,
+            project: msg.project || "~",
+            model: msg.model || "claude",
+            initialMessage: msg.task?.trim() || undefined,
+          });
+          console.log(`Spawn routed to satellite "${msg.machine}" (model=${msg.model || "claude"})`);
+          break;
+        }
+
         const home = homedir();
         // Default to home directory if no project specified
         let real: string;
