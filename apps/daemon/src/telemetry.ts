@@ -1823,8 +1823,8 @@ export class TelemetryReceiver {
 
   // --- Task queue facade ---
 
-  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean, requires?: string[], preferMachine?: string, model?: string): QueuedTask {
-    return this.taskQueue.push(task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit, requires, preferMachine, model);
+  pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean, requires?: string[], preferMachine?: string): QueuedTask {
+    return this.taskQueue.push(task, project, priority, blockedBy, workflowId, verify, maxVerifyAttempts, autoCommit, requires, preferMachine);
   }
 
   removeTask(taskId: string): boolean {
@@ -1959,13 +1959,6 @@ export class TelemetryReceiver {
           task.preferMachine === "local" ? !w.machine : w.machine === task.preferMachine
         );
         if (preferred.length > 0) eligibleWorkers = preferred;
-      }
-
-      // Model-targeted routing: only dispatch to agents running the specified model
-      if (task.model) {
-        const modelMatch = eligibleWorkers.filter(w => (w.model || "claude") === task.model);
-        if (modelMatch.length === 0) continue; // no agent of this model idle - wait
-        eligibleWorkers = modelMatch;
       }
 
       // Try to match by project first, then fall back to any eligible worker
