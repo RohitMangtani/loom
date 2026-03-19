@@ -169,9 +169,10 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
 PLIST
   echo "  ✓ Satellite service installed (com.hive.satellite)"
 
-  # Start the service
-  launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null || \
+  # Start the service (try modern API first, fall back to legacy)
+  if ! launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null; then
     launchctl load "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null
+  fi
 
   # Wait for satellite to start
   SAT_OK=0
