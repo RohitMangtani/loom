@@ -1,6 +1,4 @@
 {
-  "framework": "nextjs",
-  "installCommand": "npm install",
   "buildCommand": "npx turbo build --filter=@hive/dashboard",
-  "outputDirectory": "apps/dashboard/.next"
+  "outputDirectory": "apps/dashboard/out"
 }
