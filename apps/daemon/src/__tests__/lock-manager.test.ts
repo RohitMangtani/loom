@@ -3,9 +3,10 @@ import { LockManager } from "../lock-manager.js";
 
 describe("LockManager", () => {
   let locks: LockManager;
-  const aliveWorkers = new Set(["w1", "w2", "w3"]);
+  let aliveWorkers: Set<string>;
 
   beforeEach(() => {
+    aliveWorkers = new Set(["w1", "w2", "w3"]);
     locks = new LockManager(
       (id) => aliveWorkers.has(id),
       (id) => id === "w1" ? "ttys001" : undefined,

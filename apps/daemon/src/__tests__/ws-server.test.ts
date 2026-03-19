@@ -20,6 +20,12 @@ function createServer(initialWorkers: unknown[] = []) {
     onReviewAdded() {
       // no-op for tests
     },
+    setSatelliteRelay() {},
+    setCapabilityRouter() {},
+    onAutoCommit() {},
+    onFullBroadcast() {},
+    setScratchpad() {},
+    setSatelliteSlots() {},
     getAll() {
       return workers;
     },
