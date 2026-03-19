@@ -306,21 +306,26 @@ export class WsServer {
 
         // Apply overrides: after dashboard approves/selects a satellite worker,
         // suppress stale promptType from the satellite for a cooldown period.
+        // But if the satellite reports the worker is actually working (no prompt),
+        // respect that — the agent has moved past the prompt.
         const now = Date.now();
         for (const w of incoming) {
           const key = `${machineId}:${w.id}`;
           const override = this.satelliteOverrides.get(key);
           if (override) {
-            if (now < override.until) {
+            if (now >= override.until) {
+              // Expired
+              this.satelliteOverrides.delete(key);
+            } else if (w.status === "working" && !w.promptType) {
+              // Agent has moved past the prompt and is working — clear override
+              this.satelliteOverrides.delete(key);
+            } else {
               // Override still active — clear prompt state and apply dashboard state
               w.promptType = null;
               w.promptMessage = undefined;
               w.status = override.status as WorkerState["status"];
               w.currentAction = override.currentAction;
               w.lastAction = override.lastAction;
-            } else {
-              // Expired — satellite should have caught up by now
-              this.satelliteOverrides.delete(key);
             }
           }
         }
