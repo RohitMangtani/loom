@@ -49,14 +49,9 @@ The system solves four problems at once:
 
 ## Background
 
-Built by [Rohit Mangtani](https://rohitmangtani.com). MBA in Business Analytics and BS in Computer Information Systems from Bentley University. Currently working in fixed income operations at RBC. Background in finance, data analysis, and quantitative systems.
+Built by Rohit Mangtani. MBA in Business Analytics and BS in Computer Information Systems from Bentley University. Currently working in fixed income operations at RBC. Background in finance, data analysis, and quantitative systems.
 
 This project came out of running multiple AI agents daily across several projects and needing a way to manage the coordination overhead. The system was built using the agents it manages: multiple Claude and Codex instances iterating on the daemon, dashboard, and each other's output simultaneously.
-
-Related writing:
-- [A Visual Workflow for AI Agents - Hive](https://rohitmangtani.com/writing/a-visual-workflow-for-ai-agents) — the motivation and four-pillar framework
-- [Hive deep dive](https://rmgtni.xyz/lab/hive) — technical architecture and multi-machine details
-- [How Hive Was Built](https://rmgtni.xyz/lab/how-hive-was-built) — the methodology and skills involved
 
 ## Prerequisites
 
@@ -213,13 +208,13 @@ Stack your terminal windows vertically on screen. The daemon detects their posit
 
 Open the dashboard URL on your phone and add it to your home screen. It runs full-screen like a native app. See the [Install as App](#install-as-app) section below.
 
-## Using the Quadrants
+## Using the Tiles
 
-**Assign tasks by complexity, not by file.** Give your hardest task to Q1 (top-left) so you can keep an eye on it. Put your most independent tasks in Q3 and Q4 where they can run unattended longest.
+**Assign tasks by complexity, not by file.** Give your hardest task to the top tile so you can keep an eye on it. Put your most independent tasks in the lower tiles where they can run unattended longest.
 
-**Bridge context between agents.** When Agent 1 discovers something Agent 3 needs, tap Agent 3's tile and paste the relevant finding. Or use the scratchpad so any agent can read it.
+**Bridge context between agents.** When one agent discovers something another needs, tap the other tile and paste the finding. Or use the scratchpad so any agent can read it.
 
-**Give commands to specific agents.** Tap any tile and type a plain English instruction: "Stop what you are doing and fix the login bug first" or "Read what Q2 just committed and review it." The message goes straight to that agent's terminal as if you typed it there.
+**Give commands to specific agents.** Tap any tile and type a plain English instruction: "Stop what you are doing and fix the login bug first" or "Read what the agent above just committed and review it." The message goes straight to that agent's terminal as if you typed it there.
 
 ## How It Works
 
@@ -408,7 +403,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 Claude agents read instructions from `~/.claude/CLAUDE.md` that tell them how to interact with the daemon. Here's what that hook-driven path does automatically:
 
-1. **Identify themselves** — read `~/.hive/workers.json` on startup to find their quadrant. On every prompt, the identity hook also injects a peer summary showing what the other agents are doing.
+1. **Identify themselves** — read `~/.hive/workers.json` on startup to find their slot. On every prompt, the identity hook also injects a peer summary showing what the other agents are doing.
 2. **Check learnings** — read `.claude/hive-learnings.md` before starting any task
 3. **Lock files** — acquire locks before editing files other agents might touch
 4. **Write learnings** — persist lessons after solving non-obvious problems
@@ -477,7 +472,7 @@ Daemon (Node.js, port 3001 + 3002)
 ├── Discovery     — finds Claude + Codex + OpenClaw processes via ps + lsof every 3s
 ├── Telemetry     — receives hook events and inferred signals, maintains worker state
 ├── Auto-pilot    — detects stuck prompts, auto-approves via send-return
-├── Arrange       — detects terminal positions, assigns quadrants by screen location
+├── Arrange       — detects terminal positions, assigns slots by screen location
 ├── Watchdog      — detects stuck loops, escalates to dashboard
 ├── State store   — snapshots daemon state every 30s, restores on restart
 ├── Notifications — macOS native alerts when agents go stuck
@@ -503,12 +498,12 @@ Dashboard (Next.js, port 3000 — installable as PWA)
 | `apps/daemon/src/telemetry.ts` | Hook event receiver, worker state machine |
 | `apps/daemon/src/auto-pilot.ts` | Automatic prompt approval |
 | `apps/daemon/src/tty-input.ts` | AppleScript + CGEvent terminal interaction |
-| `apps/daemon/src/arrange-windows.ts` | Window position detection and quadrant assignment |
+| `apps/daemon/src/arrange-windows.ts` | Window position detection and slot assignment |
 | `apps/daemon/src/api-routes.ts` | All REST API endpoints |
 | `apps/daemon/src/ws-server.ts` | WebSocket server for dashboard |
 | `apps/daemon/src/watchdog.ts` | Stuck loop detection |
 | `apps/daemon/src/state-store.ts` | Snapshot persistence across restarts |
-| `~/.hive/identity.sh` | Claude hook: injects quadrant ID + peer summary on every prompt |
+| `~/.hive/identity.sh` | Claude hook: injects slot ID + peer summary on every prompt |
 | `~/.hive/sessions/` | Claude TTY→session marker files written by `identity.sh` |
 | `apps/daemon/src/notifications.ts` | macOS push notifications on stuck |
 | `apps/daemon/src/task-queue.ts` | Global task queue |
