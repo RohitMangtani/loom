@@ -109,6 +109,10 @@ if [ ! -f "$HOME/.hive/token" ]; then
   bash "$ROOT/setup.sh"
 else
   echo "  ✓ Already set up"
+  # Always ensure dependencies are current (git pull may have changed them)
+  echo "  Installing dependencies..."
+  npm install --silent 2>&1 | tail -1
+  echo "  ✓ Dependencies up to date"
 fi
 
 # ── Satellite: store config + start ───────────────────────────────────
@@ -135,13 +139,34 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   else
     echo ""
     echo "  Starting satellite daemon..."
-    if osascript -e "tell application \"Terminal\" to do script \"cd '$ROOT' && npx tsx apps/daemon/src/index.ts --satellite\"" 2>/dev/null; then
-      echo "  ✓ Satellite started in a new Terminal window"
+    # Start in background so we can healthcheck it
+    nohup npx tsx apps/daemon/src/index.ts --satellite > "$HOME/.hive/satellite.log" 2>&1 &
+    SAT_PID="$!"
+    disown "$SAT_PID" 2>/dev/null || true
+
+    # Wait for satellite to start listening on port 3001
+    SAT_OK=0
+    for _ in $(seq 1 15); do
+      if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
+        SAT_OK=1
+        break
+      fi
+      # Check if process died
+      if ! kill -0 "$SAT_PID" 2>/dev/null; then
+        break
+      fi
+      sleep 1
+    done
+
+    if [ "$SAT_OK" -eq 1 ]; then
+      echo "  ✓ Satellite daemon running (pid: $SAT_PID)"
     else
-      echo "  Starting in background..."
-      nohup npx tsx apps/daemon/src/index.ts --satellite > "$HOME/.hive/satellite.log" 2>&1 &
-      disown "$!" 2>/dev/null || true
-      echo "  ✓ Satellite started in background (log: ~/.hive/satellite.log)"
+      echo "  ✗ Satellite daemon failed to start."
+      echo "    Check the log: cat ~/.hive/satellite.log"
+      echo ""
+      echo "  Last 10 lines of log:"
+      tail -10 "$HOME/.hive/satellite.log" 2>/dev/null | sed 's/^/    /'
+      exit 1
     fi
   fi
 
@@ -158,6 +183,7 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   echo "  Open Terminal windows and run 'claude', 'codex',"
   echo "  or any agent — the primary dashboard sees them."
   echo ""
+  echo "  Log:  cat ~/.hive/satellite.log"
   echo "  Stop: kill \$(lsof -tiTCP:3001)"
   echo ""
   echo "  ────────────────────────────────────────────────"
