@@ -208,6 +208,64 @@ export function registerApiRoutes(
     }
   });
 
+  // GET /api/learnings?q=keyword&project=/path/to/project&limit=5
+  // Search learnings by keyword. Returns the most relevant entries instead
+  // of forcing the agent to read the entire file and waste context window.
+  app.get("/api/learnings", requireAuth, (req, res) => {
+    const query = ((req.query.q || req.query.query || "") as string).toLowerCase().trim();
+    const projectPath = req.query.project as string | undefined;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 5, 1), 20);
+
+    // Collect learnings from all known projects (or a specific one)
+    const results: Array<{ project: string; entry: string; score: number }> = [];
+    const searchTerms = query.split(/\s+/).filter(Boolean);
+
+    const scanProject = (projPath: string) => {
+      const file = join(projPath, ".claude", "hive-learnings.md");
+      if (!existsSync(file)) return;
+      try {
+        const content = readFileSync(file, "utf-8");
+        const lines = content.split("\n").filter(l => l.startsWith("- ["));
+        const projName = projPath.split("/").pop() || projPath;
+        for (const line of lines) {
+          const lower = line.toLowerCase();
+          if (!query) {
+            // No query = return latest entries
+            results.push({ project: projName, entry: line, score: 0 });
+          } else {
+            // Score by how many search terms match
+            let score = 0;
+            for (const term of searchTerms) {
+              if (lower.includes(term)) score++;
+            }
+            if (score > 0) {
+              results.push({ project: projName, entry: line, score });
+            }
+          }
+        }
+      } catch { /* skip unreadable */ }
+    };
+
+    if (projectPath) {
+      scanProject(projectPath);
+    } else {
+      // Scan all projects that have learnings
+      const workers = receiver.getAll();
+      const scanned = new Set<string>();
+      for (const w of workers) {
+        if (!scanned.has(w.project)) {
+          scanned.add(w.project);
+          scanProject(w.project);
+        }
+      }
+    }
+
+    // Sort: by score (descending), then by recency (latest first)
+    results.sort((a, b) => b.score - a.score);
+    const top = query ? results.slice(0, limit) : results.slice(-limit).reverse();
+    res.json({ query: query || null, count: top.length, total: results.length, results: top });
+  });
+
   // GET /api/signals
   app.get("/api/signals", requireAuth, (req, res) => {
     const workerId = req.query.workerId as string | undefined;
