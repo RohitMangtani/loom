@@ -61,6 +61,8 @@ interface SatelliteDownMessage {
   files?: string[];       // auto-commit: file paths to commit
   message?: string;       // auto-commit: commit message
   workers?: unknown[];    // satellite_all_workers: full worker list from primary
+  includeHistory?: boolean; // satellite_context: include conversation history
+  historyLimit?: number;    // satellite_context: max history entries
 }
 
 /** Probe this machine for hardware and software capabilities. */
@@ -588,6 +590,30 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           this.streamer.unsubscribe(subKey);
           this.chatSubs.delete(prefixedId);
         }
+        break;
+      }
+
+      case "satellite_context": {
+        // Primary is requesting worker context (conversation history, status).
+        // Read it locally and send back — this is what makes cross-machine
+        // context queries work transparently.
+        const localId = msg.localWorkerId || "";
+        const worker = this.telemetry.get(localId);
+        if (!worker) {
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: "Worker not found" });
+          return;
+        }
+        const includeHistory = msg.includeHistory === true;
+        const historyLimit = typeof msg.historyLimit === "number" ? msg.historyLimit : 6;
+        const context = this.telemetry.getWorkerContext(localId, { includeHistory, historyLimit });
+        // Also get recent chat entries for richer context
+        const chatHistory = includeHistory ? this.streamer.readHistory(localId).slice(-historyLimit) : [];
+        this.send({
+          type: "satellite_context_response",
+          requestId: msg.requestId,
+          context,
+          chatHistory,
+        } as unknown as SatelliteUpMessage);
         break;
       }
 

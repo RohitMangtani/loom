@@ -69,8 +69,8 @@ export function registerApiRoutes(
     res.json(result);
   });
 
-  // GET /api/context
-  app.get("/api/context", requireAuth, (req, res) => {
+  // GET /api/context — transparently queries satellite workers
+  app.get("/api/context", requireAuth, async (req, res) => {
     const workerId = req.query.workerId as string | undefined;
     const workerIds = typeof req.query.workerIds === "string"
       ? req.query.workerIds.split(",").map((id) => id.trim()).filter(Boolean)
@@ -83,7 +83,8 @@ export function registerApiRoutes(
     };
 
     if (workerId) {
-      const context = receiver.getWorkerContext(workerId, options);
+      // Try local first, then relay to satellite if needed
+      const context = await receiver.getWorkerContextAsync(workerId, options);
       if (!context) {
         res.status(404).json({ error: `Worker ${workerId} not found` });
         return;

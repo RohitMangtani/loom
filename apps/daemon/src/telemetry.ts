@@ -894,6 +894,23 @@ export class TelemetryReceiver {
     return this.getAll();
   }
 
+  // Satellite context relay: registered by ws-server
+  private satelliteContextRelay: ((workerId: string, options: { includeHistory?: boolean; historyLimit?: number }) => Promise<unknown>) | null = null;
+
+  setSatelliteContextRelay(relay: (workerId: string, options: { includeHistory?: boolean; historyLimit?: number }) => Promise<unknown>): void {
+    this.satelliteContextRelay = relay;
+  }
+
+  /** Get context for a worker, transparently relaying to satellite if needed. */
+  async getWorkerContextAsync(workerId: string, options: { includeHistory?: boolean; historyLimit?: number } = {}): Promise<unknown> {
+    const local = this.getWorkerContext(workerId, options);
+    if (local) return local;
+    if (workerId.includes(":") && this.satelliteContextRelay) {
+      return this.satelliteContextRelay(workerId, options);
+    }
+    return null;
+  }
+
   // --- Auto-commit ---
 
   onAutoCommit(listener: (workerId: string, project: string, files: string[], message: string) => void): void {

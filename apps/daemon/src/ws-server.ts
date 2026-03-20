@@ -52,6 +52,8 @@ export class WsServer {
   // promptType from incoming satellite_workers reports for a short period.
   // Key: "machineId:localWorkerId" → expiry timestamp
   private satelliteOverrides = new Map<string, { until: number; status: string; currentAction: string | null; lastAction: string }>();
+  // Pending satellite context requests: requestId → resolver
+  private pendingSatelliteRequests = new Map<string, { resolve: (data: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
 
   constructor(
     telemetry: TelemetryReceiver,
@@ -116,6 +118,15 @@ export class WsServer {
       (machineId, requires) => this.machineHasCapabilities(machineId, requires),
       (requires, preferMachine) => this.findCapableMachine(requires, preferMachine),
     );
+
+    // Satellite context relay: let the REST API query satellite workers' context
+    this.telemetry.setSatelliteContextRelay(async (workerId, options) => {
+      const sat = this.getSatelliteForWorker(workerId);
+      if (!sat) return null;
+      const parsed = this.parseSatelliteWorker(workerId);
+      if (!parsed) return null;
+      return this.requestSatelliteContext(sat, workerId, parsed.localId, options);
+    });
 
     // Auto-commit: forward satellite commit requests to the correct satellite machine
     this.telemetry.onAutoCommit((workerId, project, files, message) => {
@@ -373,6 +384,31 @@ export class WsServer {
     }
   }
 
+  /** Request worker context from a satellite. Returns the context or null on timeout. */
+  private requestSatelliteContext(
+    sat: SatelliteConnection,
+    workerId: string,
+    localId: string,
+    options: { includeHistory?: boolean; historyLimit?: number },
+  ): Promise<unknown> {
+    return new Promise((resolve) => {
+      const requestId = `ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const timer = setTimeout(() => {
+        this.pendingSatelliteRequests.delete(requestId);
+        resolve(null);
+      }, 10_000);
+      this.pendingSatelliteRequests.set(requestId, { resolve, timer });
+      this.sendToSatellite(sat, {
+        type: "satellite_context",
+        requestId,
+        workerId,
+        localWorkerId: localId,
+        includeHistory: options.includeHistory ?? false,
+        historyLimit: options.historyLimit ?? 6,
+      });
+    });
+  }
+
   /** Handle messages from a satellite connection. */
   private handleSatelliteMessage(ws: WebSocket, machineId: string, msg: Record<string, unknown>): void {
     if (msg.type !== "satellite_workers") {
@@ -486,9 +522,25 @@ export class WsServer {
 
         try {
           const result = this.handleApiRelay(method, path, body, machineId);
-          this.sendToSatellite(sat, { type: "satellite_api_response", requestId, data: result });
+          // handleApiRelay may return a Promise for satellite context queries
+          Promise.resolve(result).then(
+            (data) => this.sendToSatellite(sat, { type: "satellite_api_response", requestId, data }),
+            (err) => this.sendToSatellite(sat, { type: "satellite_api_response", requestId, data: { error: err instanceof Error ? err.message : "Unknown error" } }),
+          );
         } catch (err) {
           this.sendToSatellite(sat, { type: "satellite_api_response", requestId, data: { error: err instanceof Error ? err.message : "Unknown error" } });
+        }
+        break;
+      }
+
+      case "satellite_context_response": {
+        // Satellite responded to a context query from requestSatelliteContext()
+        const ctxReqId = msg.requestId as string;
+        const pending = this.pendingSatelliteRequests.get(ctxReqId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.pendingSatelliteRequests.delete(ctxReqId);
+          pending.resolve(msg.context ?? msg);
         }
         break;
       }
@@ -549,6 +601,10 @@ export class WsServer {
           historyLimit: Number.isFinite(historyLimit) ? Math.max(1, Math.min(12, historyLimit)) : 6,
         };
         if (workerId) {
+          // For satellite workers, use async relay (returns a promise)
+          if (workerId.includes(":")) {
+            return this.telemetry.getWorkerContextAsync(workerId, options);
+          }
           return this.telemetry.getWorkerContext(workerId, options) || { error: `Worker ${workerId} not found` };
         }
         return this.telemetry.getWorkerContexts({
