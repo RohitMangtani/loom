@@ -120,9 +120,11 @@ export class NotificationManager {
     this.lastNotified.set(workerId, now);
 
     const label = state.tty || workerId.slice(0, 10);
+    const machine = state.machineLabel || state.machine;
+    const machineTag = machine ? ` @${machine}` : "";
     const project = state.projectName || "unknown";
     const action = state.stuckMessage?.split("\n")[0]?.slice(0, 80) || state.currentAction || "Needs attention";
-    const title = `Hive: ${label} stuck`;
+    const title = `Hive: ${label}${machineTag} stuck`;
     const body = `${project} — ${action}`;
 
     try {
@@ -146,9 +148,11 @@ export class NotificationManager {
     this.lastPushed.set(workerId, now);
 
     const slot = state.quadrant ? `Q${state.quadrant}` : (state.tty || workerId.slice(0, 8));
+    const machine = state.machineLabel || state.machine;
+    const machineTag = machine ? ` @${machine}` : "";
     const project = state.projectName || "unknown";
     const action = state.lastAction?.slice(0, 100) || "Task complete";
-    const title = `${slot} done`;
+    const title = `${slot} done${machineTag}`;
     const body = `${project} — ${action}`;
 
     this.pushMgr
