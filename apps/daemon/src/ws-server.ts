@@ -28,6 +28,7 @@ function getLocalVersion(): string {
 }
 
 const LOCAL_MACHINE_LABEL = osHostname();
+const TUNNEL_FILE = join(homedir(), ".hive", "tunnel-url.txt");
 
 /** Satellite connection state */
 interface SatelliteConnection {
@@ -57,6 +58,7 @@ export class WsServer {
   private lastWorkersSnapshot: string | null = null;
   private lastModelsSnapshot: string | null = null;
   private lastMachinesSnapshot: string | null = null;
+  private lastBroadcastPrimaryUrl: string | null = null;
   private pushMgr: WebPushManager | null = null;
 
   // Satellite connections: machineId → connection
@@ -421,6 +423,30 @@ export class WsServer {
     this.broadcast({ type: "machines", machines });
   }
 
+  private getCurrentPrimaryWsUrl(): string | null {
+    try {
+      if (!existsSync(TUNNEL_FILE)) return null;
+      const raw = readFileSync(TUNNEL_FILE, "utf-8");
+      const httpsUrl = raw.match(/https:\/\/[^\s]+/)?.[0] || raw.trim();
+      if (!httpsUrl.startsWith("https://")) return null;
+      return httpsUrl.replace("https://", "wss://");
+    } catch {
+      return null;
+    }
+  }
+
+  private broadcastPrimaryUrlIfChanged(): void {
+    const primaryUrl = this.getCurrentPrimaryWsUrl();
+    if (!primaryUrl || primaryUrl === this.lastBroadcastPrimaryUrl) return;
+    this.lastBroadcastPrimaryUrl = primaryUrl;
+    for (const sat of this.satellites.values()) {
+      this.sendToSatellite(sat, {
+        type: "satellite_primary_url",
+        primaryUrl,
+      });
+    }
+  }
+
   /** Forward a command to a satellite. */
   private sendToSatellite(sat: SatelliteConnection, msg: Record<string, unknown>): void {
     if (sat.ws.readyState === WebSocket.OPEN) {
@@ -685,6 +711,13 @@ export class WsServer {
 
         // Notify dashboard clients about the new satellite
         this.broadcastMachines();
+        const primaryUrl = this.getCurrentPrimaryWsUrl();
+        if (primaryUrl) {
+          this.sendToSatellite(sat, {
+            type: "satellite_primary_url",
+            primaryUrl,
+          });
+        }
         break;
       }
 
@@ -1479,6 +1512,7 @@ export class WsServer {
    *  so the dashboard stays current even when status changes come from
    *  discovery (JSONL/CPU analysis) instead of hooks. */
   pushState(): void {
+    this.broadcastPrimaryUrlIfChanged();
     // Expire stale satellites: if no satellite_workers received in 30s,
     // the machine is likely asleep or disconnected. Remove it so tiles
     // disappear promptly instead of ghosting until the TCP close fires.

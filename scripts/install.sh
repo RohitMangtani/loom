@@ -137,8 +137,12 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   # Store primary connection info
   mkdir -p "$HOME/.hive"
   echo "$PRIMARY_URL" > "$HOME/.hive/primary-url"
+  {
+    echo "$PRIMARY_URL"
+    [ -f "$HOME/.hive/primary-urls.txt" ] && cat "$HOME/.hive/primary-urls.txt"
+  } | awk 'NF && !seen[$0]++' | head -5 > "$HOME/.hive/primary-urls.txt"
   echo "$PRIMARY_TOKEN" > "$HOME/.hive/primary-token"
-  chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-token"
+  chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-urls.txt" "$HOME/.hive/primary-token"
   echo "  ✓ Primary connection stored"
 
   echo "  Cleaning existing Hive satellite runtime..."

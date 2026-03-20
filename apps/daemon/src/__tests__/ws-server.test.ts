@@ -501,10 +501,13 @@ describe("WsServer pushState", () => {
       { includeHistory: true, historyLimit: 4 },
     );
 
-    const sent = JSON.parse((satelliteWs.send as unknown as { mock: { calls: [string][] } }).mock.calls[1]![0]);
+    const sent = (satelliteWs.send as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([raw]) => JSON.parse(raw) as Record<string, unknown>)
+      .find((msg) => msg.type === "satellite_context");
+    expect(sent).toBeTruthy();
     server.handleSatelliteMessage(satelliteWs, "remote-mac", {
       type: "satellite_context_response",
-      requestId: sent.requestId,
+      requestId: sent!.requestId,
       context: {
         workerId: "remote-mac:rw1",
         status: "working",

@@ -70,6 +70,7 @@ interface SatelliteUpMessage {
 interface SatelliteDownMessage {
   type: string;
   requestId?: string;
+  primaryUrl?: string;
   action?: string;
   workerId?: string;      // prefixed ID (machineId:localId)
   localWorkerId?: string; // local ID on this machine
@@ -184,6 +185,8 @@ function detectCapabilities(): MachineCapabilities {
 
 export class SatelliteClient {
   private primaryUrl: string;
+  private primaryUrlCandidates: string[] = [];
+  private primaryUrlIndex = 0;
   private token: string;
   private machineId: string;
   private capabilities: MachineCapabilities;
@@ -225,6 +228,81 @@ export class SatelliteClient {
 
     // Patch hook URLs so local Claude instances report to local telemetry
     patchHookUrls(localToken);
+    this.rememberPrimaryUrl(primaryUrl, true);
+  }
+
+  private normalizePrimaryUrl(url: string): string {
+    const trimmed = url.trim();
+    if (trimmed.startsWith("https://")) return trimmed.replace("https://", "wss://");
+    return trimmed;
+  }
+
+  private rememberPrimaryUrl(url: string, prioritize = false): void {
+    const normalized = this.normalizePrimaryUrl(url);
+    if (!normalized) return;
+    const hiveDir = join(homedir(), ".hive");
+    const urlsFile = join(hiveDir, "primary-urls.txt");
+    const merged = [
+      ...(prioritize ? [normalized] : []),
+      ...this.primaryUrlCandidates,
+      ...(() => {
+        try {
+          if (!existsSync(urlsFile)) return [];
+          return readFileSync(urlsFile, "utf-8").split("\n").map((line) => this.normalizePrimaryUrl(line)).filter(Boolean);
+        } catch {
+          return [];
+        }
+      })(),
+      ...(!prioritize ? [normalized] : []),
+    ].filter(Boolean);
+    this.primaryUrlCandidates = Array.from(new Set(merged)).slice(0, 5);
+    this.primaryUrlIndex = this.primaryUrlCandidates.indexOf(normalized);
+    if (this.primaryUrlIndex < 0) this.primaryUrlIndex = 0;
+    this.primaryUrl = normalized;
+    try {
+      mkdirSync(hiveDir, { recursive: true });
+      writeFileSync(join(hiveDir, "primary-url"), `${normalized}\n`);
+      writeFileSync(urlsFile, `${this.primaryUrlCandidates.join("\n")}\n`);
+    } catch {
+      // Best-effort persistence.
+    }
+  }
+
+  private loadPrimaryUrlCandidates(): void {
+    const hiveDir = join(homedir(), ".hive");
+    const primaryUrlFile = join(hiveDir, "primary-url");
+    const urlsFile = join(hiveDir, "primary-urls.txt");
+    const candidates = [
+      this.primaryUrl,
+      ...(() => {
+        try {
+          return existsSync(primaryUrlFile) ? [readFileSync(primaryUrlFile, "utf-8")] : [];
+        } catch {
+          return [];
+        }
+      })(),
+      ...(() => {
+        try {
+          return existsSync(urlsFile) ? readFileSync(urlsFile, "utf-8").split("\n") : [];
+        } catch {
+          return [];
+        }
+      })(),
+    ].map((value) => this.normalizePrimaryUrl(value)).filter(Boolean);
+
+    if (candidates.length === 0) return;
+    this.primaryUrlCandidates = Array.from(new Set(candidates)).slice(0, 5);
+    const currentIndex = this.primaryUrlCandidates.indexOf(this.primaryUrl);
+    this.primaryUrlIndex = currentIndex >= 0 ? currentIndex : 0;
+    this.primaryUrl = this.primaryUrlCandidates[this.primaryUrlIndex]!;
+  }
+
+  private rotatePrimaryUrlCandidate(): void {
+    this.loadPrimaryUrlCandidates();
+    if (this.primaryUrlCandidates.length <= 1) return;
+    this.primaryUrlIndex = (this.primaryUrlIndex + 1) % this.primaryUrlCandidates.length;
+    this.primaryUrl = this.primaryUrlCandidates[this.primaryUrlIndex]!;
+    console.log(`[satellite] Trying alternate primary URL: ${this.primaryUrl}`);
   }
 
   start(): void {
@@ -276,19 +354,7 @@ export class SatelliteClient {
       return;
     }
 
-    // Re-read primary URL from disk on each reconnect attempt.
-    // If the primary restarted with a new tunnel URL and the user
-    // re-ran install --connect, this picks up the updated URL.
-    try {
-      const urlFile = join(homedir(), ".hive", "primary-url");
-      if (existsSync(urlFile)) {
-        const diskUrl = readFileSync(urlFile, "utf-8").trim();
-        if (diskUrl && diskUrl !== this.primaryUrl) {
-          console.log(`[satellite] Primary URL changed: ${this.primaryUrl} → ${diskUrl}`);
-          this.primaryUrl = diskUrl;
-        }
-      }
-    } catch { /* keep current URL */ }
+    this.loadPrimaryUrlCandidates();
 
     const sep = this.primaryUrl.includes("?") ? "&" : "?";
     const url = `${this.primaryUrl}${sep}token=${encodeURIComponent(this.token)}&satellite=${encodeURIComponent(this.machineId)}`;
@@ -383,6 +449,7 @@ export class SatelliteClient {
       return;
     }
 
+    this.rotatePrimaryUrlCandidate();
     this.scheduleReconnect();
   }
 
@@ -962,6 +1029,13 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           const localSlots = slots.map((s, i) => ({ ...s, quadrant: i + 1 }));
           arrangeTerminalWindows(localSlots);
           updateTerminalTitles(localSlots);
+        }
+        break;
+      }
+
+      case "satellite_primary_url": {
+        if (msg.primaryUrl) {
+          this.rememberPrimaryUrl(msg.primaryUrl, true);
         }
         break;
       }
