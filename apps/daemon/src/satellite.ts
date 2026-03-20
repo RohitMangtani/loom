@@ -832,6 +832,15 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
                 else { console.log(`[satellite] git pull: ${(stdout || "").trim()}`); resolve(); }
               });
           });
+          // Build after pull so compiled JS matches pulled source
+          const npxPath = process.env.NPX_PATH || "npx";
+          await new Promise<void>((resolve, reject) => {
+            execFile(npxPath, ["tsc"], { cwd: join(repoDir, "apps/daemon"), timeout: 30_000 },
+              (err) => {
+                if (err) { console.log(`[satellite] build warning: ${err.message.slice(0, 100)}`); resolve(); }
+                else { console.log("[satellite] rebuild complete"); resolve(); }
+              });
+          });
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
           // Restart: give time for the result to send, then exit.
           // The process supervisor (launchd/systemd/pm2) or install.sh wrapper
