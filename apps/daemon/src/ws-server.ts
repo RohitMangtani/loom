@@ -460,16 +460,25 @@ export class WsServer {
       case "satellite_hello": {
         const caps = msg.capabilities as MachineCapabilities | undefined;
         const satVersion = (msg.version as string) || "unknown";
-        const sat: SatelliteConnection = {
-          ws,
-          machineId,
-          hostname: (msg.hostname as string) || machineId,
-          workers: [],
-          connectedAt: Date.now(),
-          lastSeen: Date.now(),
-          capabilities: caps,
-          version: satVersion,
-        };
+        const existing = this.satellites.get(machineId);
+        const sat: SatelliteConnection = existing?.ws === ws
+          ? existing
+          : {
+              ws,
+              machineId,
+              hostname: (msg.hostname as string) || machineId,
+              workers: existing?.workers || [],
+              connectedAt: Date.now(),
+              lastSeen: Date.now(),
+              capabilities: caps,
+              version: satVersion,
+            };
+        sat.ws = ws;
+        sat.hostname = (msg.hostname as string) || machineId;
+        sat.connectedAt = Date.now();
+        sat.lastSeen = Date.now();
+        sat.capabilities = caps;
+        sat.version = satVersion;
         this.satellites.set(machineId, sat);
         const capSummary = caps ? Object.entries(caps).filter(([, v]) => v === true).map(([k]) => k).join(", ") : "none";
         console.log(`[satellite] "${machineId}" registered (hostname: ${sat.hostname}, version: ${satVersion}, capabilities: ${capSummary})`);
@@ -661,6 +670,11 @@ export class WsServer {
   }
 
   private registerSatelliteSocket(ws: WebSocket, machineId: string): void {
+    const existingSat = this.satellites.get(machineId);
+    if (existingSat && existingSat.ws !== ws) {
+      existingSat.ws = ws;
+      existingSat.lastSeen = Date.now();
+    }
     for (const [existingWs, existingMachineId] of this.satelliteWs.entries()) {
       if (existingMachineId !== machineId || existingWs === ws) continue;
       console.log(`[satellite] Closing duplicate connection for "${machineId}"`);
