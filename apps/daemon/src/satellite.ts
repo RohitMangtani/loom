@@ -537,6 +537,56 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
             tty: result.tty,
             model,
           });
+
+          // Match local spawn behavior: poll the new terminal immediately so
+          // trust/sandbox prompts and missing-CLI errors surface before the
+          // next discovery tick.
+          let polls = 0;
+          const maxPolls = 13; // ~20 seconds
+          const pollTimer = setInterval(() => {
+            polls++;
+            const current = this.telemetry.get(placeholderId);
+            if (!current) {
+              clearInterval(pollTimer);
+              return;
+            }
+
+            const content = this.discovery.readTerminalContent(result.tty!);
+            if (content) {
+              const tail = content.slice(-500);
+              if (tail.match(/command not found|not found:.*(?:claude|codex|openclaw)|No such file or directory/i)) {
+                const cliName = model.charAt(0).toUpperCase() + model.slice(1);
+                current.status = "idle";
+                current.currentAction = `${cliName} CLI not installed`;
+                current.lastAction = `${cliName} CLI not installed`;
+                current.terminalPreview = `${cliName} is not installed on this machine. Install it first, then try again.`;
+                this.telemetry.notifyExternal(current);
+                clearInterval(pollTimer);
+                setTimeout(() => {
+                  const still = this.telemetry.get(placeholderId);
+                  if (still && still.pid === 0) {
+                    this.telemetry.removeWorker(placeholderId);
+                  }
+                }, 10_000);
+                return;
+              }
+            }
+
+            const prompt = this.discovery.detectPrompt(result.tty!);
+            if (prompt) {
+              current.status = "waiting";
+              current.promptType = prompt.type;
+              current.promptMessage = prompt.message;
+              current.currentAction = prompt.message;
+              current.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
+              this.telemetry.notifyExternal(current);
+            }
+
+            if (polls >= maxPolls) {
+              clearInterval(pollTimer);
+            }
+          }, 1500);
+
           // Auto-remove placeholder after 20s if discovery hasn't replaced it
           setTimeout(() => {
             const still = this.telemetry.get(placeholderId);
