@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
+import { hostname, tmpdir } from "os";
 import { join } from "path";
 import { WsServer } from "../ws-server.js";
+
+const LOCAL_HOSTNAME = hostname();
 
 type RemovalHandler = () => void;
 type UpdateHandler = (workerId: string, worker: unknown) => void;
@@ -101,11 +103,11 @@ describe("WsServer pushState", () => {
     expect(workersCalls).toHaveLength(2);
     expect(workersCalls[0]).toEqual({
       type: "workers",
-      workers: [{ id: "w1", status: "idle", machineLabel: "Rohits-Mac-mini.local" }],
+      workers: [{ id: "w1", status: "idle", machineLabel: LOCAL_HOSTNAME }],
     });
     expect(workersCalls[1]).toEqual({
       type: "workers",
-      workers: [{ id: "w1", status: "working", machineLabel: "Rohits-Mac-mini.local" }],
+      workers: [{ id: "w1", status: "working", machineLabel: LOCAL_HOSTNAME }],
     });
   });
 
@@ -124,7 +126,7 @@ describe("WsServer pushState", () => {
     expect(workersCalls).toHaveLength(1);
     expect(workersCalls[0]).toEqual({
       type: "workers",
-      workers: [{ id: "w1", status: "idle", machineLabel: "Rohits-Mac-mini.local" }],
+      workers: [{ id: "w1", status: "idle", machineLabel: LOCAL_HOSTNAME }],
     });
   });
 
