@@ -12,6 +12,22 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+cleanup_hive_satellite_runtime() {
+  mkdir -p "$HOME/.hive/runtime" "$HOME/Library/LaunchAgents"
+
+  for plist in "$HOME/Library/LaunchAgents"/com.hive.satellite*.plist; do
+    [ -e "$plist" ] || continue
+    label="$(basename "$plist" .plist)"
+    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || launchctl unload "$plist" 2>/dev/null || true
+    if [ "$plist" != "$HOME/Library/LaunchAgents/com.hive.satellite.plist" ]; then
+      rm -f "$plist"
+    fi
+  done
+
+  pkill -f 'apps/daemon/src/index.ts --satellite|dist/index.js --satellite' 2>/dev/null || true
+  rm -f "$HOME/.hive/runtime/satellite.json"
+}
+
 # ── Parse flags ──────────────────────────────────────────────────────
 
 SATELLITE_MODE=0
@@ -124,6 +140,9 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   echo "$PRIMARY_TOKEN" > "$HOME/.hive/primary-token"
   chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-token"
   echo "  ✓ Primary connection stored"
+
+  echo "  Cleaning existing Hive satellite runtime..."
+  cleanup_hive_satellite_runtime
 
   # Stop any existing daemon on port 3001
   if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then

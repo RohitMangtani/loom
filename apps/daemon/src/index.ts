@@ -16,6 +16,7 @@ import { Collector } from "./collector.js";
 import { OutboxScanner } from "./outbox.js";
 import { loadOrCreateToken, deriveViewerToken, patchHookUrls } from "./auth.js";
 import { SatelliteClient } from "./satellite.js";
+import { acquireRuntimeSingleton } from "./runtime-singleton.js";
 
 // ── Satellite mode ──────────────────────────────────────────────────
 // Usage: npx tsx apps/daemon/src/index.ts --satellite wss://URL TOKEN
@@ -51,6 +52,13 @@ if (satFlagIdx !== -1) {
   ], { timeout: 5000 }, () => { });
 
   const localToken = loadOrCreateToken();
+  const satLock = acquireRuntimeSingleton("satellite", { primaryUrl });
+  if (!satLock.ok) {
+    const owner = satLock.conflict.metadata;
+    const ownerText = owner ? `PID ${owner.pid}` : "another process";
+    console.log(`[satellite] Runtime already owned by ${ownerText}. Exiting duplicate instance.`);
+    process.exit(0);
+  }
   const satellite = new SatelliteClient(primaryUrl, primaryToken, localToken);
   satellite.start();
 
@@ -68,10 +76,12 @@ if (satFlagIdx !== -1) {
 
   const shutdown = () => {
     console.log("\nShutting down satellite...");
+    satLock.claim.release();
     satellite.stop();
     setTimeout(() => process.exit(0), 1000);
   };
 
+  process.on("exit", satLock.claim.release);
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
@@ -88,6 +98,13 @@ if (satFlagIdx !== -1) {
   const token = loadOrCreateToken();
   const viewerToken = deriveViewerToken(token);
   patchHookUrls(token);
+  const daemonLock = acquireRuntimeSingleton("daemon");
+  if (!daemonLock.ok) {
+    const owner = daemonLock.conflict.metadata;
+    const ownerText = owner ? `PID ${owner.pid}` : "another process";
+    console.log(`[daemon] Runtime already owned by ${ownerText}. Exiting duplicate instance.`);
+    process.exit(0);
+  }
 
   const telemetry = new TelemetryReceiver(3001, token);
   const procMgr = new ProcessManager(telemetry);
@@ -152,6 +169,7 @@ if (satFlagIdx !== -1) {
 
   const shutdown = () => {
     console.log("\nShutting down...");
+    daemonLock.claim.release();
     stateStore.save();
     stateStore.stop();
     for (const id of procMgr.listIds()) {
@@ -160,6 +178,7 @@ if (satFlagIdx !== -1) {
     setTimeout(() => process.exit(0), 2000);
   };
 
+  process.on("exit", daemonLock.claim.release);
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 }

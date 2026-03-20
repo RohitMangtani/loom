@@ -11,6 +11,7 @@
     "launch:local": "bash scripts/launch-local.sh",
     "start": "bash apps/daemon/scripts/start.sh",
     "start:satellite": "npx tsx apps/daemon/src/index.ts --satellite",
+    "doctor": "bash scripts/doctor.sh",
     "dev:daemon": "npm -w apps/daemon run dev",
     "dev:dashboard": "npm -w apps/dashboard run dev",
     "build": "turbo build",

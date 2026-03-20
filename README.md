@@ -119,6 +119,8 @@ The tunnel URL and token are printed at the end of the primary install. You can 
 
 Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the Cloudflare tunnel — the machines don't need to be on the same network. The satellite runs as a background service (launchd) — it survives sleep, reboot, and terminal close. If macOS asks you to approve Node.js in System Settings → Privacy & Security, click Allow once.
 
+The connect install is idempotent. Re-running it on the same Mac updates the stored primary URL/token, cleans out stale satellite processes and duplicate launch agents, and re-installs the background service cleanly.
+
 ### Local-only install (no Vercel needed)
 
 If you just want localhost access without deploying anywhere:
@@ -189,6 +191,14 @@ npm run dev:dashboard
 ```
 
 This opens the dashboard at `localhost:3000`.
+
+**Runtime repair**
+```bash
+npm run doctor
+npm run doctor -- --repair-satellite
+```
+
+Use this if a machine was migrated, manually started twice, or has stale launchd/runtime state. Hive now enforces a single primary daemon and a single satellite client per machine, and `doctor` resets drift without removing any dashboard features.
 
 **Agents** (open Terminal.app windows and run any supported CLI you installed)
 ```bash
