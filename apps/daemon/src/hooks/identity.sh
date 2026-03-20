@@ -34,23 +34,46 @@ WORKERS="$HOME/.hive/workers.json"
 [ ! -f "$WORKERS" ] && exit 0
 
 python3 -c "
-import json, sys
+import json, os, sys
+LOCAL_MACHINE = os.uname().nodename
+
+def machine_label(worker):
+    label = worker.get('machineLabel')
+    if label:
+        return label
+    machine = worker.get('machine')
+    if not machine or machine == 'local':
+        return LOCAL_MACHINE
+    return machine
+
+def project_path(worker):
+    return worker.get('project') or worker.get('projectName', '?')
+
 try:
     with open('$WORKERS') as f:
         data = json.load(f)
     me = None
+    fallback_me = None
     peers = []
     for w in data.get('workers', []):
         if w.get('tty') == '$TTY_NAME':
-            me = w
+            if fallback_me is None:
+                fallback_me = w
+            machine = w.get('machine')
+            label = w.get('machineLabel')
+            if not machine or machine == 'local' or label == LOCAL_MACHINE:
+                me = w
         else:
             peers.append(w)
+    if me is None:
+        me = fallback_me
     if not me:
         sys.exit(0)
+    peers = [p for p in data.get('workers', []) if p is not me]
     q = me.get('quadrant', '?')
-    proj = me.get('projectName', '?')
+    tty = me.get('tty', '?')
     model = me.get('model', 'claude')
-    line = f'You are Q{q} ({me.get(\"tty\", \"?\")}, {proj})'
+    line = f'You are Q{q} ({tty}, {model}) @{machine_label(me)} [{project_path(me)}]'
     if peers:
         parts = []
         for p in sorted(peers, key=lambda x: x.get('quadrant', 99)):
@@ -60,7 +83,8 @@ try:
             pproj = p.get('projectName', '?')
             pmodel = p.get('model', 'claude')
             tag = f'[{pmodel}] ' if pmodel != 'claude' else ''
-            parts.append(f'Q{pq} {tag}{st} {pproj}: {act}' if act else f'Q{pq} {tag}{st} {pproj}')
+            summary = f'Q{pq} {tag}{st} @{machine_label(p)} {pproj} [{project_path(p)}]'
+            parts.append(f'{summary}: {act}' if act else summary)
         line += '\nPeers: ' + ' | '.join(parts)
     print(line)
 except Exception:

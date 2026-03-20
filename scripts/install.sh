@@ -294,7 +294,7 @@ echo "  Waiting for tunnel..."
 TUNNEL_URL=""
 for _ in $(seq 1 90); do
   if [ -f "$HOME/.hive/tunnel-url.txt" ]; then
-    TUNNEL_URL="$(grep -Eo 'https://[-a-z0-9.]+trycloudflare.com' "$HOME/.hive/tunnel-url.txt" | head -1 || true)"
+    TUNNEL_URL="$(grep -Eo 'https://[^[:space:]]+' "$HOME/.hive/tunnel-url.txt" | head -1 || true)"
     if [ -n "$TUNNEL_URL" ]; then
       break
     fi

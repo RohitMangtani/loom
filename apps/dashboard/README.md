@@ -29,4 +29,4 @@ npm start
 npm run deploy:dashboard
 ```
 
-`npm start` creates a Cloudflare quick tunnel for the local WebSocket server and writes the public URL to `~/.hive/tunnel-url.txt`. `npm run deploy:dashboard` deploys this app to your Vercel account with that tunnel URL as `NEXT_PUBLIC_WS_URL`.
+`npm start` creates a public tunnel for the local WebSocket server and writes the public URL to `~/.hive/tunnel-url.txt`. `npm run deploy:dashboard` deploys this app to your Vercel account with that tunnel URL as `NEXT_PUBLIC_WS_URL`.

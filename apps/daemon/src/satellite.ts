@@ -249,6 +249,15 @@ export class SatelliteClient {
   }
 
   private connect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     // Re-read primary URL from disk on each reconnect attempt.
     // If the primary restarted with a new tunnel URL and the user
     // re-ran install --connect, this picks up the updated URL.
@@ -267,9 +276,14 @@ export class SatelliteClient {
     const url = `${this.primaryUrl}${sep}token=${encodeURIComponent(this.token)}&satellite=${encodeURIComponent(this.machineId)}`;
 
     console.log(`[satellite] Connecting to primary at ${this.primaryUrl}...`);
-    this.ws = new WebSocket(url);
+    const ws = new WebSocket(url);
+    this.ws = ws;
 
-    this.ws.on("open", () => {
+    ws.on("open", () => {
+      if (this.ws !== ws) {
+        ws.close();
+        return;
+      }
       console.log(`[satellite] Connected to primary as "${this.machineId}"`);
       this.reconnectDelay = 1000;
 
@@ -287,7 +301,8 @@ export class SatelliteClient {
       this.reportWorkers();
     });
 
-    this.ws.on("message", (raw) => {
+    ws.on("message", (raw) => {
+      if (this.ws !== ws) return;
       try {
         const msg: SatelliteDownMessage = JSON.parse(raw.toString());
         this.handleMessage(msg).catch((err) => {
@@ -296,13 +311,19 @@ export class SatelliteClient {
       } catch { /* malformed JSON */ }
     });
 
-    this.ws.on("close", () => {
+    ws.on("close", () => {
+      if (this.ws !== ws) return;
+      this.ws = null;
       console.log(`[satellite] Disconnected. Reconnecting in ${this.reconnectDelay / 1000}s...`);
-      this.reconnectTimer = setTimeout(() => this.connect(), this.reconnectDelay);
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.connect();
+      }, this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30_000);
     });
 
-    this.ws.on("error", () => {
+    ws.on("error", () => {
+      if (this.ws !== ws) return;
       // onclose will fire next — reconnect happens there
     });
   }

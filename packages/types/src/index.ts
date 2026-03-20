@@ -31,8 +31,10 @@ export interface WorkerState {
   promptMessage?: string;
   /** Raw terminal output for agents with no session yet (shows CLI prompts). */
   terminalPreview?: string;
-  /** Machine hostname — set for satellite (remote) workers, undefined for local. */
+  /** Stable machine ID used for routing remote workers. */
   machine?: string;
+  /** Human-readable machine label for peer summaries and workers.json snapshots. */
+  machineLabel?: string;
 }
 
 export interface TelemetryEvent {
@@ -73,6 +75,11 @@ export interface MachineCapabilities {
   platform?: string;
   /** Architecture (arm64, x86_64) */
   arch?: string;
+  /** Projects available on this machine: name → absolute path.
+   *  Auto-detected from git repos + overridable via ~/.hive/capabilities.json.
+   *  Enables path-agnostic dispatch: "work on crawler" resolves to the correct
+   *  local path regardless of which machine runs the task. */
+  projects?: Record<string, string>;
 }
 
 /** A connected satellite machine (sent to dashboard for spawn routing). */

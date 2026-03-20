@@ -5,7 +5,6 @@ import { existsSync, mkdirSync, appendFileSync, readFileSync, readdirSync, statS
 import type { ProcessManager } from "./process-mgr.js";
 import { ProcessDiscovery } from "./discovery.js";
 import type { TelemetryReceiver } from "./telemetry.js";
-import { spawnTerminalWindow } from "./arrange-windows.js";
 
 export function registerApiRoutes(
   app: ReturnType<typeof express>,
@@ -304,46 +303,40 @@ export function registerApiRoutes(
 
   // POST /api/spawn
   app.post("/api/spawn", requireAuth, (req, res) => {
-    const { project, model: rawModel, task, targetQuadrant } = req.body as { project?: string; model?: string; task?: string; targetQuadrant?: number };
-    if (!project) {
-      res.status(400).json({ error: "Missing project" });
-      return;
-    }
-
-    const HOME = process.env.HOME || `/Users/${process.env.USER}`;
-    const resolved = project.startsWith("~/") ? join(HOME, project.slice(2)) : project;
-
-    let realPath: string;
-    try {
-      realPath = realpathSync(resolved);
-    } catch {
-      res.status(400).json({ error: `Project path does not exist: ${resolved}` });
-      return;
-    }
-
-    if (!realPath.startsWith(HOME)) {
-      res.status(403).json({ error: "Project path must be under home directory" });
-      return;
-    }
-
-    if (receiver.getAll().length >= 8) {
-      res.status(409).json({ error: "All 8 slots are occupied" });
-      return;
-    }
-
-    const model = typeof rawModel === "string" && rawModel ? rawModel : "claude";
-    const initMessage = typeof task === "string" && task.trim() ? task.trim() : "hi";
-    const requestedQ = typeof targetQuadrant === "number" && targetQuadrant >= 1 && targetQuadrant <= 8
-      ? targetQuadrant : undefined;
-    const openQ = requestedQ ?? receiver.getFirstOpenQuadrant();
-    const result = spawnTerminalWindow(realPath, model, openQ, initMessage, receiver.getAll().length);
+    const { project, model, task, targetQuadrant, machine } = req.body as {
+      project?: string;
+      model?: string;
+      task?: string;
+      targetQuadrant?: number;
+      machine?: string;
+    };
+    const result = receiver.spawnViaSwarm({ project, model, task, targetQuadrant, machine });
     if (!result.ok) {
-      res.status(500).json({ error: result.error || "Failed to spawn terminal" });
+      const message = typeof result.error === "string" ? result.error : "Failed to spawn worker";
+      const status = message.includes("not connected") ? 404
+        : message.includes("Invalid project path") ? 400
+          : message.includes("All 8 slots") ? 409
+            : 500;
+      res.status(status).json({ error: message });
       return;
     }
-    // Mark TTY as freshly spawned — blank chat until identity hook pins session
-    if (result.tty) receiver.markSpawn(result.tty);
-    res.json({ ok: true, model, project: realPath });
+    res.json(result);
+  });
+
+  // POST /api/kill
+  app.post("/api/kill", requireAuth, (req, res) => {
+    const { workerId } = req.body as { workerId?: string };
+    if (!workerId) {
+      res.status(400).json({ error: "Missing workerId" });
+      return;
+    }
+    const result = receiver.killViaSwarm(workerId);
+    if (!result.ok) {
+      const message = typeof result.error === "string" ? result.error : `Worker ${workerId} not found`;
+      res.status(message.includes("not found") ? 404 : 500).json({ error: message });
+      return;
+    }
+    res.json(result);
   });
 
   // GET /api/models — returns built-in + custom agent types for spawn dialog
@@ -360,23 +353,9 @@ export function registerApiRoutes(
     res.json([...builtIn, ...custom]);
   });
 
-  // GET /api/projects
+  // GET /api/projects — auto-detect git repos in common directories
   app.get("/api/projects", requireAuth, (_req, res) => {
-    const HOME = process.env.HOME || `/Users/${process.env.USER}`;
-    const projectsDir = join(HOME, "factory", "projects");
-    try {
-      const entries = readdirSync(projectsDir);
-      const projects = entries
-        .filter(name => {
-          try {
-            return statSync(join(projectsDir, name)).isDirectory();
-          } catch { return false; }
-        })
-        .map(name => ({ name, path: join(projectsDir, name) }));
-      res.json({ projects });
-    } catch {
-      res.json({ projects: [] });
-    }
+    res.json(receiver.getSwarmProjects());
   });
 
   // GET /api/reviews
@@ -460,11 +439,8 @@ export function registerApiRoutes(
 
   // GET /api/capabilities — list all machine capabilities across the swarm
   app.get("/api/capabilities", requireAuth, (_req, res) => {
-    // This is handled by the catch-all satellite relay for satellites,
-    // and by the ws-server's handleApiRelay for the primary.
-    // For now, return local capabilities + note that satellite caps come via WS.
-    res.json({ note: "Use WS relay or satellite /api/capabilities for full swarm view" });
+    res.json(receiver.getSwarmCapabilities());
   });
 
-  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange, /api/capabilities");
+  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/kill, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange, /api/capabilities");
 }

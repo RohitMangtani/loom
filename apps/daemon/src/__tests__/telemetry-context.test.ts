@@ -7,6 +7,10 @@ const { writeFileSync } = vi.hoisted(() => ({
 const { sendInputToTty } = vi.hoisted(() => ({
   sendInputToTty: vi.fn(() => ({ ok: true })),
 }));
+const { execFileSync, execFile } = vi.hoisted(() => ({
+  execFileSync: vi.fn(),
+  execFile: vi.fn(),
+}));
 
 vi.mock("fs", () => ({
   existsSync: vi.fn(() => false),
@@ -22,12 +26,19 @@ vi.mock("../tty-input.js", () => ({
   sendInputToTty,
 }));
 
+vi.mock("child_process", () => ({
+  execFileSync,
+  execFile,
+}));
+
 describe("TelemetryReceiver worker context", () => {
   let telemetry: TelemetryReceiver;
 
   beforeEach(() => {
     writeFileSync.mockClear();
     sendInputToTty.mockClear();
+    execFileSync.mockClear();
+    execFile.mockClear();
 
     telemetry = new TelemetryReceiver(3001, "token");
     telemetry.setStreamer({
@@ -126,5 +137,77 @@ describe("TelemetryReceiver worker context", () => {
     expect(sendInputToTty.mock.calls[0][1]).toContain("context-messages/msg-");
     expect(sendInputToTty.mock.calls[0][1]).toContain("Read ");
     expect(writeFileSync.mock.calls.some(([path]) => String(path).includes("context-messages/msg-"))).toBe(true);
+  });
+
+  it("dispatches queued tasks to matching satellite workers and resolves project paths per machine", () => {
+    const relay = vi.fn(async () => ({ ok: true }));
+    const remoteWorker = {
+      id: "satellite-1:w_remote",
+      pid: 303,
+      project: "/Users/rohitmangtani/hive",
+      projectName: "hive",
+      status: "idle" as const,
+      currentAction: null,
+      lastAction: "Waiting",
+      lastActionAt: Date.now() - 20_000,
+      errorCount: 0,
+      startedAt: 3,
+      task: null,
+      managed: false,
+      tty: "ttys111",
+      model: "claude",
+      machine: "satellite-1",
+    };
+
+    telemetry.setSatelliteRelay(relay, () => [
+      ...telemetry.getAll(),
+      remoteWorker,
+    ]);
+    telemetry.setSwarmApi(
+      () => ({
+        projects: [
+          {
+            name: "hive",
+            path: "/Users/rmgtni/factory/projects/hive",
+            machines: {
+              local: "/Users/rmgtni/factory/projects/hive",
+              "satellite-1": "/Users/rohitmangtani/hive",
+            },
+          },
+        ],
+      }),
+      () => ({
+        local: { projects: { hive: "/Users/rmgtni/factory/projects/hive" } },
+        "satellite-1": { projects: { hive: "/Users/rohitmangtani/hive" } },
+      }),
+      () => ({ ok: true }),
+      () => ({ ok: true }),
+    );
+
+    telemetry.registerDiscovered("w_other", {
+      id: "w_other",
+      pid: 404,
+      project: "/Users/rmgtni/factory/projects/other",
+      projectName: "other",
+      status: "idle",
+      currentAction: null,
+      lastAction: "Waiting",
+      lastActionAt: Date.now() - 20_000,
+      errorCount: 0,
+      startedAt: 4,
+      task: null,
+      managed: false,
+      tty: "ttys004",
+      model: "claude",
+      quadrant: 4,
+    });
+
+    telemetry.pushTask("Audit satellite queue dispatch", "/Users/rmgtni/factory/projects/hive");
+    telemetry.tick();
+
+    expect(relay).toHaveBeenCalledTimes(1);
+    expect(relay.mock.calls[0]?.[0]).toBe("satellite-1:w_remote");
+    expect(String(relay.mock.calls[0]?.[1])).toContain("Audit satellite queue dispatch");
+    expect(telemetry.getTaskQueue()).toHaveLength(0);
   });
 });

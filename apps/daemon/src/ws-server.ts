@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { URL } from "url";
-import { homedir } from "os";
-import { realpathSync, unlinkSync, readdirSync, statSync } from "fs";
+import { arch, cpus, homedir, hostname as osHostname, platform as osPlatform, totalmem } from "os";
+import { realpathSync, unlinkSync, readdirSync, statSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { ProcessManager } from "./process-mgr.js";
@@ -11,7 +11,21 @@ import { spawnTerminalWindow, closeTerminalWindow } from "./arrange-windows.js";
 import { validateToken } from "./auth.js";
 import { ProcessDiscovery } from "./discovery.js";
 import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState, ConnectedMachine, MachineCapabilities } from "./types.js";
+import { execFileSync } from "child_process";
 import type { WebPushManager } from "./web-push.js";
+import { scanLocalProjects } from "./project-discovery.js";
+
+/** Get the git commit hash of the hive repo (short, 8 chars). */
+function getLocalVersion(): string {
+  try {
+    const repoDir = join(import.meta.dirname, "..", "..", "..");
+    return execFileSync("/usr/bin/git", ["rev-parse", "--short=8", "HEAD"], {
+      cwd: repoDir, timeout: 3000, encoding: "utf-8",
+    }).trim();
+  } catch { return "unknown"; }
+}
+
+const LOCAL_MACHINE_LABEL = osHostname();
 
 /** Satellite connection state */
 interface SatelliteConnection {
@@ -22,6 +36,7 @@ interface SatelliteConnection {
   connectedAt: number;
   lastSeen: number;
   capabilities?: MachineCapabilities;
+  version?: string;
 }
 
 export class WsServer {
@@ -52,8 +67,22 @@ export class WsServer {
   // promptType from incoming satellite_workers reports for a short period.
   // Key: "machineId:localWorkerId" → expiry timestamp
   private satelliteOverrides = new Map<string, { until: number; status: string; currentAction: string | null; lastAction: string }>();
+  // Satellite status smoothing: mirrors discovery.ts hysteresis for remote workers.
+  // Without this, the primary blindly relays whatever the satellite reports every 3s,
+  // causing dashboard flapping (working→idle→working) when the satellite's own detection
+  // catches intermediate states between hysteresis checks.
+  // Key: "machineId:localWorkerId"
+  private satelliteIdleCounts = new Map<string, number>();       // consecutive idle reports
+  private satelliteLastWorking = new Map<string, number>();      // timestamp of last confirmed working
+  private static readonly SAT_IDLE_HYSTERESIS = 2;              // require N consecutive idle reports
+  private static readonly SAT_WORKING_COOLDOWN = 25_000;        // 25s cooldown after last confirmed working
+  // Satellite auto-pilot: track stuck state for grace period + dedup
+  private satelliteAutoApproved = new Set<string>();
+  private satelliteStuckFirstSeen = new Map<string, number>();
   // Pending satellite context requests: requestId → resolver
   private pendingSatelliteRequests = new Map<string, { resolve: (data: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
+  // Satellite handshake race: buffer worker snapshots that arrive before hello.
+  private pendingSatelliteWorkers = new Map<string, WorkerState[]>();
 
   constructor(
     telemetry: TelemetryReceiver,
@@ -98,7 +127,10 @@ export class WsServer {
           localWorkerId: parsed.localId,
           content,
         });
-        // Optimistic update
+        // Optimistic update + clear hysteresis so satellite stays green
+        const satKey = `${sat.machineId}:${parsed.localId}`;
+        this.satelliteIdleCounts.set(satKey, 0);
+        this.satelliteLastWorking.set(satKey, Date.now());
         const remote = sat.workers.find(w => w.id === parsed.localId);
         if (remote) {
           remote.status = "working";
@@ -127,6 +159,13 @@ export class WsServer {
       if (!parsed) return null;
       return this.requestSatelliteContext(sat, workerId, parsed.localId, options);
     });
+
+    this.telemetry.setSwarmApi(
+      () => this.getProjects() as { projects: Array<{ name: string; path: string; machines?: Record<string, string> }> },
+      () => this.getAllCapabilities(),
+      (request) => this.spawnViaControlPlane(request),
+      (workerId, fromMachine) => this.killViaControlPlane(workerId, fromMachine),
+    );
 
     // Auto-commit: forward satellite commit requests to the correct satellite machine
     this.telemetry.onAutoCommit((workerId, project, files, message) => {
@@ -194,7 +233,10 @@ export class WsServer {
 
   /** Get all workers: local + satellite, merged into one list. */
   private getAllWorkers(): WorkerState[] {
-    const local = this.telemetry.getAll();
+    const local = this.telemetry.getAll().map((worker) => ({
+      ...worker,
+      machineLabel: worker.machineLabel || LOCAL_MACHINE_LABEL,
+    }));
     const remote: WorkerState[] = [];
     for (const sat of this.satellites.values()) {
       for (const w of sat.workers) {
@@ -203,6 +245,7 @@ export class WsServer {
           // Prefix ID to ensure global uniqueness
           id: `${sat.machineId}:${w.id}`,
           machine: sat.machineId,
+          machineLabel: sat.hostname,
         });
       }
     }
@@ -332,21 +375,20 @@ export class WsServer {
   private localCapabilities: MachineCapabilities | null = null;
   private detectLocalCapabilities(): MachineCapabilities {
     if (this.localCapabilities) return this.localCapabilities;
-    const { execFileSync } = require("child_process");
-    const { cpus, totalmem, platform, arch } = require("os");
     const caps: MachineCapabilities = {
-      platform: platform(),
+      platform: osPlatform(),
       arch: arch(),
       cpuCores: cpus().length,
       ramGb: Math.round(totalmem() / (1024 ** 3)),
       node: true,
+      projects: scanLocalProjects(homedir()),
     };
     const check = (cmd: string, args: string[]): boolean => {
       try { execFileSync(cmd, args, { timeout: 3000, encoding: "utf-8", stdio: "pipe" }); return true; }
       catch { return false; }
     };
     try {
-      if (platform() === "darwin") {
+      if (osPlatform() === "darwin") {
         const sp = execFileSync("/usr/sbin/system_profiler", ["SPDisplaysDataType"], { timeout: 5000, encoding: "utf-8" });
         caps.gpu = true;
         const m = sp.match(/Chipset Model:\s*(.+)/i) || sp.match(/Chip:\s*(.+)/i);
@@ -361,9 +403,9 @@ export class WsServer {
       caps.tensorflow = check("python3", ["-c", "import tensorflow"]);
     }
     try {
-      const capFile = join(require("os").homedir(), ".hive", "capabilities.json");
-      if (require("fs").existsSync(capFile)) {
-        const custom = JSON.parse(require("fs").readFileSync(capFile, "utf-8"));
+      const capFile = join(homedir(), ".hive", "capabilities.json");
+      if (existsSync(capFile)) {
+        const custom = JSON.parse(readFileSync(capFile, "utf-8"));
         if (custom.tags) caps.tags = custom.tags;
       }
     } catch { /* skip */ }
@@ -417,6 +459,7 @@ export class WsServer {
     switch (msg.type) {
       case "satellite_hello": {
         const caps = msg.capabilities as MachineCapabilities | undefined;
+        const satVersion = (msg.version as string) || "unknown";
         const sat: SatelliteConnection = {
           ws,
           machineId,
@@ -425,57 +468,45 @@ export class WsServer {
           connectedAt: Date.now(),
           lastSeen: Date.now(),
           capabilities: caps,
+          version: satVersion,
         };
         this.satellites.set(machineId, sat);
         const capSummary = caps ? Object.entries(caps).filter(([, v]) => v === true).map(([k]) => k).join(", ") : "none";
-        console.log(`[satellite] "${machineId}" registered (hostname: ${sat.hostname}, capabilities: ${capSummary})`);
+        console.log(`[satellite] "${machineId}" registered (hostname: ${sat.hostname}, version: ${satVersion}, capabilities: ${capSummary})`);
+
+        const pendingWorkers = this.pendingSatelliteWorkers.get(machineId);
+        if (pendingWorkers) {
+          this.pendingSatelliteWorkers.delete(machineId);
+          console.log(`[satellite] Applying buffered workers for "${machineId}" (${pendingWorkers.length})`);
+          this.applySatelliteWorkers(machineId, sat, pendingWorkers);
+        }
+
+        // Auto-update: if satellite is running stale code, tell it to pull + restart.
+        // The satellite handles satellite_update by running git pull --ff-only then
+        // process.exit(0) — its process supervisor restarts it with fresh code.
+        const primaryVersion = getLocalVersion();
+        if (satVersion !== "unknown" && primaryVersion !== "unknown" && satVersion !== primaryVersion) {
+          console.log(`[satellite] "${machineId}" version mismatch: satellite=${satVersion} primary=${primaryVersion} — sending auto-update`);
+          this.sendToSatellite(sat, {
+            type: "satellite_update",
+            requestId: `autoupdate_${Date.now()}`,
+          });
+        }
+
         // Notify dashboard clients about the new satellite
         this.broadcastMachines();
         break;
       }
 
       case "satellite_workers": {
+        const incoming = ((msg.workers as WorkerState[]) || []).map((worker) => ({ ...worker }));
         const sat = this.satellites.get(machineId);
         if (!sat) {
-          console.log(`[satellite] Workers from unknown satellite "${machineId}" — hello not received yet`);
+          this.pendingSatelliteWorkers.set(machineId, incoming);
+          console.log(`[satellite] Buffering workers for "${machineId}" until hello arrives (${incoming.length})`);
           return;
         }
-        sat.lastSeen = Date.now();
-        const prevCount = sat.workers.length;
-        const incoming = (msg.workers as WorkerState[]) || [];
-
-        // Apply overrides: after dashboard approves/selects a satellite worker,
-        // suppress stale promptType from the satellite for a cooldown period.
-        // But if the satellite reports the worker is actually working (no prompt),
-        // respect that — the agent has moved past the prompt.
-        const now = Date.now();
-        for (const w of incoming) {
-          const key = `${machineId}:${w.id}`;
-          const override = this.satelliteOverrides.get(key);
-          if (override) {
-            if (now >= override.until) {
-              // Expired
-              this.satelliteOverrides.delete(key);
-            } else if (w.status === "working" && !w.promptType) {
-              // Agent has moved past the prompt and is working — clear override
-              this.satelliteOverrides.delete(key);
-            } else {
-              // Override still active — clear prompt state and apply dashboard state
-              w.promptType = null;
-              w.promptMessage = undefined;
-              w.status = override.status as WorkerState["status"];
-              w.currentAction = override.currentAction;
-              w.lastAction = override.lastAction;
-            }
-          }
-        }
-
-        sat.workers = incoming;
-        if (sat.workers.length !== prevCount) {
-          console.log(`[satellite] "${machineId}" workers: ${prevCount} → ${sat.workers.length}`);
-        }
-        // Force state push on next tick
-        this.lastWorkersSnapshot = null;
+        this.applySatelliteWorkers(machineId, sat, incoming);
         break;
       }
 
@@ -545,6 +576,105 @@ export class WsServer {
         break;
       }
     }
+  }
+
+  private applySatelliteWorkers(machineId: string, sat: SatelliteConnection, incoming: WorkerState[]): void {
+    sat.lastSeen = Date.now();
+    const prevCount = sat.workers.length;
+
+    // Apply overrides: after dashboard approves/selects a satellite worker,
+    // suppress stale promptType from the satellite for a cooldown period.
+    // But if the satellite reports the worker is actually working (no prompt),
+    // respect that — the agent has moved past the prompt.
+    const now = Date.now();
+    for (const w of incoming) {
+      const key = `${machineId}:${w.id}`;
+      const override = this.satelliteOverrides.get(key);
+      if (override) {
+        if (now >= override.until) {
+          this.satelliteOverrides.delete(key);
+        } else if (w.status === "working" && !w.promptType) {
+          this.satelliteOverrides.delete(key);
+        } else {
+          w.promptType = null;
+          w.promptMessage = undefined;
+          w.status = override.status as WorkerState["status"];
+          w.currentAction = override.currentAction;
+          w.lastAction = override.lastAction;
+        }
+      }
+    }
+
+    // Satellite status smoothing: apply hysteresis to prevent dashboard flapping.
+    // The satellite reports raw status every 3s. Without smoothing, intermediate
+    // states between the satellite's own hysteresis checks leak through, causing
+    // rapid working→idle→working flicker on the dashboard.
+    for (const w of incoming) {
+      const key = `${machineId}:${w.id}`;
+      if (w.status === "working") {
+        this.satelliteIdleCounts.set(key, 0);
+        this.satelliteLastWorking.set(key, now);
+      } else if (w.status === "idle") {
+        const idleCount = (this.satelliteIdleCounts.get(key) || 0) + 1;
+        this.satelliteIdleCounts.set(key, idleCount);
+        const lastWorking = this.satelliteLastWorking.get(key) || 0;
+        const cooldownElapsed = now - lastWorking;
+        if (idleCount < WsServer.SAT_IDLE_HYSTERESIS || cooldownElapsed < WsServer.SAT_WORKING_COOLDOWN) {
+          w.status = "working";
+          w.currentAction = w.currentAction || "Thinking...";
+        }
+      }
+    }
+
+    // Task durability: detect satellite workers that disappeared (died, terminal closed).
+    // If they had a running task, re-queue it so another worker picks it up.
+    const prevIds = new Set(sat.workers.map(w => w.id));
+    const incomingIds = new Set(incoming.map(w => w.id));
+    for (const prevId of prevIds) {
+      if (!incomingIds.has(prevId)) {
+        const prefixedId = `${machineId}:${prevId}`;
+        const requeued = this.telemetry.requeueSatelliteTask(prefixedId);
+        if (requeued) {
+          console.log(`[satellite] Worker "${prefixedId}" died with task "${requeued.id}" — re-queued`);
+        }
+        const key = `${machineId}:${prevId}`;
+        this.satelliteIdleCounts.delete(key);
+        this.satelliteLastWorking.delete(key);
+        this.satelliteOverrides.delete(key);
+      }
+    }
+
+    sat.workers = incoming;
+    if (sat.workers.length !== prevCount) {
+      console.log(`[satellite] "${machineId}" workers: ${prevCount} → ${sat.workers.length}`);
+    }
+    this.lastWorkersSnapshot = null;
+  }
+
+  private registerSatelliteSocket(ws: WebSocket, machineId: string): void {
+    for (const [existingWs, existingMachineId] of this.satelliteWs.entries()) {
+      if (existingMachineId !== machineId || existingWs === ws) continue;
+      console.log(`[satellite] Closing duplicate connection for "${machineId}"`);
+      this.satelliteWs.delete(existingWs);
+      existingWs.close();
+    }
+    this.satelliteWs.set(ws, machineId);
+  }
+
+  private handleSatelliteDisconnect(ws: WebSocket, machineId: string): void {
+    console.log(`[satellite] "${machineId}" disconnected`);
+    if (this.satelliteWs.get(ws) === machineId) {
+      this.satelliteWs.delete(ws);
+    }
+
+    const active = this.satellites.get(machineId);
+    if (active?.ws !== ws) return;
+
+    this.satellites.delete(machineId);
+    this.pendingSatelliteWorkers.delete(machineId);
+    this.lastWorkersSnapshot = null;
+    this.pushState();
+    this.broadcastMachines();
   }
 
   /** Handle a relayed API request from a satellite.
@@ -635,6 +765,7 @@ export class WsServer {
             body.autoCommit as boolean | undefined,
             body.requires as string[] | undefined,
             body.preferMachine as string | undefined,
+            body.model as string | undefined,
           );
           return { ok: true, task: queued, remaining: this.telemetry.getTaskQueueLength() };
         }
@@ -753,6 +884,25 @@ export class WsServer {
       case "models":
         return this.getModels();
 
+      case "spawn":
+        if (method === "POST") {
+          return this.spawnViaControlPlane({
+            project: body?.project as string | undefined,
+            model: body?.model as string | undefined,
+            task: body?.task as string | undefined,
+            targetQuadrant: body?.targetQuadrant as number | undefined,
+            machine: body?.machine as string | undefined,
+            fromMachine,
+          });
+        }
+        return { error: "Method not supported" };
+
+      case "kill":
+        if (method === "POST" && body?.workerId) {
+          return this.killViaControlPlane(body.workerId as string, fromMachine);
+        }
+        return { error: "Missing workerId" };
+
       case "projects":
         return this.getProjects();
 
@@ -785,21 +935,190 @@ export class WsServer {
     return [...builtIn, ...custom];
   }
 
-  /** List available projects (same logic as /api/projects route). */
+  /** List available projects across all machines.
+   *  Scans common directories for git repos on the primary, then merges
+   *  satellite-reported projects. Projects identified by name, resolved
+   *  per-machine — "hive" maps to ~/factory/projects/hive on primary
+   *  and ~/hive on the MacBook Air. Dashboard and task queue use names. */
   private getProjects(): unknown {
-    const HOME = process.env.HOME || `/Users/${process.env.USER}`;
-    const projectsDir = join(HOME, "factory", "projects");
-    try {
-      const entries = readdirSync(projectsDir);
-      const projects = entries
-        .filter(name => {
-          try { return statSync(join(projectsDir, name)).isDirectory(); } catch { return false; }
-        })
-        .map(name => ({ name, path: join(projectsDir, name) }));
-      return { projects };
-    } catch {
-      return { projects: [] };
+    // name → { machines: { machineId: path } }
+    const projectMap = new Map<string, { name: string; machines: Record<string, string> }>();
+
+    // Scan primary machine
+    for (const [name, path] of Object.entries(scanLocalProjects(homedir()))) {
+      if (!projectMap.has(name)) {
+        projectMap.set(name, { name, machines: { local: path } });
+      }
     }
+
+    // Merge satellite projects (from capabilities.projects)
+    for (const [machineId, sat] of this.satellites) {
+      const satProjects = sat.capabilities?.projects;
+      if (!satProjects) continue;
+      for (const [name, path] of Object.entries(satProjects)) {
+        const existing = projectMap.get(name);
+        if (existing) {
+          existing.machines[machineId] = path;
+        } else {
+          projectMap.set(name, { name, machines: { [machineId]: path } });
+        }
+      }
+    }
+
+    const projects = Array.from(projectMap.values()).map(p => ({
+      name: p.name,
+      // Primary path for backward compat (dashboard spawn dialog)
+      path: p.machines["local"] || Object.values(p.machines)[0] || "",
+      machines: p.machines,
+    }));
+    return { projects };
+  }
+
+  private resolveProjectForMachine(machineId: string | undefined, project?: string): string {
+    if (!project || project === "~") return "~";
+    const targetMachine = machineId && machineId !== "local" ? machineId : "local";
+    const projectName = project.split("/").pop() || project;
+    const catalog = this.getProjects() as { projects: Array<{ name: string; path: string; machines?: Record<string, string> }> };
+    const entry = catalog.projects.find((candidate) =>
+      candidate.name === project
+      || candidate.name === projectName
+      || candidate.path === project
+      || Object.values(candidate.machines || {}).includes(project)
+    );
+    return entry?.machines?.[targetMachine] || entry?.path || project;
+  }
+
+  private spawnViaControlPlane(request: {
+    project?: string;
+    model?: string;
+    task?: string;
+    targetQuadrant?: number;
+    machine?: string;
+    fromMachine?: string;
+  }): { ok: boolean; error?: string; model?: string; project?: string; machine?: string } {
+    const targetMachine = request.machine && request.machine !== "local"
+      ? request.machine
+      : (request.fromMachine && request.fromMachine !== "local" ? request.fromMachine : undefined);
+
+    if (targetMachine) {
+      const targetSat = this.satellites.get(targetMachine);
+      if (!targetSat) {
+        return { ok: false, error: `Machine "${targetMachine}" not connected` };
+      }
+      const satProject = this.resolveProjectForMachine(targetMachine, request.project);
+      this.sendToSatellite(targetSat, {
+        type: "satellite_spawn",
+        requestId: `spawn_${Date.now()}`,
+        project: satProject,
+        model: request.model || "claude",
+        initialMessage: request.task?.trim() || undefined,
+        targetQuadrant: request.targetQuadrant,
+      });
+      console.log(`Spawn routed to satellite "${targetMachine}" project="${satProject}" (model=${request.model || "claude"})`);
+      return { ok: true, model: request.model || "claude", project: satProject, machine: targetMachine };
+    }
+
+    const home = homedir();
+    let real: string;
+    if (!request.project || request.project === "~") {
+      real = home;
+    } else {
+      const projectPath = request.project.startsWith("~/")
+        ? request.project.replace("~", home)
+        : request.project;
+      try {
+        real = realpathSync(projectPath);
+      } catch {
+        return { ok: false, error: "Invalid project path" };
+      }
+      if (!real.startsWith(home + "/") && real !== home) {
+        return { ok: false, error: "Invalid project path" };
+      }
+    }
+
+    const model = request.model || "claude";
+    const currentCount = this.telemetry.getAll().length;
+    if (currentCount >= 8) {
+      return { ok: false, error: "All 8 slots are occupied" };
+    }
+    const requestedQ = typeof request.targetQuadrant === "number" && request.targetQuadrant >= 1 && request.targetQuadrant <= 8
+      ? request.targetQuadrant
+      : undefined;
+    const openQ = requestedQ ?? this.telemetry.getFirstOpenQuadrant();
+    const initMessage = request.task?.trim() || undefined;
+    const termResult = spawnTerminalWindow(real, model, openQ, initMessage, this.telemetry.getAll().length);
+    if (!termResult.ok) {
+      return { ok: false, error: termResult.error || "Failed to spawn terminal" };
+    }
+    if (termResult.tty) {
+      this.telemetry.markSpawn(termResult.tty);
+      const spawnTty = termResult.tty;
+      const projectName = real.split("/").pop() || real;
+      const placeholderId = `spawning_${spawnTty.replace("/dev/", "").replace(/\//g, "_")}`;
+      this.telemetry.registerDiscovered(placeholderId, {
+        id: placeholderId,
+        pid: 0,
+        project: real,
+        projectName,
+        status: "waiting" as const,
+        currentAction: "Starting...",
+        lastAction: "Spawning terminal",
+        lastActionAt: Date.now(),
+        errorCount: 0,
+        startedAt: Date.now(),
+        task: null,
+        managed: false,
+        tty: spawnTty,
+        model,
+        terminalPreview: undefined,
+      });
+    }
+    console.log(`Spawned ${model} terminal for ${real} (tty=${termResult.tty})`);
+    return { ok: true, model, project: real, machine: "local" };
+  }
+
+  private killViaControlPlane(workerId: string, _fromMachine?: string): { ok: boolean; error?: string; workerId?: string } {
+    const killSat = this.getSatelliteForWorker(workerId);
+    if (killSat) {
+      const parsed = this.parseSatelliteWorker(workerId);
+      if (!parsed) return { ok: false, error: `Worker ${workerId} not found` };
+      this.sendToSatellite(killSat, {
+        type: "satellite_kill",
+        requestId: `kill_${Date.now()}`,
+        workerId,
+        localWorkerId: parsed.localId,
+      });
+      killSat.workers = killSat.workers.filter(w => w.id !== parsed.localId);
+      this.lastWorkersSnapshot = null;
+      console.log(`Killed satellite worker ${workerId}`);
+      return { ok: true, workerId };
+    }
+
+    const worker = this.telemetry.get(workerId);
+    if (!worker) return { ok: false, error: `Worker ${workerId} not found` };
+    const killPid = worker.pid;
+    const killTty = worker.tty;
+
+    this.procMgr.kill(workerId);
+    if (killPid) {
+      try { process.kill(killPid, "SIGKILL"); } catch { /* already gone */ }
+    }
+    this.telemetry.removeWorker(workerId);
+
+    if (killTty) {
+      const ttyName = killTty.replace("/dev/", "");
+      const markerPath = join(homedir(), ".hive", "sessions", ttyName);
+      try { unlinkSync(markerPath); } catch { /* already gone */ }
+      setTimeout(() => {
+        const result = closeTerminalWindow(killTty);
+        if (!result.ok) {
+          console.log(`[kill] Failed to close terminal ${killTty}: ${result.error}`);
+        }
+      }, 500);
+    }
+
+    console.log(`Killed worker ${workerId} (pid=${killPid}, tty=${killTty})`);
+    return { ok: true, workerId };
   }
 
   /** Push full worker list to all clients. Call from the main tick loop
@@ -813,12 +1132,71 @@ export class WsServer {
     for (const [id, sat] of this.satellites) {
       if (now - sat.lastSeen > 30_000) {
         console.log(`[satellite] "${id}" stale (no report in ${Math.round((now - sat.lastSeen) / 1000)}s) — removing`);
+        // Clean up hysteresis state for this satellite's workers
+        for (const w of sat.workers) {
+          const key = `${id}:${w.id}`;
+          this.satelliteIdleCounts.delete(key);
+          this.satelliteLastWorking.delete(key);
+          this.satelliteOverrides.delete(key);
+        }
         sat.ws.close();
         this.satellites.delete(id);
         this.satelliteWs.delete(sat.ws);
+        this.pendingSatelliteWorkers.delete(id);
         this.lastWorkersSnapshot = null;
         this.broadcastMachines();
       }
+    }
+
+    // Satellite auto-pilot: auto-approve stuck satellite workers.
+    // The primary's AutoPilot only handles local workers (telemetry.getAll()).
+    // Satellite workers report stuck status via satellite_workers — the primary
+    // must forward the approval back via satellite_selection.
+    for (const [machineId, sat] of this.satellites) {
+      for (const w of sat.workers) {
+        if (w.status !== "stuck") continue;
+        const key = `sat_autopilot_${machineId}:${w.id}_${w.lastActionAt || 0}`;
+        if (this.satelliteAutoApproved.has(key)) continue;
+
+        // Grace period: first time seeing this stuck → start timer
+        if (!this.satelliteStuckFirstSeen.has(key)) {
+          this.satelliteStuckFirstSeen.set(key, now);
+          continue;
+        }
+        const waited = now - this.satelliteStuckFirstSeen.get(key)!;
+        if (waited < 3_000) continue; // 3s grace for human intervention
+
+        // Grace expired — auto-approve via satellite_selection (option 0 = first option)
+        const parsed = this.parseSatelliteWorker(`${machineId}:${w.id}`);
+        if (parsed) {
+          this.sendToSatellite(sat, {
+            type: "satellite_selection",
+            requestId: `autopilot_${Date.now()}`,
+            workerId: `${machineId}:${w.id}`,
+            localWorkerId: parsed.localId,
+            optionIndex: 0,
+          });
+          this.satelliteAutoApproved.add(key);
+          this.satelliteStuckFirstSeen.delete(key);
+          // Apply override so dashboard shows working immediately
+          const overrideKey = `${machineId}:${w.id}`;
+          this.satelliteOverrides.set(overrideKey, {
+            until: now + 15_000,
+            status: "working",
+            currentAction: "Thinking...",
+            lastAction: "Auto-approved from primary",
+          });
+          console.log(`[satellite-autopilot] Auto-approved stuck worker "${machineId}:${w.id}" after ${Math.round(waited / 1000)}s`);
+        }
+      }
+    }
+    // Prune old satellite auto-pilot state
+    if (this.satelliteAutoApproved.size > 200) {
+      const arr = Array.from(this.satelliteAutoApproved);
+      this.satelliteAutoApproved = new Set(arr.slice(arr.length - 50));
+    }
+    for (const [k, ts] of this.satelliteStuckFirstSeen) {
+      if (now - ts > 60_000) this.satelliteStuckFirstSeen.delete(k);
     }
 
     const workers = this.getAllWorkers();
@@ -841,6 +1219,7 @@ export class WsServer {
             projectName: w.projectName, status: w.status,
             currentAction: w.currentAction, lastAction: w.lastAction,
             startedAt: w.startedAt, model: w.model || "claude",
+            machine: "local", machineLabel: LOCAL_MACHINE_LABEL,
           });
         }
         // Also include satellite workers from OTHER satellites
@@ -853,7 +1232,7 @@ export class WsServer {
               project: w.project, projectName: w.projectName,
               status: w.status, currentAction: w.currentAction,
               lastAction: w.lastAction, startedAt: w.startedAt,
-              model: w.model || "claude", machine: sat.machineId,
+              model: w.model || "claude", machine: sat.machineId, machineLabel: sat.hostname,
             });
           }
         }
@@ -868,7 +1247,7 @@ export class WsServer {
     // Push satellite worker slots to telemetry for inclusion in workers.json
     // so the primary's identity hook shows cross-machine peers.
     if (this.satellites.size > 0) {
-      const satSlots: Array<{ quadrant: number; id: string; pid: number; tty?: string; project: string; projectName: string; status: string; currentAction: string | null; lastAction: string; startedAt: number; model: string; machine?: string }> = [];
+      const satSlots: Array<{ quadrant: number; id: string; pid: number; tty?: string; project: string; projectName: string; status: string; currentAction: string | null; lastAction: string; startedAt: number; model: string; machine?: string; machineLabel?: string }> = [];
       // Start satellite slots after the highest local quadrant (no gaps)
       const localWorkers = this.telemetry.getAll();
       const maxLocalSlot = localWorkers.reduce((max, w) => Math.max(max, w.quadrant || 0), 0);
@@ -888,6 +1267,7 @@ export class WsServer {
             startedAt: w.startedAt,
             model: w.model || "claude",
             machine: sat.machineId,
+            machineLabel: sat.hostname,
           });
         }
       }
@@ -934,7 +1314,7 @@ export class WsServer {
       // ── Satellite connection ──────────────────────────────────
       if (satelliteId && isAdmin) {
         console.log(`[satellite] "${satelliteId}" connected`);
-        this.satelliteWs.set(ws, satelliteId);
+        this.registerSatelliteSocket(ws, satelliteId);
 
         ws.on("message", (raw) => {
           try {
@@ -943,16 +1323,7 @@ export class WsServer {
           } catch { /* malformed */ }
         });
 
-        ws.on("close", () => {
-          console.log(`[satellite] "${satelliteId}" disconnected`);
-          this.satellites.delete(satelliteId);
-          this.satelliteWs.delete(ws);
-          // Force a state push so dashboard drops the satellite's workers
-          this.lastWorkersSnapshot = null;
-          this.pushState();
-          // Notify dashboard clients that satellite list changed
-          this.broadcastMachines();
-        });
+        ws.on("close", () => this.handleSatelliteDisconnect(ws, satelliteId));
 
         ws.on("error", () => ws.close());
         return;
@@ -1132,14 +1503,26 @@ export class WsServer {
             this.send(ws, { type: "error", error: `Machine "${msg.machine}" not connected` });
             return;
           }
+          // Resolve project to satellite's local path.
+          // msg.project can be a name ("hive"), a primary path, or "~".
+          // Check satellite's capabilities.projects for the name mapping.
+          let satProject = msg.project || "~";
+          if (satProject && satProject !== "~") {
+            const projectName = satProject.split("/").pop() || satProject;
+            const satPath = targetSat.capabilities?.projects?.[projectName];
+            if (satPath) {
+              satProject = satPath;
+            }
+            // If no mapping found, send as-is — satellite handles its own resolution
+          }
           this.sendToSatellite(targetSat, {
             type: "satellite_spawn",
             requestId: `spawn_${Date.now()}`,
-            project: msg.project || "~",
+            project: satProject,
             model: msg.model || "claude",
             initialMessage: msg.task?.trim() || undefined,
           });
-          console.log(`Spawn routed to satellite "${msg.machine}" (model=${msg.model || "claude"})`);
+          console.log(`Spawn routed to satellite "${msg.machine}" project="${satProject}" (model=${msg.model || "claude"})`);
           break;
         }
 
@@ -1372,7 +1755,10 @@ export class WsServer {
             localWorkerId: parsed.localId,
             content: msg.content,
           });
-          // Optimistic update: show working state immediately
+          // Optimistic update + clear hysteresis so satellite stays green
+          const dashSatKey = `${msgSat.machineId}:${parsed.localId}`;
+          this.satelliteIdleCounts.set(dashSatKey, 0);
+          this.satelliteLastWorking.set(dashSatKey, Date.now());
           const msgRemote = msgSat.workers.find(w => w.id === parsed.localId);
           if (msgRemote) {
             msgRemote.status = "working";

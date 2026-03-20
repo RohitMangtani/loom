@@ -165,7 +165,7 @@ You have three supported ways to run Hive:
 npm run launch
 ```
 
-This starts the local daemon on `3001/3002`, opens a free Cloudflare quick tunnel for the WebSocket server, deploys or updates the dashboard to your own Vercel account, opens the hosted dashboard URL, and keeps the daemon and tunnel running in one terminal. On a new machine, run `npx vercel login` once first.
+This starts the local daemon on `3001/3002`, opens the current public tunnel for the WebSocket server, deploys or updates the dashboard to your own Vercel account, opens the hosted dashboard URL, and keeps the daemon and tunnel running in one terminal. On a new machine, run `npx vercel login` once first.
 
 **Local-only fallback**
 ```bash
@@ -236,7 +236,7 @@ This is how you run agents unattended. You give them tasks and walk away. Auto-p
 
 ### Coordination
 Multiple agents can safely work on the same codebase:
-- **Peer awareness** — Claude agents get a one-line summary of what the other agents are doing (status, project, current action) via the identity hook. Codex workers still share the same fleet state through the dashboard, scratchpad, and REST API.
+- **Peer awareness** — Claude agents get a one-line summary of what the other agents are doing via the identity hook, including status, project, current action, machine label, and project path. Codex workers still share the same fleet state through the dashboard, scratchpad, and REST API.
 - **File locks** — acquire advisory locks before editing shared files (`POST /api/locks`)
 - **Conflict detection** — check if another agent recently modified a file (`GET /api/conflicts`)
 - **Scratchpad** — leave ephemeral notes for other agents (`POST /api/scratchpad`), auto-expires in 1 hour
@@ -404,7 +404,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 Claude agents read instructions from `~/.claude/CLAUDE.md` that tell them how to interact with the daemon. Here's what that hook-driven path does automatically:
 
-1. **Identify themselves** — read `~/.hive/workers.json` on startup to find their slot. On every prompt, the identity hook also injects a peer summary showing what the other agents are doing.
+1. **Identify themselves** — read `~/.hive/workers.json` on startup to find their slot. On every prompt, the identity hook also injects a peer summary showing what the other agents are doing, where they are running, and which project path they have open.
 2. **Check learnings** — read `.claude/hive-learnings.md` before starting any task
 3. **Lock files** — acquire locks before editing files other agents might touch
 4. **Write learnings** — persist lessons after solving non-obvious problems
@@ -574,7 +574,7 @@ The app caches itself via service worker, so repeat opens are instant. It works 
 
 For a hosted dashboard, use the current Hive architecture:
 
-1. `npm start` to run the daemon and create a free Cloudflare quick tunnel for `ws://localhost:3002`
+1. `npm start` to run the daemon and create a public tunnel for `ws://localhost:3002`
 2. `npm run deploy:dashboard` to deploy `apps/dashboard` to your own Vercel account using that tunnel URL
 3. Keep `npm start` running while you use the deployed dashboard
 

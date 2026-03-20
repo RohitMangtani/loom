@@ -52,7 +52,7 @@ echo "Waiting for public tunnel URL..."
 TUNNEL_URL=""
 for _ in $(seq 1 60); do
   if [ -f "$TUNNEL_FILE" ]; then
-    TUNNEL_URL="$(grep -Eo 'https://[-a-z0-9.]+trycloudflare.com' "$TUNNEL_FILE" | head -n 1 || true)"
+    TUNNEL_URL="$(grep -Eo 'https://[^[:space:]]+' "$TUNNEL_FILE" | head -n 1 || true)"
     if [ -n "$TUNNEL_URL" ]; then
       break
     fi

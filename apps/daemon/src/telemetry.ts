@@ -1,6 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { randomBytes } from "crypto";
+import { hostname } from "os";
 import { basename, join } from "path";
 import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { describeAction, truncate } from "./utils.js";
@@ -10,7 +11,7 @@ import { validateToken } from "./auth.js";
 import { sendInputToTty, sendInputToTtyAsync } from "./tty-input.js";
 import type { ProcessManager } from "./process-mgr.js";
 import type { ProcessDiscovery } from "./discovery.js";
-import type { ChatEntry, WorkerState, TelemetryEvent } from "./types.js";
+import type { ChatEntry, MachineCapabilities, WorkerState, TelemetryEvent } from "./types.js";
 import { TaskQueue } from "./task-queue.js";
 import type { QueuedTask } from "./task-queue.js";
 import { Scratchpad } from "./scratchpad.js";
@@ -22,9 +23,11 @@ import type { Collector } from "./collector.js";
 import { SuggestionEngine } from "./suggestion-engine.js";
 import { ReviewStore } from "./review-store.js";
 import type { ReviewItem } from "./review-store.js";
+import { scanLocalProjects } from "./project-discovery.js";
 
 const IDLE_THRESHOLD = 30_000;
 const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const LOCAL_MACHINE_LABEL = hostname();
 
 interface QueuedMessage {
   id: string;
@@ -50,6 +53,21 @@ interface WorkerContextOptions {
   includeHistory?: boolean;
   historyLimit?: number;
   artifactLimit?: number;
+}
+
+interface SwarmProjectEntry {
+  name: string;
+  path: string;
+  machines?: Record<string, string>;
+}
+
+interface SwarmSpawnRequest {
+  project?: string;
+  model?: string;
+  task?: string;
+  targetQuadrant?: number;
+  machine?: string;
+  fromMachine?: string;
 }
 
 export interface WorkerContextSnapshot {
@@ -130,7 +148,7 @@ export class TelemetryReceiver {
 
   // Satellite workers injected by ws-server for inclusion in workers.json
   // so the primary's identity hook shows cross-machine peers.
-  private satelliteSlots: Array<{ quadrant: number; id: string; pid: number; tty?: string; project: string; projectName: string; status: string; currentAction: string | null; lastAction: string; startedAt: number; model: string; machine?: string }> = [];
+  private satelliteSlots: Array<{ quadrant: number; id: string; pid: number; tty?: string; project: string; projectName: string; status: string; currentAction: string | null; lastAction: string; startedAt: number; model: string; machine?: string; machineLabel?: string }> = [];
 
   // Dispatch tracking
   private dispatchedTasks = new Map<string, {
@@ -151,6 +169,10 @@ export class TelemetryReceiver {
   // messages to satellite workers (workerId contains "machineId:localId").
   private satelliteMessageRelay: ((workerId: string, content: string, from?: string) => Promise<{ ok: boolean; error?: string }>) | null = null;
   private satelliteAllWorkersGetter: (() => WorkerState[]) | null = null;
+  private swarmProjectsGetter: (() => { projects: SwarmProjectEntry[] }) | null = null;
+  private swarmCapabilitiesGetter: (() => Record<string, MachineCapabilities>) | null = null;
+  private swarmSpawnHandler: ((request: SwarmSpawnRequest) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
+  private swarmKillHandler: ((workerId: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
 
   // Workflow handoffs: workflowId → handoff context from completed steps
   private workflowHandoffs = new Map<string, string[]>();
@@ -195,7 +217,7 @@ export class TelemetryReceiver {
 
   start(): void {
     const app = express();
-    app.use(express.json());
+    app.use(express.json({ limit: "10mb" }));
     this.app = app;
 
     const requireAuth = (req: Request, res: Response, next: NextFunction) => {
@@ -552,11 +574,13 @@ export class TelemetryReceiver {
   }
 
   getWorkerContext(workerId: string, options: WorkerContextOptions = {}): WorkerContextSnapshot | null {
-    const worker = this.get(workerId);
+    const worker = this.getWorkerSnapshot(workerId);
     if (!worker) return null;
 
-    const recentArtifacts = this.getRecentArtifacts(workerId, options.artifactLimit ?? 5);
-    const recentMessages = options.includeHistory === false
+    const hasLocalState = this.workers.has(workerId);
+
+    const recentArtifacts = hasLocalState ? this.getRecentArtifacts(workerId, options.artifactLimit ?? 5) : [];
+    const recentMessages = options.includeHistory === false || !hasLocalState
       ? []
       : this.getRecentMessages(workerId, options.historyLimit ?? 6);
 
@@ -598,11 +622,11 @@ export class TelemetryReceiver {
     } = {},
   ): string {
     const contextIds = new Set<string>();
-    if (options.includeSenderContext !== false && options.fromWorkerId && this.get(options.fromWorkerId)) {
+    if (options.includeSenderContext !== false && options.fromWorkerId && this.getWorkerSnapshot(options.fromWorkerId)) {
       contextIds.add(options.fromWorkerId);
     }
     for (const workerId of options.contextWorkerIds || []) {
-      if (this.get(workerId)) contextIds.add(workerId);
+      if (this.getWorkerSnapshot(workerId)) contextIds.add(workerId);
     }
     contextIds.delete(targetWorkerId);
 
@@ -660,7 +684,7 @@ export class TelemetryReceiver {
   // --- Dispatch tracking ---
 
   trackDispatch(workerId: string, taskBrief: string, taskId?: string, workflowId?: string, fromWorkerId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean): void {
-    const worker = this.workers.get(workerId);
+    const worker = this.getWorkerSnapshot(workerId);
     const project = worker?.project || "";
     this.dispatchedTasks.set(workerId, {
       task: taskBrief.slice(0, 200),
@@ -677,7 +701,7 @@ export class TelemetryReceiver {
 
   private checkCompletedDispatches(): void {
     for (const [workerId, dispatch] of this.dispatchedTasks) {
-      const worker = this.workers.get(workerId);
+      const worker = this.getWorkerSnapshot(workerId);
       if (!worker) {
         if (dispatch.taskId) {
           this.taskQueue.requeueRunningTask(workerId);
@@ -892,6 +916,87 @@ export class TelemetryReceiver {
   getAllWorkersIncludingSatellites(): WorkerState[] {
     if (this.satelliteAllWorkersGetter) return this.satelliteAllWorkersGetter();
     return this.getAll();
+  }
+
+  setSwarmApi(
+    projectsGetter: () => { projects: SwarmProjectEntry[] },
+    capabilitiesGetter: () => Record<string, MachineCapabilities>,
+    spawnHandler: (request: SwarmSpawnRequest) => { ok: boolean; error?: string; [key: string]: unknown },
+    killHandler: (workerId: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown },
+  ): void {
+    this.swarmProjectsGetter = projectsGetter;
+    this.swarmCapabilitiesGetter = capabilitiesGetter;
+    this.swarmSpawnHandler = spawnHandler;
+    this.swarmKillHandler = killHandler;
+  }
+
+  getSwarmProjects(): { projects: SwarmProjectEntry[] } {
+    if (this.swarmProjectsGetter) return this.swarmProjectsGetter();
+    const projects = Object.entries(scanLocalProjects(HOME)).map(([name, path]) => ({
+      name,
+      path,
+      machines: { local: path },
+    }));
+    return { projects };
+  }
+
+  getSwarmCapabilities(): Record<string, MachineCapabilities> {
+    if (this.swarmCapabilitiesGetter) return this.swarmCapabilitiesGetter();
+    return {
+      local: {
+        node: true,
+        projects: scanLocalProjects(HOME),
+      },
+    };
+  }
+
+  spawnViaSwarm(request: SwarmSpawnRequest): { ok: boolean; error?: string; [key: string]: unknown } {
+    if (!this.swarmSpawnHandler) return { ok: false, error: "Spawn control not available" };
+    return this.swarmSpawnHandler(request);
+  }
+
+  killViaSwarm(workerId: string, fromMachine?: string): { ok: boolean; error?: string; [key: string]: unknown } {
+    if (!this.swarmKillHandler) return { ok: false, error: "Kill control not available" };
+    return this.swarmKillHandler(workerId, fromMachine);
+  }
+
+  private getWorkerSnapshot(workerId: string): WorkerState | undefined {
+    return this.workers.get(workerId) || this.satelliteAllWorkersGetter?.().find((worker) => worker.id === workerId);
+  }
+
+  private isRemoteWorker(workerId: string, worker?: WorkerState): boolean {
+    return !!worker?.machine || workerId.includes(":");
+  }
+
+  private resolveProjectForMachine(project: string, machine?: string): string {
+    if (!project) return project;
+    const normalizedMachine = machine || "local";
+    const normalizedProject = project.startsWith("~/")
+      ? join(HOME, project.slice(2))
+      : project;
+    const projectName = basename(normalizedProject);
+    for (const entry of this.getSwarmProjects().projects) {
+      if (
+        entry.name === project ||
+        entry.name === projectName ||
+        entry.path === normalizedProject ||
+        entry.machines?.local === normalizedProject ||
+        Object.values(entry.machines || {}).includes(normalizedProject)
+      ) {
+        return entry.machines?.[normalizedMachine] || entry.path || normalizedProject;
+      }
+    }
+    return normalizedProject;
+  }
+
+  private workerMatchesProject(worker: WorkerState, taskProject?: string): boolean {
+    if (!taskProject) return true;
+    const resolvedProject = this.resolveProjectForMachine(taskProject, worker.machine);
+    return worker.project === resolvedProject
+      || worker.project.startsWith(resolvedProject + "/")
+      || worker.project.includes(taskProject)
+      || worker.projectName === taskProject
+      || worker.projectName === basename(taskProject);
   }
 
   // Satellite context relay: registered by ws-server
@@ -1316,7 +1421,7 @@ export class TelemetryReceiver {
       quadrant: number; id: string; pid: number; tty: string | undefined;
       project: string; projectName: string; status: string;
       currentAction: string | null; lastAction: string; startedAt: number;
-      model: string; lastDirection?: string; contextSummary?: string;
+      model: string; machine?: string; machineLabel?: string; lastDirection?: string; contextSummary?: string;
     }> = [];
     for (const w of workers) {
       const q = this.quadrantAssignments.get(w.id);
@@ -1327,6 +1432,8 @@ export class TelemetryReceiver {
         project: w.project, projectName: w.projectName, status: w.status,
         currentAction: w.currentAction, lastAction: w.lastAction, startedAt: w.startedAt,
         model: w.model || "claude",
+        machine: "local",
+        machineLabel: LOCAL_MACHINE_LABEL,
         lastDirection: w.lastDirection,
         contextSummary: context?.contextSummary,
       });
@@ -1496,17 +1603,18 @@ export class TelemetryReceiver {
       autoCommit?: boolean;
     },
   ): { ok: true; queued?: boolean; id?: string; position?: number } | { ok: false; error: string } {
-    const worker = this.get(workerId);
+    const worker = this.getWorkerSnapshot(workerId);
     if (!worker) {
       return { ok: false, error: `Worker ${workerId} not found` };
     }
+    const remoteWorker = this.isRemoteWorker(workerId, worker) && !this.workers.has(workerId);
 
     const contentWithContext = this.composeMessageWithContext(workerId, content, {
       fromWorkerId: options.fromWorkerId,
       contextWorkerIds: options.contextWorkerIds,
       includeSenderContext: options.includeSenderContext,
     });
-    const deliverableContent = worker.tty
+    const deliverableContent = worker.tty && !remoteWorker
       ? this.prepareTtyPayload(worker, contentWithContext)
       : contentWithContext;
 
@@ -1544,7 +1652,15 @@ export class TelemetryReceiver {
     }
 
     let error: string | undefined;
-    if (worker.managed) {
+    if (remoteWorker) {
+      if (!this.satelliteMessageRelay) {
+        error = `No satellite relay registered for ${workerId}`;
+      } else {
+        this.satelliteMessageRelay(workerId, payload, options.source).catch((err) => {
+          console.log(`[satellite-message] ${workerId}: ${err instanceof Error ? err.message : err}`);
+        });
+      }
+    } else if (worker.managed) {
       if (!this.processManager) {
         error = `Worker ${workerId} is managed, but no process manager is registered`;
       } else {
@@ -1594,14 +1710,16 @@ export class TelemetryReceiver {
       return { ok: false, error };
     }
 
-    worker.status = "working";
-    worker.currentAction = "Thinking...";
-    worker.lastAction = options.lastAction || "Received message";
-    worker.lastActionAt = Date.now();
-    worker.stuckMessage = undefined;
-    this.idleConfirmed.set(workerId, false);
-    if (options.markDashboardInput) this.markDashboardInput(workerId);
-    this.markInputSent(workerId, options.source);
+    if (!remoteWorker) {
+      worker.status = "working";
+      worker.currentAction = "Thinking...";
+      worker.lastAction = options.lastAction || "Received message";
+      worker.lastActionAt = Date.now();
+      worker.stuckMessage = undefined;
+      this.idleConfirmed.set(workerId, false);
+      if (options.markDashboardInput) this.markDashboardInput(workerId);
+      this.markInputSent(workerId, options.source);
+    }
     if (options.trackDispatch) {
       this.trackDispatch(
         workerId,
@@ -1614,7 +1732,7 @@ export class TelemetryReceiver {
         options.autoCommit,
       );
     }
-    this.notifyExternal(worker);
+    if (!remoteWorker) this.notifyExternal(worker);
     return { ok: true };
   }
 
@@ -1644,15 +1762,16 @@ export class TelemetryReceiver {
       autoCommit?: boolean;
     },
   ): Promise<{ ok: true; queued?: boolean; id?: string; position?: number } | { ok: false; error: string }> {
-    const worker = this.get(workerId);
+    const worker = this.getWorkerSnapshot(workerId);
     if (!worker) {
       return { ok: false, error: `Worker ${workerId} not found` };
     }
+    const remoteWorker = this.isRemoteWorker(workerId, worker) && !this.workers.has(workerId);
 
     // Auto-pull before delivering messages from API/dashboard so the agent
     // works on the latest code. Same pattern as task queue dispatch.
     // Skips internal sources (auto-pilot, task-queue — queue already pulls).
-    if (worker.project && !options.source.startsWith("auto-pilot") && options.source !== "task-queue") {
+    if (!remoteWorker && worker.project && !options.source.startsWith("auto-pilot") && options.source !== "task-queue") {
       try {
         const { execFile: gitPull } = require("child_process");
         gitPull("/usr/bin/git", ["pull", "--ff-only", "--no-edit"], {
@@ -1668,7 +1787,7 @@ export class TelemetryReceiver {
       contextWorkerIds: options.contextWorkerIds,
       includeSenderContext: options.includeSenderContext,
     });
-    const deliverableContent = worker.tty
+    const deliverableContent = worker.tty && !remoteWorker
       ? this.prepareTtyPayload(worker, contentWithContext)
       : contentWithContext;
 
@@ -1705,14 +1824,16 @@ export class TelemetryReceiver {
 
     // Optimistically update state BEFORE async send — dashboard sees
     // the worker go green immediately, no waiting for AppleScript.
-    worker.status = "working";
-    worker.currentAction = "Thinking...";
-    worker.lastAction = options.lastAction || "Received message";
-    worker.lastActionAt = Date.now();
-    worker.stuckMessage = undefined;
-    this.idleConfirmed.set(workerId, false);
-    if (options.markDashboardInput) this.markDashboardInput(workerId);
-    this.markInputSent(workerId, options.source);
+    if (!remoteWorker) {
+      worker.status = "working";
+      worker.currentAction = "Thinking...";
+      worker.lastAction = options.lastAction || "Received message";
+      worker.lastActionAt = Date.now();
+      worker.stuckMessage = undefined;
+      this.idleConfirmed.set(workerId, false);
+      if (options.markDashboardInput) this.markDashboardInput(workerId);
+      this.markInputSent(workerId, options.source);
+    }
     if (options.trackDispatch) {
       this.trackDispatch(
         workerId,
@@ -1725,11 +1846,20 @@ export class TelemetryReceiver {
         options.autoCommit,
       );
     }
-    this.notifyExternal(worker);
+    if (!remoteWorker) this.notifyExternal(worker);
 
     // Now do the actual send without blocking
     let error: string | undefined;
-    if (worker.managed) {
+    if (remoteWorker) {
+      if (!this.satelliteMessageRelay) {
+        error = `No satellite relay registered for ${workerId}`;
+      } else {
+        const result = await this.satelliteMessageRelay(workerId, payload, options.source);
+        if (!result.ok) {
+          error = result.error || `Failed to relay to ${workerId}`;
+        }
+      }
+    } else if (worker.managed) {
       if (!this.processManager) {
         error = `Worker ${workerId} is managed, but no process manager is registered`;
       } else {
@@ -1807,7 +1937,7 @@ export class TelemetryReceiver {
   private drainQueues(): void {
     for (const [workerId, queue] of this.messageQueue) {
       if (queue.length === 0) continue;
-      const worker = this.get(workerId);
+      const worker = this.getWorkerSnapshot(workerId);
       if (!worker || worker.status !== "idle") continue;
 
       const msg = queue.shift()!;
@@ -1850,6 +1980,19 @@ export class TelemetryReceiver {
     this.satelliteSlots = slots;
   }
 
+  /** Re-queue a satellite worker's task when it dies. Returns the re-queued task or undefined.
+   *  Called by ws-server when a satellite reports a worker gone from its previous report. */
+  requeueSatelliteTask(prefixedWorkerId: string): { id: string; task: string } | undefined {
+    const dispatch = this.dispatchedTasks.get(prefixedWorkerId);
+    if (dispatch?.taskId) {
+      const requeued = this.taskQueue.requeueRunningTask(prefixedWorkerId);
+      this.dispatchedTasks.delete(prefixedWorkerId);
+      if (requeued) return { id: requeued.id, task: requeued.task };
+    }
+    this.dispatchedTasks.delete(prefixedWorkerId);
+    return undefined;
+  }
+
   // --- Task queue facade ---
 
   pushTask(task: string, project?: string, priority?: number, blockedBy?: string, workflowId?: string, verify?: boolean, maxVerifyAttempts?: number, autoCommit?: boolean, requires?: string[], preferMachine?: string, model?: string): QueuedTask {
@@ -1870,7 +2013,8 @@ export class TelemetryReceiver {
 
   private buildContextBrief(targetWorkerId: string, taskProject?: string): string {
     const lines: string[] = [];
-    const others = this.getAll().filter(w => w.id !== targetWorkerId);
+    const others = this.getAllWorkersIncludingSatellites().filter(w => w.id !== targetWorkerId);
+    const resolvedLocalProject = taskProject ? this.resolveProjectForMachine(taskProject, "local") : undefined;
 
     const active = others.filter(w => w.status === "working");
     if (active.length > 0) {
@@ -1885,7 +2029,7 @@ export class TelemetryReceiver {
     if (taskProject) {
       const relevantArtifacts: Array<{ worker: string; path: string; action: string }> = [];
       for (const w of others) {
-        if (!w.project.includes(taskProject)) continue;
+        if (!this.workerMatchesProject(w, taskProject)) continue;
         const arts = this.getArtifacts(w.id);
         for (const art of arts) {
           if (Date.now() - art.ts < 30 * 60 * 1000) {
@@ -1909,7 +2053,7 @@ export class TelemetryReceiver {
 
     if (taskProject) {
       const relatedWorkers = others
-        .filter((worker) => worker.project.includes(taskProject))
+        .filter((worker) => this.workerMatchesProject(worker, taskProject))
         .sort((a, b) => b.lastActionAt - a.lastActionAt)
         .slice(0, 3);
       if (relatedWorkers.length > 0) {
@@ -1928,7 +2072,7 @@ export class TelemetryReceiver {
 
     if (taskProject) {
       const learningPaths = [
-        join(taskProject, ".claude", "hive-learnings.md"),
+        ...(resolvedLocalProject ? [join(resolvedLocalProject, ".claude", "hive-learnings.md")] : []),
         join(HOME, "factory", "projects", taskProject, ".claude", "hive-learnings.md"),
       ];
       for (const lp of learningPaths) {
@@ -1953,10 +2097,6 @@ export class TelemetryReceiver {
     if (this.taskQueue.length === 0) return;
 
     const now = Date.now();
-    const localIdleWorkers = this.getAll().filter(w =>
-      w.status === "idle" && w.tty && (now - w.lastActionAt > 15_000)
-    );
-    // Also consider satellite idle workers (via the all-workers getter)
     const allWorkers = this.satelliteAllWorkersGetter ? this.satelliteAllWorkersGetter() : this.getAll();
     const allIdleWorkers = allWorkers.filter(w =>
       w.status === "idle" && (now - w.lastActionAt > 15_000)
@@ -1969,7 +2109,7 @@ export class TelemetryReceiver {
       if (task.blockedBy && !this.taskQueue.isCompleted(task.blockedBy)) continue;
 
       // Capability-based routing: if task has `requires`, filter to capable machines
-      let eligibleWorkers = localIdleWorkers;
+      let eligibleWorkers = allIdleWorkers;
       if (task.requires && task.requires.length > 0 && this.capabilityChecker) {
         // Local machine always has id undefined/no machine field
         // Check if local machine satisfies requirements
@@ -1998,18 +2138,21 @@ export class TelemetryReceiver {
       }
 
       // Try to match by project first, then fall back to any eligible worker
-      let target = eligibleWorkers.find(w => task.project && w.project.includes(task.project));
+      let target = eligibleWorkers.find(w => this.workerMatchesProject(w, task.project));
       if (!target) target = eligibleWorkers[0];
       if (!target) continue;
 
-      const brief = this.buildContextBrief(target.id, task.project);
+      const resolvedTaskProject = task.project
+        ? this.resolveProjectForMachine(task.project, target.machine)
+        : undefined;
+      const brief = this.buildContextBrief(target.id, resolvedTaskProject || task.project);
 
       // Git pull before dispatch: ensure agent starts with latest code
-      if (task.project) {
+      if (resolvedTaskProject) {
         try {
           const { execFileSync } = require("child_process");
           execFileSync("/usr/bin/git", ["pull", "--ff-only", "--no-edit"], {
-            cwd: task.project,
+            cwd: resolvedTaskProject,
             encoding: "utf-8",
             timeout: 15_000,
           });
@@ -2020,8 +2163,9 @@ export class TelemetryReceiver {
       let conflictWarning = "";
       const activeLocks = this.lockManager.getLocksExcluding(target.id);
       if (activeLocks.length > 0) {
+        const taskNeedle = basename(resolvedTaskProject || task.project || "");
         const lockLines = activeLocks
-          .filter(l => !task.project || l.path.includes(task.project.split("/").pop() || ""))
+          .filter(l => !taskNeedle || l.path.includes(taskNeedle))
           .map(l => `  - ${l.path} (locked by ${l.tty || l.workerId})`)
           .slice(0, 5);
         if (lockLines.length > 0) {
@@ -2059,8 +2203,6 @@ export class TelemetryReceiver {
         // One task per worker per tick
         const targetIdx = allIdleWorkers.indexOf(target);
         if (targetIdx >= 0) allIdleWorkers.splice(targetIdx, 1);
-        const localIdx = localIdleWorkers.indexOf(target);
-        if (localIdx >= 0) localIdleWorkers.splice(localIdx, 1);
         if (allIdleWorkers.length === 0) break;
       }
     }
