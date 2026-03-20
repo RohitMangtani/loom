@@ -866,9 +866,11 @@ export class TelemetryReceiver {
   }
 
   private buildHandoff(workerId: string, worker: WorkerState, dispatch: { task: string; project: string; taskId?: string }): string {
+    const { execFileSync } = require("child_process");
     const artifacts = this.getArtifacts(workerId);
     const recentArtifacts = artifacts.filter(a => Date.now() - a.ts < 30 * 60 * 1000);
-    const files = recentArtifacts.map(a => {
+    const filePaths = recentArtifacts.map(a => a.path);
+    const fileList = recentArtifacts.map(a => {
       const short = a.path.split("/").slice(-2).join("/");
       return `  - ${short} (${a.action})`;
     });
@@ -877,16 +879,45 @@ export class TelemetryReceiver {
       `## Handoff from ${worker.tty || workerId}${dispatch.taskId ? ` (${dispatch.taskId})` : ""}`,
       `Completed: ${dispatch.task}`,
     ];
-    if (files.length > 0) {
-      lines.push("Files modified:");
-      lines.push(...files.slice(-10));
+
+    // ── FEATURE 1: Structured JSON handoff data ──
+    // Machine-parseable context so the receiving agent works from exact data,
+    // not natural language interpretation. Reduces telephone-game drift.
+    const handoffData: Record<string, unknown> = {
+      from: worker.tty || workerId,
+      task: dispatch.task,
+      project: dispatch.project,
+      files: recentArtifacts.slice(-10).map(a => ({ path: a.path, action: a.action })),
+    };
+
+    // ── FEATURE 2: Git state verification ──
+    // Capture the exact git state so the receiving agent can verify it's
+    // working on the same codebase. If another agent pushed in between,
+    // the hash won't match and the agent knows to pull first.
+    if (dispatch.project) {
+      try {
+        const gitHash = execFileSync("/usr/bin/git", ["rev-parse", "--short", "HEAD"], {
+          cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
+        }).trim();
+        const gitBranch = execFileSync("/usr/bin/git", ["branch", "--show-current"], {
+          cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
+        }).trim();
+        const gitClean = execFileSync("/usr/bin/git", ["status", "--porcelain"], {
+          cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
+        }).trim();
+        handoffData.git = { hash: gitHash, branch: gitBranch, clean: gitClean.length === 0 };
+        lines.push("", `Git state: ${gitBranch} @ ${gitHash}${gitClean.length > 0 ? " (uncommitted changes)" : " (clean)"}`);
+      } catch { /* not a git repo */ }
     }
 
-    // Rich context: include git diff summary so the next agent sees exactly
-    // what changed, not just file names. Prevents telephone-game drift.
-    if (dispatch.project && files.length > 0) {
+    if (fileList.length > 0) {
+      lines.push("Files modified:");
+      lines.push(...fileList.slice(-10));
+    }
+
+    // Git diff summary (what exactly changed, not just which files)
+    if (dispatch.project && fileList.length > 0) {
       try {
-        const { execFileSync } = require("child_process");
         const diff = execFileSync("/usr/bin/git", ["diff", "--stat", "HEAD~1"], {
           cwd: dispatch.project, encoding: "utf-8", timeout: 5000,
         }).trim();
@@ -894,22 +925,61 @@ export class TelemetryReceiver {
           lines.push("", "Git diff summary:");
           lines.push(diff.slice(0, 500));
         }
-      } catch { /* not a git repo or no commits */ }
+      } catch { /* no commits */ }
     }
 
-    // Include the agent's last few chat messages so the next agent has
-    // the actual output, not a summary of the output.
+    // Previous agent's verbatim output
     if (this.streamer?.readHistory) {
       const history = this.streamer.readHistory(workerId);
       const agentMessages = history.filter(e => e.role === "agent").slice(-3);
       if (agentMessages.length > 0) {
         lines.push("", "Previous agent's last output:");
         for (const msg of agentMessages) {
-          const text = msg.text.slice(0, 300);
-          lines.push(`  > ${text}`);
+          lines.push(`  > ${msg.text.slice(0, 300)}`);
         }
+        handoffData.lastOutput = agentMessages.map(m => m.text.slice(0, 500));
       }
     }
+
+    // ── FEATURE 3: Output validation ──
+    // Lightweight checks that flag potential issues before the next agent starts.
+    // Never blocks, just adds warnings to the handoff.
+    const warnings: string[] = [];
+    if (recentArtifacts.length === 0) {
+      warnings.push("No file changes detected. The previous agent may not have completed its task.");
+    }
+    if (dispatch.project) {
+      try {
+        const porcelain = execFileSync("/usr/bin/git", ["status", "--porcelain"], {
+          cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
+        }).trim();
+        if (porcelain.length > 0) {
+          const uncommitted = porcelain.split("\n").length;
+          warnings.push(`${uncommitted} uncommitted file(s) in working directory. The previous agent may have forgotten to commit.`);
+        }
+      } catch { /* not git */ }
+
+      // Check for merge conflicts
+      try {
+        const conflictCheck = execFileSync("/usr/bin/git", ["diff", "--check"], {
+          cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
+        }).trim();
+        if (conflictCheck.includes("conflict")) {
+          warnings.push("Git merge conflicts detected. Resolve before starting.");
+        }
+      } catch { /* diff --check returns non-zero on conflicts */ }
+    }
+
+    if (warnings.length > 0) {
+      lines.push("", "Warnings:");
+      for (const w of warnings) {
+        lines.push(`  ! ${w}`);
+      }
+      handoffData.warnings = warnings;
+    }
+
+    // Append structured data block
+    lines.push("", "```json:handoff", JSON.stringify(handoffData, null, 2).slice(0, 800), "```");
 
     return lines.join("\n");
   }

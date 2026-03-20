@@ -39,10 +39,10 @@ The system solves four problems at once:
 - **Auto-pilot** -permission prompts auto-approve after a 3-second grace window. Stuck loops get caught and surfaced. Agents never sit idle.
 - **Messaging** -tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy.
 - **Coordination** -file locks, conflict detection, task queue, scratchpad. Multiple agents on the same codebase without collisions.
-- **Workflow handoff** -tag related tasks with a workflow ID. When step 1 finishes, step 2 receives a summary of what was done before it starts.
+- **Workflow handoff** -tag related tasks with a workflow ID. When step 1 finishes, step 2 receives the git diff, verbatim agent output, and a structured JSON context block. Git state is verified before each handoff to prevent stale-code drift. Warnings flag uncommitted files or merge conflicts before the next step starts.
 - **Model-aware routing** -tasks can target a specific model (`"model":"codex"`), require machine capabilities (`"requires":["gpu"]`), or prefer a specific machine.
 - **Capability detection** -each machine auto-reports CPU, RAM, GPU, installed software. Custom tags via `~/.hive/capabilities.json`.
-- **Compound learning** -every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge.
+- **Compound learning** -every solved problem gets written to a per-project knowledge file. Agents search learnings by keyword (`/api/learnings?q=keyword`) instead of reading everything, scaling to hundreds of entries without wasting context.
 - **State persistence** -daemon snapshots every 30 seconds. Survives restarts. Satellites run as launchd services and survive sleep and reboot.
 - **Push notifications** -macOS native alerts when agents get stuck. Web Push to your phone when agents finish. PWA installable on iOS and Android.
 - **Review queue** -auto-detects git pushes, deploys, and PRs across all agents. Slide-out drawer on the dashboard.
