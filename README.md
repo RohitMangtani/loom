@@ -32,20 +32,20 @@ The system solves four problems at once:
 
 ## Features
 
-- **Stoplight dashboard** — green/red/yellow at a glance. Open on your phone, tablet, or second monitor. Supports 1-8 agents per machine.
-- **Multi-model** — Claude, Codex, OpenClaw side by side. Spawn any from the dashboard. Add custom agents via `~/.hive/agents.json`.
-- **Multi-machine** — connect additional Macs as satellites. Agents from all machines appear in one dashboard. Messages, tasks, and coordination route transparently across the network.
-- **Auto-discovery** — start any supported agent in a terminal and it appears on the dashboard within 3 seconds. No registration, no config.
-- **Auto-pilot** — permission prompts auto-approve after a 3-second grace window. Stuck loops get caught and surfaced. Agents never sit idle.
-- **Messaging** — tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy.
-- **Coordination** — file locks, conflict detection, task queue, scratchpad. Multiple agents on the same codebase without collisions.
-- **Workflow handoff** — tag related tasks with a workflow ID. When step 1 finishes, step 2 receives a summary of what was done before it starts.
-- **Model-aware routing** — tasks can target a specific model (`"model":"codex"`), require machine capabilities (`"requires":["gpu"]`), or prefer a specific machine.
-- **Capability detection** — each machine auto-reports CPU, RAM, GPU, installed software. Custom tags via `~/.hive/capabilities.json`.
-- **Compound learning** — every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge.
-- **State persistence** — daemon snapshots every 30 seconds. Survives restarts. Satellites run as launchd services and survive sleep and reboot.
-- **Push notifications** — macOS native alerts when agents get stuck. Web Push to your phone when agents finish. PWA installable on iOS and Android.
-- **Review queue** — auto-detects git pushes, deploys, and PRs across all agents. Slide-out drawer on the dashboard.
+- **Stoplight dashboard** -green/red/yellow at a glance. Open on your phone, tablet, or second monitor. Supports 1-8 agents per machine.
+- **Multi-model** -Claude, Codex, OpenClaw side by side. Spawn any from the dashboard. Add custom agents via `~/.hive/agents.json`.
+- **Multi-machine** -connect additional Macs as satellites. Agents from all machines appear in one dashboard. Messages, tasks, and coordination route transparently across the network.
+- **Auto-discovery** -start any supported agent in a terminal and it appears on the dashboard within 3 seconds. No registration, no config.
+- **Auto-pilot** -permission prompts auto-approve after a 3-second grace window. Stuck loops get caught and surfaced. Agents never sit idle.
+- **Messaging** -tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy.
+- **Coordination** -file locks, conflict detection, task queue, scratchpad. Multiple agents on the same codebase without collisions.
+- **Workflow handoff** -tag related tasks with a workflow ID. When step 1 finishes, step 2 receives a summary of what was done before it starts.
+- **Model-aware routing** -tasks can target a specific model (`"model":"codex"`), require machine capabilities (`"requires":["gpu"]`), or prefer a specific machine.
+- **Capability detection** -each machine auto-reports CPU, RAM, GPU, installed software. Custom tags via `~/.hive/capabilities.json`.
+- **Compound learning** -every solved problem gets written to a per-project knowledge file. Fresh agents start with accumulated knowledge.
+- **State persistence** -daemon snapshots every 30 seconds. Survives restarts. Satellites run as launchd services and survive sleep and reboot.
+- **Push notifications** -macOS native alerts when agents get stuck. Web Push to your phone when agents finish. PWA installable on iOS and Android.
+- **Review queue** -auto-detects git pushes, deploys, and PRs across all agents. Slide-out drawer on the dashboard.
 
 ## Background
 
@@ -56,8 +56,8 @@ This project came out of running multiple AI agents daily across several project
 ## Prerequisites
 
 - **macOS** (uses AppleScript + CGEvent for terminal interaction)
-- **Node.js 20+** — [nodejs.org](https://nodejs.org)
-- **Homebrew** — [brew.sh](https://brew.sh) (for installing Cloudflare tunnel and other optional dependencies)
+- **Node.js 20+** - [nodejs.org](https://nodejs.org)
+- **Homebrew** - [brew.sh](https://brew.sh) (for installing Cloudflare tunnel and other optional dependencies)
 
 That's it. Everything else is optional and the setup script handles it gracefully:
 
@@ -69,17 +69,17 @@ That's it. Everything else is optional and the setup script handles it gracefull
 | Cloudflare tunnel (fallback) | Phone/remote access, random URLs | `brew install cloudflared` |
 | Vercel account | Hosted dashboard | `npx vercel login` |
 
-Without an AI CLI, setup still completes — install one later and agents auto-appear. Without `swiftc`, everything works except auto-pilot. Without Vercel/cloudflared, use `npm run launch:local` for localhost-only.
+Without an AI CLI, setup still completes. Install one later and agents auto-appear. Without `swiftc`, everything works except auto-pilot. Without Vercel/cloudflared, use `npm run launch:local` for localhost-only.
 
 Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection. Any other terminal agent can be added via a config file (see [Custom Agents](#custom-agents)).
 
 ## Install
 
-Before you paste, you'll need to approve a few things as the agent works. These are all one-time prompts from your CLI and macOS — say yes to each and the agent continues on its own:
+Before you paste, you'll need to approve a few things as the agent works. These are all one-time prompts from your CLI and macOS. Say yes to each and the agent continues on its own:
 
-1. **Allow shell commands** — Claude Code or Codex will ask permission to run terminal commands. Approve it.
-2. **Allow file access to `~/`** — the agent needs to write to `~/.hive/` for config and tokens. When it asks to expand scope beyond the project directory, approve it.
-3. **Sandbox mode** — if your CLI asks, select **full sandbox** so the agent can run commands without pausing on every action.
+1. **Allow shell commands** -Claude Code or Codex will ask permission to run terminal commands. Approve it.
+2. **Allow file access to `~/`** -the agent needs to write to `~/.hive/` for config and tokens. When it asks to expand scope beyond the project directory, approve it.
+3. **Sandbox mode** -if your CLI asks, select **full sandbox** so the agent can run commands without pausing on every action.
 
 Paste this into Claude Code or Codex:
 
@@ -90,16 +90,16 @@ Paste this into Claude Code or Codex:
 - A free [Vercel](https://vercel.com) account (the dashboard deploys here so you can access it from any device)
 - At least one AI CLI installed: `claude`, `codex`, or `openclaw`
 
-### After install — one-time macOS approvals
+### After install: one-time macOS approvals
 
 Once the agent finishes and Hive is running, macOS may ask for a couple more permissions the first time you use certain features:
 
-4. **Automation permission** — macOS asks "Terminal wants to control Terminal." Click **OK**. This lets Hive send messages to agents and close terminals from the dashboard. If you miss it: System Settings → Privacy & Security → Automation.
-5. **Accessibility permission** (optional) — if setup compiled the auto-pilot binary, it opens System Settings and Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip if you prefer manual approval.
+4. **Automation permission** -macOS asks "Terminal wants to control Terminal." Click **OK**. This lets Hive send messages to agents and close terminals from the dashboard. If you miss it: System Settings → Privacy & Security → Automation.
+5. **Accessibility permission** (optional). If setup compiled the auto-pilot binary, it opens System Settings and Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip if you prefer manual approval.
 
 ### Using your token
 
-Once setup finishes, the agent prints your token. Copy it. Open the dashboard URL the agent gives you, paste the token into the input field at the top of the page, and hit enter. You now have full control — send messages to agents, spawn new ones, close them with the X button on each tile, and manage your fleet. The token is saved at `~/.hive/token` if you need it again.
+Once setup finishes, the agent prints your token. Copy it. Open the dashboard URL the agent gives you, paste the token into the input field at the top of the page, and hit enter. You now have full control: send messages to agents, spawn new ones, close them with the X button on each tile, and manage your fleet. The token is saved at `~/.hive/token` if you need it again.
 
 ### Running agents
 
@@ -107,7 +107,7 @@ Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They app
 
 ### Connect another computer
 
-You can connect multiple Macs to the same Hive dashboard. Terminals on the second machine appear alongside your local ones — chat, close, and manage them all from one screen.
+You can connect multiple Macs to the same Hive dashboard. Terminals on the second machine appear alongside your local ones. Chat, close, and manage them all from one screen.
 
 On the second computer, run the same install prompt or clone and run:
 
@@ -117,7 +117,7 @@ bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
 
 The tunnel URL and token are printed at the end of the primary install. You can also find them at `~/.hive/tunnel-url.txt` and `~/.hive/token` on the primary machine. The connect command also appears in the install output.
 
-Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the Cloudflare tunnel — the machines don't need to be on the same network. The satellite runs as a background service (launchd) — it survives sleep, reboot, and terminal close. If macOS asks you to approve Node.js in System Settings → Privacy & Security, click Allow once.
+Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the Cloudflare tunnel, so the machines don't need to be on the same network. The satellite runs as a background service (launchd) and survives sleep, reboot, and terminal close. If macOS asks you to approve Node.js in System Settings → Privacy & Security, click Allow once.
 
 The connect install is idempotent. Re-running it on the same Mac updates the stored primary URL/token, cleans out stale satellite processes and duplicate launch agents, and re-installs the background service cleanly.
 
@@ -151,7 +151,7 @@ The setup script:
 7. Creates `.env` from the template
 8. Prints your auth token
 
-### Accessibility Permission (optional — for auto-pilot)
+### Accessibility Permission (optional, for auto-pilot)
 
 If `swiftc` was available, setup compiles `~/send-return` and automatically opens System Settings and Finder for you:
 
@@ -244,10 +244,10 @@ Detects Claude, Codex, and OpenClaw processes within 3 seconds via `ps` + `lsof`
 
 ### Status Tracking
 Multi-layer detection pipeline determines real-time status:
-1. **Hook events** — Claude Code hooks report every tool call to the daemon (Claude agents)
-2. **JSONL analysis** — reads the agent's conversation log for recent activity, extracts the last user message as a direction summary (Claude and Codex)
-3. **CPU signal** — falls back to CPU usage (>8% = working) when hooks are delayed (all agents)
-4. **PTY output** — detects terminal output flow for agents actively generating text
+1. **Hook events** -Claude Code hooks report every tool call to the daemon (Claude agents)
+2. **JSONL analysis** -reads the agent's conversation log for recent activity, extracts the last user message as a direction summary (Claude and Codex)
+3. **CPU signal** -falls back to CPU usage (>8% = working) when hooks are delayed (all agents)
+4. **PTY output** -detects terminal output flow for agents actively generating text
 
 ### Auto-Pilot
 Auto-approves permission prompts so agents never sit idle waiting for you. The daemon detects when an agent is stuck on a prompt, waits a 3-second grace window (so you can override from the dashboard), then sends a Return keystroke via the `send-return` binary.
@@ -256,13 +256,13 @@ This is how you run agents unattended. You give them tasks and walk away. Auto-p
 
 ### Coordination
 Multiple agents can safely work on the same codebase:
-- **Peer awareness** — Claude agents get a one-line summary of what the other agents are doing via the identity hook, including status, project, current action, machine label, and project path. Codex workers still share the same fleet state through the dashboard, scratchpad, and REST API.
-- **File locks** — acquire advisory locks before editing shared files (`POST /api/locks`)
-- **Conflict detection** — check if another agent recently modified a file (`GET /api/conflicts`)
-- **Scratchpad** — leave ephemeral notes for other agents (`POST /api/scratchpad`), auto-expires in 1 hour
-- **Inter-agent messaging** — send a prompt to any other agent (`POST /api/message`)
-- **Task queue** — push tasks to a global queue, auto-dispatched to the next idle agent (`POST /api/queue`)
-- **Workflow handoff** — tag tasks with the same `workflowId` and the daemon passes completion context automatically. When Agent 1 finishes step 1, the daemon builds a summary of what it did (files created, files edited) and prepends it to step 2 before dispatching to the next agent. Queue it like this:
+- **Peer awareness** -Claude agents get a one-line summary of what the other agents are doing via the identity hook, including status, project, current action, machine label, and project path. Codex workers still share the same fleet state through the dashboard, scratchpad, and REST API.
+- **File locks** -acquire advisory locks before editing shared files (`POST /api/locks`)
+- **Conflict detection** -check if another agent recently modified a file (`GET /api/conflicts`)
+- **Scratchpad** -leave ephemeral notes for other agents (`POST /api/scratchpad`), auto-expires in 1 hour
+- **Inter-agent messaging** -send a prompt to any other agent (`POST /api/message`)
+- **Task queue** -push tasks to a global queue, auto-dispatched to the next idle agent (`POST /api/queue`)
+- **Workflow handoff** -tag tasks with the same `workflowId` and the daemon passes completion context automatically. When Agent 1 finishes step 1, the daemon builds a summary of what it did (files created, files edited) and prepends it to step 2 before dispatching to the next agent. Queue it like this:
 
 ```bash
 # Step 1: Build the API
@@ -296,8 +296,8 @@ On a fresh computer restart, the old marker files are overwritten the moment you
 ### Push Notifications
 Two channels, zero setup:
 
-- **macOS desktop** — when an agent goes stuck (yellow), a native notification fires with the agent name, project, and what it needs. 60-second cooldown per agent.
-- **Web Push (iOS/Android/desktop browser)** — when an agent finishes work (green to red), a push notification is sent to all subscribed devices. 15-second cooldown per agent. The dashboard is a PWA. Add it to your Home Screen, tap the bell icon in the header, and allow notifications. VAPID keys are auto-generated on first daemon start (`~/.hive/vapid.json`). Subscriptions persist across daemon restarts (`~/.hive/push-subs.json`).
+- **macOS desktop** -when an agent goes stuck (yellow), a native notification fires with the agent name, project, and what it needs. 60-second cooldown per agent.
+- **Web Push (iOS/Android/desktop browser)** -when an agent finishes work (green to red), a push notification is sent to all subscribed devices. 15-second cooldown per agent. The dashboard is a PWA. Add it to your Home Screen, tap the bell icon in the header, and allow notifications. VAPID keys are auto-generated on first daemon start (`~/.hive/vapid.json`). Subscriptions persist across daemon restarts (`~/.hive/push-subs.json`).
 
 Configure at `~/.hive/notifications.json`. Set `pushOnComplete: false` to disable completion notifications. Defaults work out of the box.
 
@@ -319,8 +319,8 @@ All endpoints require the auth token from `~/.hive/token` via the `Authorization
 | Method | Endpoint | Body | Description |
 |--------|----------|------|-------------|
 | `POST` | `/api/message` | `{workerId, content}` | Send a prompt to any agent. Queued if busy, returns message ID. |
-| `GET` | `/api/message-queue` | — | View queued messages with IDs, previews, and timestamps |
-| `DELETE` | `/api/message-queue/:id` | — | Cancel a queued message before it's delivered |
+| `GET` | `/api/message-queue` | | View queued messages with IDs, previews, and timestamps |
+| `DELETE` | `/api/message-queue/:id` | | Cancel a queued message before it's delivered |
 
 ### Cross-Machine Control
 | Method | Endpoint | Body / Query | Description |
@@ -329,16 +329,16 @@ All endpoints require the auth token from `~/.hive/token` via the `Authorization
 | `POST` | `/api/spawn` | `{project?, model?, task?, targetQuadrant?, machine?}` | Spawn an agent on the local machine or a connected satellite. |
 | `POST` | `/api/kill` | `{workerId}` | Kill a local or remote worker. |
 | `POST` | `/api/satellites/repair` | `{machine, action?}` | Ask a connected satellite to `update`, `repair`, or `reinstall` itself. |
-| `GET` | `/api/projects` | — | List projects merged across all machines. |
-| `GET` | `/api/capabilities` | — | List auto-detected machine capabilities and per-machine project paths. |
+| `GET` | `/api/projects` | | List projects merged across all machines. |
+| `GET` | `/api/capabilities` | | List auto-detected machine capabilities and per-machine project paths. |
 | `GET` | `/api/control-plane-audit` | `?limit=100` (optional) | Read the append-only control-plane audit log for exec, spawn, kill, and maintenance actions. |
 
 ### Task Queue
 | Method | Endpoint | Body | Description |
 |--------|----------|------|-------------|
-| `GET` | `/api/queue` | — | View all queued tasks |
+| `GET` | `/api/queue` | | View all queued tasks |
 | `POST` | `/api/queue` | `{task, project?, priority?, blockedBy?, workflowId?, requires?, preferMachine?, model?}` | Push a task. Auto-dispatched to next idle agent. Add `workflowId` to link related tasks for automatic handoff. Add `requires` for capability routing (see below). Add `model` to target a specific agent type. |
-| `DELETE` | `/api/queue/:id` | — | Remove a queued task |
+| `DELETE` | `/api/queue/:id` | | Remove a queued task |
 
 **Capability routing:** Tasks can target specific machines or agent types:
 
@@ -374,7 +374,7 @@ Satellites auto-detect their capabilities on startup and report them to the prim
 ### File Coordination
 | Method | Endpoint | Body / Query | Description |
 |--------|----------|--------------|-------------|
-| `GET` | `/api/locks` | — | List all active file locks |
+| `GET` | `/api/locks` | | List all active file locks |
 | `POST` | `/api/locks` | `{workerId, path}` | Acquire lock. Returns 409 if already locked. |
 | `DELETE` | `/api/locks` | `?workerId=X&path=Y` | Release lock (omit path to release all) |
 | `GET` | `/api/conflicts` | `?path=X&excludeWorker=Y` | Check if another agent recently modified a file |
@@ -398,8 +398,8 @@ Satellites auto-detect their capabilities on startup and report them to the prim
 | `GET` | `/api/reviews` | `?unseen=1` (optional) | List review items. Add `?unseen=1` for unread only. |
 | `POST` | `/api/reviews` | `{summary, url?, type?, workerId?}` | Report a reviewable change. Type: deploy/commit/pr/push/review-needed/general. |
 | `PATCH` | `/api/reviews/:id` | `{action: "seen"}` | Mark a review as seen |
-| `PATCH` | `/api/reviews` | — | Mark all reviews as seen |
-| `DELETE` | `/api/reviews/:id` | — | Dismiss a review |
+| `PATCH` | `/api/reviews` | | Mark all reviews as seen |
+| `DELETE` | `/api/reviews/:id` | | Dismiss a review |
 
 The daemon also auto-detects `git push`, `gh pr create`, and Vercel deploys from hook events and creates review items automatically. Agents can self-report with richer summaries via the POST endpoint.
 
@@ -408,7 +408,7 @@ The daemon also auto-detects `git push`, `gh pr create`, and Vercel deploys from
 |--------|----------|-------|-------------|
 | `GET` | `/api/audit` | `?tty=X` (optional) | Status change audit log |
 | `GET` | `/api/signals` | `?workerId=X` (optional) | Raw signal data (hooks, CPU, JSONL) |
-| `GET` | `/api/debug` | — | Full daemon state dump |
+| `GET` | `/api/debug` | | Full daemon state dump |
 
 ### Example: Send a task to an idle agent
 
@@ -435,12 +435,12 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 Claude agents read instructions from `~/.claude/CLAUDE.md` that tell them how to interact with the daemon. Here's what that hook-driven path does automatically:
 
-1. **Identify themselves** — read `~/.hive/workers.json` on startup to find their slot. On every prompt, the identity hook also injects a peer summary showing what the other agents are doing, where they are running, and which project path they have open.
-2. **Check learnings** — read `.claude/hive-learnings.md` before starting any task
-3. **Lock files** — acquire locks before editing files other agents might touch
-4. **Write learnings** — persist lessons after solving non-obvious problems
-5. **Dispatch work** — send tasks to other agents when the work involves a different project or needs a fresh perspective
-6. **Use scratchpad** — leave notes about in-progress work for other agents
+1. **Identify themselves** -read `~/.hive/workers.json` on startup to find their slot. On every prompt, the identity hook also injects a peer summary showing what the other agents are doing, where they are running, and which project path they have open.
+2. **Check learnings** -read `.claude/hive-learnings.md` before starting any task
+3. **Lock files** -acquire locks before editing files other agents might touch
+4. **Write learnings** -persist lessons after solving non-obvious problems
+5. **Dispatch work** -send tasks to other agents when the work involves a different project or needs a fresh perspective
+6. **Use scratchpad** -leave notes about in-progress work for other agents
 
 These behaviors are configured through the CLAUDE.md instructions, not hardcoded. Codex workers still participate in discovery, messaging, queueing, and shared state, but they do not use the Claude hook path.
 
@@ -485,11 +485,11 @@ The daemon watches this file and reloads when it changes. No restart needed.
 ### Claude Code Hooks
 
 If Claude Code is installed, setup installs or updates these hooks in `~/.claude/settings.json`:
-- **UserPromptSubmit** — registers the TTY/session mapping and injects identity + peer summary
-- **PreToolUse** — fires before every tool call, reports tool name to daemon
-- **PostToolUse** — fires after every tool call, reports result
-- **Notification** — fires on agent notifications (errors, completions)
-- **Stop** — fires when an agent session ends
+- **UserPromptSubmit** -registers the TTY/session mapping and injects identity + peer summary
+- **PreToolUse** -fires before every tool call, reports tool name to daemon
+- **PostToolUse** -fires after every tool call, reports result
+- **Notification** -fires on agent notifications (errors, completions)
+- **Stop** -fires when an agent session ends
 
 `bash setup-hooks.sh` is idempotent. It merges Hive hooks into existing settings instead of replacing them.
 
@@ -501,24 +501,24 @@ Setup generates a random token at `~/.hive/token`. All API requests require this
 
 ```
 Daemon (Node.js, port 3001 + 3002)
-├── Discovery     — finds Claude + Codex + OpenClaw processes via ps + lsof every 3s
-├── Telemetry     — receives hook events and inferred signals, maintains worker state
-├── Auto-pilot    — detects stuck prompts, auto-approves via send-return
-├── Arrange       — detects terminal positions, assigns slots by screen location
-├── Watchdog      — detects stuck loops, escalates to dashboard
-├── State store   — snapshots daemon state every 30s, restores on restart
-├── Notifications — macOS native alerts when agents go stuck
-├── Task queue    — global work queue, auto-dispatches to idle agents
-├── Coordination  — file locks, scratchpad, conflict detection, learnings
-├── API routes    — REST endpoints for all coordination features
-└── WebSocket     — pushes live state to dashboard every 3 seconds
+├── Discovery     -finds Claude + Codex + OpenClaw processes via ps + lsof every 3s
+├── Telemetry     -receives hook events and inferred signals, maintains worker state
+├── Auto-pilot    -detects stuck prompts, auto-approves via send-return
+├── Arrange       -detects terminal positions, assigns slots by screen location
+├── Watchdog      -detects stuck loops, escalates to dashboard
+├── State store   -snapshots daemon state every 30s, restores on restart
+├── Notifications -macOS native alerts when agents go stuck
+├── Task queue    -global work queue, auto-dispatches to idle agents
+├── Coordination  -file locks, scratchpad, conflict detection, learnings
+├── API routes    -REST endpoints for all coordination features
+└── WebSocket     -pushes live state to dashboard every 3 seconds
 
-Dashboard (Next.js, port 3000 — installable as PWA)
-├── Vertical stack — stoplight status cards matching terminal layout top to bottom
-├── Live chat     — stream each agent's conversation history
-├── Review queue  — slide-out drawer of recent pushes, deploys, and PRs
-├── Controls      — send messages, spawn agents, view queue
-└── Service worker — offline caching, instant repeat loads
+Dashboard (Next.js, port 3000 -installable as PWA)
+├── Vertical stack -stoplight status cards matching terminal layout top to bottom
+├── Live chat     -stream each agent's conversation history
+├── Review queue  -slide-out drawer of recent pushes, deploys, and PRs
+├── Controls      -send messages, spawn agents, view queue
+└── Service worker -offline caching, instant repeat loads
 ```
 
 ### Key Files
@@ -592,14 +592,14 @@ The dashboard is a PWA (Progressive Web App). After deploying, install it on you
 1. Open the dashboard URL in Safari
 2. Tap the share button (box with arrow)
 3. Tap "Add to Home Screen"
-4. Open from your home screen — full-screen, no browser chrome
+4. Open from your home screen -full-screen, no browser chrome
 
 **Android:**
 1. Open the dashboard URL in Chrome
 2. Tap the three-dot menu
 3. Tap "Add to Home screen" or "Install app"
 
-The app caches itself via service worker, so repeat opens are instant. It works like a native app — own icon, own entry in the app switcher, dark status bar matching the dashboard theme.
+The app caches itself via service worker, so repeat opens are instant. It works like a native app -own icon, own entry in the app switcher, dark status bar matching the dashboard theme.
 
 ## Deploy Your Own Dashboard
 
