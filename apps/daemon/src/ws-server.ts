@@ -902,13 +902,19 @@ export class WsServer {
 
     // Detect satellite status transitions and fire listeners (for notifications).
     // This runs AFTER overrides and smoothing, so it reflects final dashboard state.
+    // Look up global quadrants from the merged worker list so notifications
+    // say "Q4 done (MacBook-Air)" not "Q1 done (MacBook-Air)".
+    const allWorkers = this.getAllWorkers();
     for (const w of incoming) {
       const key = `${machineId}:${w.id}`;
       const prev = this.satellitePrevStatus.get(key);
       if (prev && prev !== w.status) {
+        // Find the global quadrant for this satellite worker
+        const global = allWorkers.find(gw => gw.id === key);
         const prefixedWorker: WorkerState = {
           ...w,
           id: key,
+          quadrant: global?.quadrant ?? w.quadrant,
           machine: machineId,
           machineLabel: sat.hostname,
         };
