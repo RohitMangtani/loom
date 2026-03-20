@@ -78,6 +78,9 @@ export class WsServer {
   // Key: "machineId:localWorkerId"
   private satelliteIdleCounts = new Map<string, number>();       // consecutive idle reports
   private static readonly SAT_IDLE_HYSTERESIS = 2;              // require N consecutive idle reports
+  // Satellite status change tracking: for notifications on working→idle transitions
+  private satellitePrevStatus = new Map<string, string>();  // "machineId:localId" → last status
+  private satelliteStatusListeners: Array<(workerId: string, worker: WorkerState, prevStatus: string) => void> = [];
   // Satellite auto-pilot: track stuck state for grace period + dedup
   private satelliteAutoApproved = new Set<string>();
   private satelliteStuckFirstSeen = new Map<string, number>();
@@ -233,6 +236,13 @@ export class WsServer {
   /** Set the WebPushManager (for push subscription handling) */
   setPushManager(mgr: WebPushManager): void {
     this.pushMgr = mgr;
+  }
+
+  /** Register a listener for satellite worker status changes.
+   *  Fires when a satellite worker transitions between states (e.g., working→idle).
+   *  Used by NotificationManager to send push notifications for remote workers. */
+  onSatelliteStatusChange(cb: (workerId: string, worker: WorkerState, prevStatus: string) => void): void {
+    this.satelliteStatusListeners.push(cb);
   }
 
   /** Get all workers: local + satellite, merged into one list. */
@@ -834,8 +844,13 @@ export class WsServer {
       const override = this.satelliteOverrides.get(key);
       if (override) {
         if (now >= override.until) {
+          // Expired
           this.satelliteOverrides.delete(key);
         } else if (w.status === "working" && !w.promptType) {
+          // Agent moved past the prompt and is working — clear override
+          this.satelliteOverrides.delete(key);
+        } else if (w.status === "idle") {
+          // Agent finished its work — clear override, let idle through
           this.satelliteOverrides.delete(key);
         } else {
           w.promptType = null;
@@ -883,6 +898,25 @@ export class WsServer {
         this.satelliteIdleCounts.delete(key);
         this.satelliteOverrides.delete(key);
       }
+    }
+
+    // Detect satellite status transitions and fire listeners (for notifications).
+    // This runs AFTER overrides and smoothing, so it reflects final dashboard state.
+    for (const w of incoming) {
+      const key = `${machineId}:${w.id}`;
+      const prev = this.satellitePrevStatus.get(key);
+      if (prev && prev !== w.status) {
+        const prefixedWorker: WorkerState = {
+          ...w,
+          id: key,
+          machine: machineId,
+          machineLabel: sat.hostname,
+        };
+        for (const cb of this.satelliteStatusListeners) {
+          try { cb(key, prefixedWorker, prev); } catch { /* non-critical */ }
+        }
+      }
+      this.satellitePrevStatus.set(key, w.status);
     }
 
     sat.workers = incoming;

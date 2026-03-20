@@ -136,8 +136,13 @@ if (satFlagIdx !== -1) {
     telemetry.importState(snapshot);
   }
 
-  // Register push notifications on stuck transitions
+  // Register push notifications on stuck transitions (local workers)
   notifications.register(telemetry);
+
+  // Register push notifications for satellite workers (working→idle, stuck)
+  ws.onSatelliteStatusChange((workerId, worker, prevStatus) => {
+    notifications.handleSatelliteStatusChange(workerId, worker, prevStatus);
+  });
 
   // Initial scan for existing Claude processes
   discovery.scan();

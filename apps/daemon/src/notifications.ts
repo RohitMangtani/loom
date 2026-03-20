@@ -63,6 +63,28 @@ export class NotificationManager {
     return { ...this.config };
   }
 
+  /** Handle a satellite worker status change. Called by ws-server when a
+   *  satellite worker transitions between states. Same logic as local workers
+   *  but fed from the satellite status pipeline instead of telemetry.onUpdate(). */
+  handleSatelliteStatusChange(workerId: string, state: WorkerState, prevStatus: string): void {
+    if (!this.config.enabled) return;
+
+    // Stuck → macOS desktop notification
+    if (state.status === "stuck" && prevStatus !== "stuck") {
+      this.notify(workerId, state);
+      return;
+    }
+
+    // Working → Idle (green → red) → push notification
+    if (
+      this.config.pushOnComplete &&
+      prevStatus === "working" &&
+      state.status === "idle"
+    ) {
+      this.pushComplete(workerId, state);
+    }
+  }
+
   private handleUpdate(workerId: string, state: WorkerState): void {
     if (!this.config.enabled) return;
 
