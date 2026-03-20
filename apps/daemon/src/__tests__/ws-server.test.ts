@@ -243,4 +243,62 @@ describe("WsServer pushState", () => {
       }],
     });
   });
+
+  it("merges satellite chat history into relayed context", async () => {
+    const harness = createServer([]);
+    const server = harness.server as unknown as {
+      registerSatelliteSocket: (ws: WebSocket, machineId: string) => void;
+      handleSatelliteMessage: (ws: WebSocket, machineId: string, msg: Record<string, unknown>) => void;
+      requestSatelliteContext: (
+        sat: { ws: WebSocket; machineId: string; hostname: string; workers: unknown[]; connectedAt: number; lastSeen: number },
+        workerId: string,
+        localId: string,
+        options: { includeHistory?: boolean; historyLimit?: number },
+      ) => Promise<unknown>;
+      satellites: Map<string, { ws: WebSocket; machineId: string; hostname: string; workers: unknown[]; connectedAt: number; lastSeen: number }>;
+    };
+    const satelliteWs = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+
+    server.registerSatelliteSocket(satelliteWs, "remote-mac");
+    server.handleSatelliteMessage(satelliteWs, "remote-mac", {
+      type: "satellite_hello",
+      hostname: "Remote-Mac.local",
+      version: "test",
+    });
+
+    const sat = server.satellites.get("remote-mac");
+    expect(sat).toBeTruthy();
+
+    const pending = server.requestSatelliteContext(
+      sat!,
+      "remote-mac:rw1",
+      "rw1",
+      { includeHistory: true, historyLimit: 4 },
+    );
+
+    const sent = JSON.parse((satelliteWs.send as unknown as { mock: { calls: [string][] } }).mock.calls[1]![0]);
+    server.handleSatelliteMessage(satelliteWs, "remote-mac", {
+      type: "satellite_context_response",
+      requestId: sent.requestId,
+      context: {
+        workerId: "remote-mac:rw1",
+        status: "working",
+        recentMessages: [],
+      },
+      chatHistory: [
+        { role: "assistant", content: "remote reply" },
+      ],
+    });
+
+    await expect(pending).resolves.toEqual({
+      workerId: "remote-mac:rw1",
+      status: "working",
+      recentMessages: [
+        { role: "assistant", content: "remote reply" },
+      ],
+    });
+  });
 });

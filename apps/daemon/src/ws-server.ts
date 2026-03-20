@@ -571,7 +571,16 @@ export class WsServer {
         if (pending) {
           clearTimeout(pending.timer);
           this.pendingSatelliteRequests.delete(ctxReqId);
-          pending.resolve(msg.context ?? msg);
+          const context = (msg.context ?? msg) as Record<string, unknown>;
+          const chatHistory = Array.isArray(msg.chatHistory) ? msg.chatHistory as ChatEntry[] : [];
+          if (context && typeof context === "object" && chatHistory.length > 0) {
+            pending.resolve({
+              ...context,
+              recentMessages: chatHistory,
+            });
+          } else {
+            pending.resolve(context);
+          }
         }
         break;
       }
