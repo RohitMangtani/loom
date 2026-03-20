@@ -881,6 +881,36 @@ export class TelemetryReceiver {
       lines.push("Files modified:");
       lines.push(...files.slice(-10));
     }
+
+    // Rich context: include git diff summary so the next agent sees exactly
+    // what changed, not just file names. Prevents telephone-game drift.
+    if (dispatch.project && files.length > 0) {
+      try {
+        const { execFileSync } = require("child_process");
+        const diff = execFileSync("/usr/bin/git", ["diff", "--stat", "HEAD~1"], {
+          cwd: dispatch.project, encoding: "utf-8", timeout: 5000,
+        }).trim();
+        if (diff) {
+          lines.push("", "Git diff summary:");
+          lines.push(diff.slice(0, 500));
+        }
+      } catch { /* not a git repo or no commits */ }
+    }
+
+    // Include the agent's last few chat messages so the next agent has
+    // the actual output, not a summary of the output.
+    if (this.streamer?.readHistory) {
+      const history = this.streamer.readHistory(workerId);
+      const agentMessages = history.filter(e => e.role === "agent").slice(-3);
+      if (agentMessages.length > 0) {
+        lines.push("", "Previous agent's last output:");
+        for (const msg of agentMessages) {
+          const text = msg.text.slice(0, 300);
+          lines.push(`  > ${text}`);
+        }
+      }
+    }
+
     return lines.join("\n");
   }
 
