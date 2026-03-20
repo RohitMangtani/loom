@@ -992,12 +992,14 @@ end tell
         // confidence idle) overrides this cooldown immediately when done.
         const lastWorking = this.lastConfirmedWorking.get(id) || 0;
         const workingCooldown = Date.now() - lastWorking;
-        // Skip cooldown when JSONL confirms the agent is done (assistant at tail).
-        // The 25s cooldown covers the "thinking gap" (user→API→no JSONL yet).
-        // But if JSONL already shows an assistant response AND hooks recently
-        // confirmed idle, there is no thinking gap — the agent is finished.
-        // ctx.status === "idle" means analyzeJsonlTail found assistant at tail.
-        const jsonlConfirmsIdle = ctx.status === "idle" && ctx.fileAgeMs > 4_000;
+        // Skip cooldown when JSONL confirms the agent is done.
+        // ctx.status === "idle" means analyzeJsonlTail found assistant at tail
+        // AND the file is >4s stale (mid-stream check already passed inside
+        // analyzeJsonlTail). No need for a second fileAge check here.
+        // The 25s cooldown only helps during the "thinking gap" (user→API→
+        // no assistant message yet). Once the assistant response is at the tail,
+        // the agent is finished — go red immediately.
+        const jsonlConfirmsIdle = ctx.status === "idle";
         const hasJsonlIdleSignal = existing.model === "openclaw" || jsonlConfirmsIdle;
         if (workingCooldown < 25_000 && existing.status === "working" && !hasJsonlIdleSignal) {
           existing.currentAction = ctx.latestAction || "Thinking...";
