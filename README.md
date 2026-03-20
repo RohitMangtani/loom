@@ -65,7 +65,8 @@ That's it. Everything else is optional and the setup script handles it gracefull
 |----------|----------------|---------------|
 | At least one AI CLI | Agents to manage | `npm install -g @anthropic-ai/claude-code` or `@openai/codex` or `openclaw` |
 | Xcode Command Line Tools | Auto-pilot (auto-approve prompts) | `xcode-select --install` |
-| Cloudflare tunnel | Phone/remote access | `brew install cloudflared` (auto-installed by `npm start`) |
+| ngrok (recommended) | Phone/remote access, stable URLs | `brew install ngrok` then `ngrok config add-authtoken YOUR_TOKEN` ([ngrok.com](https://ngrok.com)) |
+| Cloudflare tunnel (fallback) | Phone/remote access, random URLs | `brew install cloudflared` |
 | Vercel account | Hosted dashboard | `npx vercel login` |
 
 Without an AI CLI, setup still completes — install one later and agents auto-appear. Without `swiftc`, everything works except auto-pilot. Without Vercel/cloudflared, use `npm run launch:local` for localhost-only.
