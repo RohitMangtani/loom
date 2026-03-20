@@ -193,10 +193,24 @@ export class SatelliteClient {
   }
 
   private connect(): void {
+    // Re-read primary URL from disk on each reconnect attempt.
+    // If the primary restarted with a new tunnel URL and the user
+    // re-ran install --connect, this picks up the updated URL.
+    try {
+      const urlFile = join(homedir(), ".hive", "primary-url");
+      if (existsSync(urlFile)) {
+        const diskUrl = readFileSync(urlFile, "utf-8").trim();
+        if (diskUrl && diskUrl !== this.primaryUrl) {
+          console.log(`[satellite] Primary URL changed: ${this.primaryUrl} → ${diskUrl}`);
+          this.primaryUrl = diskUrl;
+        }
+      }
+    } catch { /* keep current URL */ }
+
     const sep = this.primaryUrl.includes("?") ? "&" : "?";
     const url = `${this.primaryUrl}${sep}token=${encodeURIComponent(this.token)}&satellite=${encodeURIComponent(this.machineId)}`;
 
-    console.log(`[satellite] Connecting to primary...`);
+    console.log(`[satellite] Connecting to primary at ${this.primaryUrl}...`);
     this.ws = new WebSocket(url);
 
     this.ws.on("open", () => {
