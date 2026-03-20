@@ -407,11 +407,23 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
   }
 
   /** Report all local workers to the primary with machine tag. */
+  private lastReportSnapshot = "";
+  private lastReportAt = 0;
+
   private reportWorkers(): void {
     const workers: WorkerState[] = this.telemetry.getAll().map(w => ({
       ...w,
       machine: this.machineId,
     }));
+    // Fingerprint: count + IDs + statuses + actions. Only send when changed
+    // OR every 15s as a heartbeat (primary expects activity within 30s).
+    const snapshot = workers.map(w => `${w.id}:${w.status}:${w.currentAction || ""}`).sort().join("|");
+    const now = Date.now();
+    const changed = snapshot !== this.lastReportSnapshot;
+    const heartbeatDue = now - this.lastReportAt > 15_000;
+    if (!changed && !heartbeatDue) return;
+    this.lastReportSnapshot = snapshot;
+    this.lastReportAt = now;
     this.send({ type: "satellite_workers", machineId: this.machineId, workers });
   }
 
