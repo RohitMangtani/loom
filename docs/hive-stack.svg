@@ -1,80 +1,177 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 340" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 640" fill="none">
   <defs>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
-      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#020617" flood-opacity="0.35"/>
-      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#020617" flood-opacity="0.16"/>
+    <filter id="panelShadow">
+      <feDropShadow dx="0" dy="14" stdDeviation="24" flood-color="#000000" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="30" stdDeviation="40" flood-color="#000000" flood-opacity="0.14"/>
     </filter>
+    <linearGradient id="panelFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#18181b"/>
+      <stop offset="100%" stop-color="#111114"/>
+    </linearGradient>
+    <linearGradient id="phoneGlow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
   </defs>
   <style>
-    text {
-      font-family: "SF Pro Display", "SF Pro Text", Inter, Arial, sans-serif;
-    }
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   </style>
 
-  <rect width="860" height="340" rx="24" fill="#09090b"/>
-  <rect x="1" y="1" width="858" height="338" rx="23" stroke="#1f2937"/>
+  <rect width="920" height="640" rx="16" fill="#09090b" stroke="#27272a" stroke-width="1"/>
 
-  <rect x="24" y="22" width="118" height="24" rx="12" fill="#0f2748" stroke="#38bdf8" stroke-opacity="0.4"/>
-  <text x="83" y="38" text-anchor="middle" font-size="9.5" font-weight="700" letter-spacing="0.16em" fill="#bae6fd">FOUR PILLARS</text>
+  <text x="460" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="#fafaf9" letter-spacing="0.08em">THE VISIBLE STACK</text>
+  <text x="460" y="56" text-anchor="middle" font-size="10" fill="#a1a1aa">A visual layer for directing AI work across machines.</text>
 
-  <g filter="url(#shadow)">
-    <rect x="24" y="64" width="191" height="218" rx="22" fill="#0b1325" stroke="#1e293b"/>
-    <rect x="42" y="84" width="155" height="58" rx="16" fill="#09111d" stroke="#1f2937"/>
-    <rect x="62" y="99" width="115" height="28" rx="12" fill="#0f172a" stroke="#14532d"/>
-    <circle cx="86" cy="113" r="6" fill="#22c55e"/>
-    <circle cx="118" cy="113" r="6" fill="#ef4444"/>
-    <circle cx="150" cy="113" r="6" fill="#f59e0b"/>
-    <text x="119" y="132" text-anchor="middle" font-size="7.2" font-weight="700" fill="#94a3b8">ONE STACK</text>
-    <text x="42" y="168" font-size="12.2" font-weight="700" fill="#f8fafc">VISUAL LAYER</text>
-    <text x="42" y="194" font-size="10" fill="#94a3b8">One glanceable stack.</text>
-    <text x="42" y="210" font-size="10" fill="#94a3b8">Green means working.</text>
-    <text x="42" y="226" font-size="10" fill="#94a3b8">Red means done. Yellow means you.</text>
-  </g>
+  <rect x="28" y="82" width="272" height="352" rx="18" fill="url(#panelFill)" stroke="#27272a" stroke-width="1" filter="url(#panelShadow)"/>
+  <text x="50" y="112" font-size="12" font-weight="700" fill="#fafaf9">1. Machine view</text>
+  <text x="50" y="130" font-size="9.5" fill="#a1a1aa">Separate nodes feed one visible stack.</text>
 
-  <g filter="url(#shadow)">
-    <rect x="231" y="64" width="191" height="218" rx="22" fill="#0b1325" stroke="#1e293b"/>
-    <rect x="249" y="84" width="155" height="58" rx="16" fill="#09111d" stroke="#1f2937"/>
-    <rect x="263" y="98" width="46" height="30" rx="12" fill="#0f2748" stroke="#1e3a8a"/>
-    <text x="286" y="116" text-anchor="middle" font-size="7" font-weight="700" fill="#93c5fd">done</text>
-    <rect x="344" y="98" width="46" height="30" rx="12" fill="#052e16" stroke="#166534"/>
-    <text x="367" y="116" text-anchor="middle" font-size="7" font-weight="700" fill="#bbf7d0">next</text>
-    <path d="M309 113H344" stroke="#38bdf8" stroke-width="1.8"/>
-    <path d="M336 107L344 113L336 119" fill="none" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="249" y="168" font-size="12.2" font-weight="700" fill="#f8fafc">INTUITIVE HANDOFFS</text>
-    <text x="249" y="194" font-size="10" fill="#94a3b8">Pass output between agents</text>
-    <text x="249" y="210" font-size="10" fill="#94a3b8">by talking.</text>
-    <text x="249" y="226" font-size="10" fill="#94a3b8">Tap the tile, say what to do next.</text>
-  </g>
+  <rect x="50" y="154" width="148" height="176" rx="14" fill="#111113" stroke="#3f3f46" stroke-width="1"/>
+  <text x="64" y="174" font-size="8.4" fill="#a1a1aa">Primary node</text>
 
-  <g filter="url(#shadow)">
-    <rect x="438" y="64" width="191" height="218" rx="22" fill="#0b1325" stroke="#1e293b"/>
-    <rect x="456" y="84" width="155" height="58" rx="16" fill="#09111d" stroke="#1f2937"/>
-    <rect x="470" y="102" width="44" height="20" rx="10" fill="#0f2748"/>
-    <text x="492" y="115" text-anchor="middle" font-size="6.6" font-weight="700" fill="#93c5fd">Claude</text>
-    <rect x="520" y="102" width="42" height="20" rx="10" fill="#052e16"/>
-    <text x="541" y="115" text-anchor="middle" font-size="6.6" font-weight="700" fill="#6ee7b7">Codex</text>
-    <rect x="568" y="102" width="52" height="20" rx="10" fill="#20163a"/>
-    <text x="594" y="115" text-anchor="middle" font-size="6.6" font-weight="700" fill="#ddd6fe">OpenClaw</text>
-    <text x="456" y="168" font-size="12.2" font-weight="700" fill="#f8fafc">MULTI-MODEL SYMPHONY</text>
-    <text x="456" y="194" font-size="10" fill="#94a3b8">Claude, Codex, OpenClaw</text>
-    <text x="456" y="210" font-size="10" fill="#94a3b8">in the same grid.</text>
-    <text x="456" y="226" font-size="10" fill="#94a3b8">Each does what it is best at.</text>
-  </g>
+  <rect x="62" y="186" width="124" height="34" rx="10" fill="#172554" stroke="#1d4ed8" stroke-width="1"/>
+  <circle cx="76" cy="203" r="4.5" fill="#3b82f6"/>
+  <text x="88" y="200" font-size="8.2" font-weight="700" fill="#eff6ff">Builder</text>
+  <text x="88" y="212" font-size="7.2" fill="#bfdbfe">active now</text>
 
-  <g filter="url(#shadow)">
-    <rect x="645" y="64" width="191" height="218" rx="22" fill="#0b1325" stroke="#1e293b"/>
-    <rect x="663" y="84" width="155" height="58" rx="16" fill="#09111d" stroke="#1f2937"/>
-    <rect x="683" y="98" width="34" height="22" rx="7" fill="#0f172a" stroke="#334155"/>
-    <rect x="690" y="104" width="20" height="10" rx="3" fill="#1e293b"/>
-    <rect x="764" y="98" width="34" height="22" rx="7" fill="#0f172a" stroke="#334155"/>
-    <rect x="771" y="104" width="20" height="10" rx="3" fill="#1e293b"/>
-    <path d="M717 109H764" stroke="#a78bfa" stroke-width="1.8"/>
-    <circle cx="741" cy="109" r="3" fill="#a78bfa"/>
-    <text x="663" y="168" font-size="12.2" font-weight="700" fill="#f8fafc">MULTI-MACHINE NETWORK</text>
-    <text x="663" y="194" font-size="10" fill="#94a3b8">Multiple computers, one dashboard.</text>
-    <text x="663" y="210" font-size="10" fill="#94a3b8">Route by what each machine</text>
-    <text x="663" y="226" font-size="10" fill="#94a3b8">is good at.</text>
-  </g>
+  <rect x="62" y="226" width="124" height="34" rx="10" fill="#052e16" stroke="#22c55e" stroke-width="1.3"/>
+  <circle cx="76" cy="243" r="4.5" fill="#22c55e"/>
+  <text x="88" y="240" font-size="8.2" font-weight="700" fill="#f0fdf4">Reviewer</text>
+  <text x="88" y="252" font-size="7.2" fill="#bbf7d0">handoff live</text>
 
-  <text x="430" y="314" text-anchor="middle" font-size="12" font-weight="600" fill="#f8fafc">One person. Multiple models. Multiple machines. The output of a team.</text>
+  <rect x="62" y="266" width="124" height="34" rx="10" fill="#3f2a05" stroke="#d97706" stroke-width="1"/>
+  <circle cx="76" cy="283" r="4.5" fill="#f59e0b"/>
+  <text x="88" y="280" font-size="8.2" font-weight="700" fill="#fffbeb">Research</text>
+  <text x="88" y="292" font-size="7.2" fill="#fde68a">queued next</text>
+
+  <text x="64" y="319" font-size="7.2" fill="#71717a">Core work stays on the primary node.</text>
+
+  <rect x="210" y="174" width="68" height="118" rx="14" fill="#111113" stroke="#3f3f46" stroke-width="1"/>
+  <text x="223" y="191" font-size="7.4" fill="#a1a1aa">Satellite</text>
+  <rect x="222" y="200" width="44" height="26" rx="10" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+  <text x="244" y="211" text-anchor="middle" font-size="6.1" font-weight="700" fill="#bae6fd">Audit</text>
+  <text x="244" y="220" text-anchor="middle" font-size="5.5" fill="#93c5fd">ready</text>
+  <rect x="222" y="234" width="44" height="26" rx="10" fill="#052e16" stroke="#22c55e" stroke-width="1"/>
+  <text x="244" y="245" text-anchor="middle" font-size="6.1" font-weight="700" fill="#bbf7d0">Special</text>
+  <text x="244" y="254" text-anchor="middle" font-size="5.5" fill="#86efac">watch</text>
+  <text x="223" y="279" font-size="6.8" fill="#71717a">satellite</text>
+
+  <path d="M198 232C204 232 204 232 210 232" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="204" y="224" text-anchor="middle" font-size="6.4" fill="#93c5fd">WS</text>
+  <path d="M124 330V348" stroke="#52525b" stroke-width="1.4"/>
+  <path d="M244 292V348" stroke="#52525b" stroke-width="1.4"/>
+
+  <rect x="78" y="348" width="172" height="42" rx="12" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+  <text x="164" y="367" text-anchor="middle" font-size="8.2" font-weight="700" fill="#fafaf9">Unified stack</text>
+  <circle cx="112" cy="380" r="3.5" fill="#3b82f6"/>
+  <circle cx="136" cy="380" r="3.5" fill="#22c55e"/>
+  <circle cx="160" cy="380" r="3.5" fill="#f59e0b"/>
+  <circle cx="184" cy="380" r="3.5" fill="#38bdf8"/>
+  <circle cx="208" cy="380" r="3.5" fill="#22c55e"/>
+  <text x="164" y="387" text-anchor="middle" font-size="6.1" fill="#a1a1aa">5 visible rows</text>
+
+  <text x="164" y="458" text-anchor="middle" font-size="9.5" font-weight="600" fill="#a1a1aa">Different machines. One visual memory.</text>
+  <text x="164" y="474" text-anchor="middle" font-size="8.5" fill="#71717a">You steer by order, not hardware.</text>
+
+  <line x1="314" y1="258" x2="346" y2="258" stroke="#52525b" stroke-width="1.5"/>
+  <polygon points="340,252 352,258 340,264" fill="#52525b"/>
+  <text x="330" y="242" text-anchor="middle" font-size="8.5" fill="#a1a1aa">same order</text>
+
+  <rect x="360" y="82" width="228" height="352" rx="18" fill="url(#panelFill)" stroke="#27272a" stroke-width="1" filter="url(#panelShadow)"/>
+  <text x="382" y="112" font-size="12" font-weight="700" fill="#fafaf9">2. Stack view</text>
+  <text x="382" y="130" font-size="9.5" fill="#a1a1aa">The same rows, compressed into color,</text>
+  <text x="382" y="143" font-size="9.5" fill="#a1a1aa">state, and next action.</text>
+
+  <rect x="428" y="152" width="92" height="206" rx="24" fill="url(#phoneGlow)" stroke="#475569" stroke-width="1"/>
+  <rect x="458" y="162" width="32" height="6" rx="3" fill="#475569"/>
+  <rect x="440" y="178" width="68" height="18" rx="9" fill="#111827"/>
+  <text x="474" y="190" text-anchor="middle" font-size="7.5" font-weight="700" fill="#fafaf9">HIVE</text>
+
+  <rect x="438" y="206" width="72" height="22" rx="10" fill="#3b82f6" fill-opacity="0.16" stroke="#3b82f6" stroke-width="1"/>
+  <circle cx="450" cy="217" r="3" fill="#3b82f6"/>
+  <text x="460" y="216" font-size="6.5" font-weight="700" fill="#93c5fd">Build</text>
+  <text x="460" y="224" font-size="5.7" fill="#bfdbfe">active</text>
+
+  <rect x="438" y="232" width="72" height="30" rx="10" fill="#22c55e" fill-opacity="0.18" stroke="#22c55e" stroke-width="1.4"/>
+  <circle cx="450" cy="247" r="3" fill="#22c55e"/>
+  <text x="460" y="245" font-size="6.5" font-weight="700" fill="#86efac">Review</text>
+  <text x="460" y="253" font-size="5.7" fill="#bbf7d0">handoff</text>
+  <text x="460" y="260" font-size="5.4" fill="#dcfce7">needs judgment</text>
+
+  <rect x="438" y="266" width="72" height="22" rx="10" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b" stroke-width="1"/>
+  <circle cx="450" cy="277" r="3" fill="#f59e0b"/>
+  <text x="460" y="276" font-size="6.5" font-weight="700" fill="#fde68a">Research</text>
+  <text x="460" y="284" font-size="5.7" fill="#fcd34d">queued</text>
+
+  <rect x="438" y="292" width="72" height="22" rx="10" fill="#38bdf8" fill-opacity="0.15" stroke="#38bdf8" stroke-width="1"/>
+  <circle cx="450" cy="303" r="3" fill="#38bdf8"/>
+  <text x="460" y="302" font-size="6.5" font-weight="700" fill="#bae6fd">Audit</text>
+  <text x="460" y="310" font-size="5.7" fill="#bfdbfe">ready</text>
+
+  <rect x="438" y="318" width="72" height="22" rx="10" fill="#22c55e" fill-opacity="0.14" stroke="#22c55e" stroke-width="1"/>
+  <circle cx="450" cy="329" r="3" fill="#22c55e"/>
+  <text x="460" y="328" font-size="6.5" font-weight="700" fill="#bbf7d0">Special</text>
+  <text x="460" y="336" font-size="5.7" fill="#86efac">watch</text>
+
+  <path d="M474 342V358" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <polygon points="468,352 474,364 480,352" fill="#22c55e"/>
+  <rect x="392" y="366" width="164" height="42" rx="12" fill="#052e16" stroke="#22c55e" stroke-width="1"/>
+  <text x="474" y="383" text-anchor="middle" font-size="8.5" font-weight="700" fill="#f0fdf4">Steer by glance</text>
+  <text x="474" y="396" text-anchor="middle" font-size="7.1" fill="#bbf7d0">Read the row. Message once. Watch it settle.</text>
+
+  <text x="474" y="458" text-anchor="middle" font-size="9.5" font-weight="600" fill="#a1a1aa">You read one stack.</text>
+  <text x="474" y="474" text-anchor="middle" font-size="8.5" fill="#71717a">Not every log.</text>
+
+  <line x1="604" y1="258" x2="636" y2="258" stroke="#52525b" stroke-width="1.5"/>
+  <polygon points="630,252 642,258 630,264" fill="#52525b"/>
+  <text x="620" y="242" text-anchor="middle" font-size="8.5" fill="#a1a1aa">human steers</text>
+
+  <rect x="650" y="82" width="242" height="352" rx="18" fill="url(#panelFill)" stroke="#27272a" stroke-width="1" filter="url(#panelShadow)"/>
+  <text x="672" y="112" font-size="12" font-weight="700" fill="#fafaf9">3. Steering loop</text>
+  <text x="672" y="130" font-size="9.5" fill="#a1a1aa">Glance, message, handoff, audit in one loop.</text>
+
+  <rect x="672" y="154" width="198" height="52" rx="12" fill="#1c1917" stroke="#3f3f46" stroke-width="1"/>
+  <circle cx="690" cy="180" r="6" fill="#22c55e"/>
+  <text x="706" y="176" font-size="9.5" font-weight="700" fill="#fafaf9">Spot the active row.</text>
+  <text x="706" y="190" font-size="8.2" fill="#a1a1aa">The second tile still needs attention.</text>
+
+  <rect x="672" y="218" width="198" height="52" rx="12" fill="#172554" stroke="#2563eb" stroke-width="1"/>
+  <circle cx="690" cy="244" r="6" fill="#60a5fa"/>
+  <text x="706" y="240" font-size="9.5" font-weight="700" fill="#eff6ff">Read the live state.</text>
+  <text x="706" y="254" font-size="8.2" fill="#bfdbfe">The handoff is still in progress.</text>
+
+  <rect x="672" y="282" width="198" height="62" rx="12" fill="#3f2a05" stroke="#d97706" stroke-width="1"/>
+  <circle cx="690" cy="313" r="6" fill="#f59e0b"/>
+  <text x="706" y="307" font-size="9.5" font-weight="700" fill="#fffbeb">Send one instruction.</text>
+  <text x="706" y="321" font-size="8.0" fill="#fde68a">Keep review moving.</text>
+  <text x="706" y="333" font-size="8.0" fill="#fde68a">Queue research next.</text>
+
+  <rect x="672" y="352" width="198" height="52" rx="12" fill="#052e16" stroke="#16a34a" stroke-width="1"/>
+  <circle cx="690" cy="378" r="6" fill="#22c55e"/>
+  <text x="706" y="374" font-size="9.5" font-weight="700" fill="#f0fdf4">The stack settles.</text>
+  <text x="706" y="388" font-size="8.2" fill="#bbf7d0">The next move stays obvious.</text>
+
+  <line x1="42" y1="466" x2="878" y2="466" stroke="#27272a" stroke-width="1"/>
+  <text x="460" y="488" text-anchor="middle" font-size="10" fill="#71717a">What the daemon is doing underneath.</text>
+
+  <rect x="42" y="510" width="836" height="88" rx="14" fill="#141417" stroke="#27272a" stroke-width="1"/>
+  <text x="66" y="534" font-size="11" font-weight="700" fill="#fafaf9">The coordination layer</text>
+  <text x="66" y="552" font-size="9" fill="#71717a">The visual stack works because routing, telemetry, and memory already exist underneath it.</text>
+
+  <rect x="66" y="565" width="96" height="22" rx="11" fill="#1c1917" stroke="#3f3f46"/>
+  <text x="114" y="579" text-anchor="middle" font-size="7.5" fill="#fafaf9">Window order</text>
+  <rect x="178" y="565" width="96" height="22" rx="11" fill="#111827" stroke="#374151"/>
+  <text x="226" y="579" text-anchor="middle" font-size="7.5" fill="#e5e7eb">Status</text>
+  <rect x="290" y="565" width="96" height="22" rx="11" fill="#172554" stroke="#2563eb"/>
+  <text x="338" y="579" text-anchor="middle" font-size="7.5" fill="#dbeafe">Messaging</text>
+  <rect x="402" y="565" width="96" height="22" rx="11" fill="#052e16" stroke="#16a34a"/>
+  <text x="450" y="579" text-anchor="middle" font-size="7.5" fill="#dcfce7">Handoffs</text>
+  <rect x="514" y="565" width="96" height="22" rx="11" fill="#0f172a" stroke="#334155"/>
+  <text x="562" y="579" text-anchor="middle" font-size="7.5" fill="#e2e8f0">Cross-machine</text>
+  <rect x="626" y="565" width="96" height="22" rx="11" fill="#3f2a05" stroke="#d97706"/>
+  <text x="674" y="579" text-anchor="middle" font-size="7.5" fill="#fef3c7">Autopilot</text>
+  <rect x="738" y="565" width="96" height="22" rx="11" fill="#1f2937" stroke="#475569"/>
+  <text x="786" y="579" text-anchor="middle" font-size="7.5" fill="#e2e8f0">Learnings</text>
+
+  <text x="460" y="620" text-anchor="middle" font-size="10" font-weight="600" fill="#fafaf9">The dashboard for AI labor: the stack becomes glanceable, so the workflow becomes steerable.</text>
 </svg>
