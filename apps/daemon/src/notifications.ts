@@ -119,19 +119,20 @@ export class NotificationManager {
 
     this.lastNotified.set(workerId, now);
 
-    const label = state.tty || workerId.slice(0, 10);
-    const machine = state.machineLabel || state.machine;
-    const machineTag = machine ? ` @${machine}` : "";
+    const slot = state.quadrant ? `Q${state.quadrant}` : (state.tty || workerId.slice(0, 10));
+    const machine = state.machineLabel || state.machine || "";
+    // Shorten hostname: "Rohits-MacBook-Air.local" → "MacBook-Air"
+    const shortMachine = machine.replace(/\.local$/, "").replace(/^[^-]*-/, "");
     const project = state.projectName || "unknown";
     const action = state.stuckMessage?.split("\n")[0]?.slice(0, 80) || state.currentAction || "Needs attention";
-    const title = `Hive: ${label}${machineTag} stuck`;
+    const title = `${slot} stuck${shortMachine ? ` (${shortMachine})` : ""}`;
     const body = `${project} — ${action}`;
 
     try {
       const soundClause = this.config.sound ? ' sound name "Funk"' : "";
       const script = `display notification "${escapeAppleScript(body)}" with title "${escapeAppleScript(title)}"${soundClause}`;
       execSync(`osascript -e '${script}'`, { timeout: 3000, stdio: "ignore" });
-      console.log(`[notify] ${label}: ${action.slice(0, 60)}`);
+      console.log(`[notify] ${slot}: ${action.slice(0, 60)}`);
     } catch {
       // Non-critical
     }
@@ -148,11 +149,12 @@ export class NotificationManager {
     this.lastPushed.set(workerId, now);
 
     const slot = state.quadrant ? `Q${state.quadrant}` : (state.tty || workerId.slice(0, 8));
-    const machine = state.machineLabel || state.machine;
-    const machineTag = machine ? ` @${machine}` : "";
+    const machine = state.machineLabel || state.machine || "";
+    // Shorten hostname: "Rohits-MacBook-Air.local" → "MacBook-Air"
+    const shortMachine = machine.replace(/\.local$/, "").replace(/^[^-]*-/, "");
     const project = state.projectName || "unknown";
     const action = state.lastAction?.slice(0, 100) || "Task complete";
-    const title = `${slot} done${machineTag}`;
+    const title = `${slot} done${shortMachine ? ` (${shortMachine})` : ""}`;
     const body = `${project} — ${action}`;
 
     this.pushMgr
