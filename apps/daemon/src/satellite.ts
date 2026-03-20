@@ -12,7 +12,7 @@ import { WebSocket } from "ws";
 import { hostname } from "os";
 import { homedir, platform, arch, cpus, totalmem } from "os";
 import { join, basename } from "path";
-import { unlinkSync, existsSync, writeFileSync, readFileSync, mkdirSync } from "fs";
+import { unlinkSync, existsSync, writeFileSync, readFileSync, mkdirSync, readdirSync, statSync } from "fs";
 import { execFile, execFileSync } from "child_process";
 import type { MachineCapabilities } from "@hive/types";
 import { ProcessDiscovery } from "./discovery.js";
@@ -22,7 +22,20 @@ import { ProcessManager } from "./process-mgr.js";
 import { spawnTerminalWindow, closeTerminalWindow, arrangeTerminalWindows, updateTerminalTitles } from "./arrange-windows.js";
 import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
 import { patchHookUrls } from "./auth.js";
+import { AutoPilot } from "./auto-pilot.js";
+import { Watchdog } from "./watchdog.js";
 import type { WorkerState } from "./types.js";
+
+/** Get the git commit hash of the hive repo (short, 8 chars). */
+function getGitVersion(): string {
+  try {
+    // Resolve repo root from this file: apps/daemon/src/satellite.ts → ../../..
+    const repoDir = join(import.meta.dirname, "..", "..", "..");
+    return execFileSync("/usr/bin/git", ["rev-parse", "--short=8", "HEAD"], {
+      cwd: repoDir, timeout: 3000, encoding: "utf-8",
+    }).trim();
+  } catch { return "unknown"; }
+}
 
 /** Message from satellite → primary */
 interface SatelliteUpMessage {
@@ -31,6 +44,7 @@ interface SatelliteUpMessage {
   hostname?: string;
   platform?: string;
   capabilities?: MachineCapabilities;
+  version?: string;
   workers?: WorkerState[];
   workerId?: string;
   messages?: unknown[];
@@ -114,14 +128,46 @@ function detectCapabilities(): MachineCapabilities {
     caps.tensorflow = check("python3", ["-c", "import tensorflow"]);
   }
 
-  // Load custom tags from ~/.hive/capabilities.json
+  // Load custom config from ~/.hive/capabilities.json (tags + project overrides)
+  let customProjects: Record<string, string> | undefined;
   try {
     const capFile = join(homedir(), ".hive", "capabilities.json");
     if (existsSync(capFile)) {
-      const custom = JSON.parse(readFileSync(capFile, "utf-8")) as { tags?: string[] };
+      const custom = JSON.parse(readFileSync(capFile, "utf-8")) as { tags?: string[]; projects?: Record<string, string> };
       if (custom.tags) caps.tags = custom.tags;
+      if (custom.projects) customProjects = custom.projects;
     }
   } catch { /* skip */ }
+
+  // Auto-detect projects: scan common locations for git repos.
+  // Each project is identified by directory name → absolute path.
+  // Custom projects from capabilities.json override auto-detected ones.
+  const projects: Record<string, string> = {};
+  const scanDirs = [
+    join(homedir(), "factory", "projects"),  // primary convention
+    homedir(),                                // top-level repos (~/hive, ~/crawler)
+    join(homedir(), "projects"),              // common convention
+    join(homedir(), "code"),                  // common convention
+    join(homedir(), "dev"),                   // common convention
+  ];
+  for (const dir of scanDirs) {
+    try {
+      if (!existsSync(dir)) continue;
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        try {
+          if (!statSync(full).isDirectory()) continue;
+          if (existsSync(join(full, ".git"))) {
+            // Use directory name as project name (first match wins)
+            if (!projects[entry]) projects[entry] = full;
+          }
+        } catch { /* skip unreadable dirs */ }
+      }
+    } catch { /* skip */ }
+  }
+  // Custom overrides take priority
+  if (customProjects) Object.assign(projects, customProjects);
+  if (Object.keys(projects).length > 0) caps.projects = projects;
 
   return caps;
 }
@@ -136,6 +182,8 @@ export class SatelliteClient {
   private discovery: ProcessDiscovery;
   private streamer: SessionStreamer;
   private procMgr: ProcessManager;
+  private autoPilot: AutoPilot | null = null;
+  private watchdog: Watchdog | null = null;
   private reconnectDelay = 1000;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private chatSubs = new Map<string, string>(); // prefixed workerId → subKey
@@ -175,19 +223,27 @@ export class SatelliteClient {
     // Install CLAUDE.md so local agents know about the Hive API
     this.installClaudeMd();
 
+    // Auto-pilot + watchdog — same as primary, runs locally on satellite
+    this.autoPilot = new AutoPilot(this.telemetry, this.streamer);
+    this.watchdog = new Watchdog(this.telemetry);
+
     // Initial discovery scan
     this.discovery.scan();
+    this.telemetry.writeWorkersFile();
     console.log(`[satellite] Machine ID: ${this.machineId}`);
     console.log(`[satellite] Found ${this.telemetry.getAll().length} local agent(s)`);
 
     // Connect to primary
     this.connect();
 
-    // Periodic: discovery + report
+    // Periodic: full tick loop matching primary (discovery, status, auto-pilot, watchdog)
     this.tickInterval = setInterval(() => {
       this.telemetry.tick();
       this.procMgr.tick();
       this.discovery.scan();
+      this.telemetry.writeWorkersFile();
+      this.autoPilot?.tick();
+      this.watchdog?.tick();
       this.reportWorkers();
     }, 3_000);
   }
@@ -217,13 +273,14 @@ export class SatelliteClient {
       console.log(`[satellite] Connected to primary as "${this.machineId}"`);
       this.reconnectDelay = 1000;
 
-      // Send hello with capabilities
+      // Send hello with capabilities + version
       this.send({
         type: "satellite_hello",
         machineId: this.machineId,
         hostname: hostname(),
         platform: platform(),
         capabilities: this.capabilities,
+        version: getGitVersion(),
       } as SatelliteUpMessage);
 
       // Send initial worker list
