@@ -216,6 +216,7 @@ export class SatelliteClient {
     this.telemetry.registerProcessManager(this.procMgr);
     this.telemetry.setStreamer(this.streamer);
     this.telemetry.onRemoval((workerId) => this.streamer.clearWorker(workerId));
+    this.telemetry.onUpdate(() => this.reportWorkers());
 
     // Register API proxy routes so local agents can talk to the primary
     this.registerApiProxy();

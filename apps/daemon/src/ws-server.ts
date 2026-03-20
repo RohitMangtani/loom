@@ -73,9 +73,7 @@ export class WsServer {
   // catches intermediate states between hysteresis checks.
   // Key: "machineId:localWorkerId"
   private satelliteIdleCounts = new Map<string, number>();       // consecutive idle reports
-  private satelliteLastWorking = new Map<string, number>();      // timestamp of last confirmed working
   private static readonly SAT_IDLE_HYSTERESIS = 2;              // require N consecutive idle reports
-  private static readonly SAT_WORKING_COOLDOWN = 25_000;        // 25s cooldown after last confirmed working
   // Satellite auto-pilot: track stuck state for grace period + dedup
   private satelliteAutoApproved = new Set<string>();
   private satelliteStuckFirstSeen = new Map<string, number>();
@@ -130,7 +128,6 @@ export class WsServer {
         // Optimistic update + clear hysteresis so satellite stays green
         const satKey = `${sat.machineId}:${parsed.localId}`;
         this.satelliteIdleCounts.set(satKey, 0);
-        this.satelliteLastWorking.set(satKey, Date.now());
         const remote = sat.workers.find(w => w.id === parsed.localId);
         if (remote) {
           remote.status = "working";
@@ -626,18 +623,18 @@ export class WsServer {
     // Satellite status smoothing: apply hysteresis to prevent dashboard flapping.
     // The satellite reports raw status every 3s. Without smoothing, intermediate
     // states between the satellite's own hysteresis checks leak through, causing
-    // rapid working→idle→working flicker on the dashboard.
+    // single-report working→idle flicker on the dashboard.
     for (const w of incoming) {
       const key = `${machineId}:${w.id}`;
       if (w.status === "working") {
         this.satelliteIdleCounts.set(key, 0);
-        this.satelliteLastWorking.set(key, now);
       } else if (w.status === "idle") {
         const idleCount = (this.satelliteIdleCounts.get(key) || 0) + 1;
         this.satelliteIdleCounts.set(key, idleCount);
-        const lastWorking = this.satelliteLastWorking.get(key) || 0;
-        const cooldownElapsed = now - lastWorking;
-        if (idleCount < WsServer.SAT_IDLE_HYSTERESIS || cooldownElapsed < WsServer.SAT_WORKING_COOLDOWN) {
+        const definitiveIdle =
+          w.lastAction === "Session ended" ||
+          w.lastAction === "Waiting for input";
+        if (!definitiveIdle && idleCount < WsServer.SAT_IDLE_HYSTERESIS) {
           w.status = "working";
           w.currentAction = w.currentAction || "Thinking...";
         }
@@ -657,7 +654,6 @@ export class WsServer {
         }
         const key = `${machineId}:${prevId}`;
         this.satelliteIdleCounts.delete(key);
-        this.satelliteLastWorking.delete(key);
         this.satelliteOverrides.delete(key);
       }
     }
@@ -1159,7 +1155,6 @@ export class WsServer {
         for (const w of sat.workers) {
           const key = `${id}:${w.id}`;
           this.satelliteIdleCounts.delete(key);
-          this.satelliteLastWorking.delete(key);
           this.satelliteOverrides.delete(key);
         }
         sat.ws.close();
@@ -1781,7 +1776,6 @@ export class WsServer {
           // Optimistic update + clear hysteresis so satellite stays green
           const dashSatKey = `${msgSat.machineId}:${parsed.localId}`;
           this.satelliteIdleCounts.set(dashSatKey, 0);
-          this.satelliteLastWorking.set(dashSatKey, Date.now());
           const msgRemote = msgSat.workers.find(w => w.id === parsed.localId);
           if (msgRemote) {
             msgRemote.status = "working";

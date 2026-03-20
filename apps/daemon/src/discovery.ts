@@ -818,9 +818,15 @@ end tell
     const isIdleConfirmed = this.telemetry.isIdleConfirmed(id);
     if (isIdleConfirmed) {
       // Don't enforce idleConfirmed if input was sent recently — the agent
-      // is about to (or just did) receive new work. Let normal analysis decide.
+      // is about to receive new work. But if the worker just definitively ended
+      // the session or reached an idle prompt, trust that idle signal until we
+      // see real working evidence. Otherwise stale terminal/JSONL noise can
+      // drag a finished satellite worker back to green right after completion.
       const lastInput = this.telemetry.getLastInputSent(id);
       const recentInput = lastInput > 0 && Date.now() - lastInput < 15_000;
+      const stickyIdle =
+        existing.lastAction === "Session ended" ||
+        existing.lastAction === "Waiting for input";
       // Also override if JSONL tail shows high-confidence working (e.g., user
       // typed directly in Terminal — no markInputSent, but JSONL has real user
       // input at tail). Safe: highConfidence=false for noise, so phantom green
@@ -842,7 +848,8 @@ end tell
       if (cpuActive) this.consecutiveActiveChecks.set(id, activeCount);
       else this.consecutiveActiveChecks.set(id, 0);
       const cpuOverride = cpuActive && activeCount >= 2;
-      if (!recentInput && !jsonlOverride && !cpuOverride) {
+      const recentInputOverride = recentInput && !stickyIdle;
+      if (!recentInputOverride && !jsonlOverride && !cpuOverride) {
         if (ctx.latestAction) existing.lastAction = ctx.latestAction;
         existing.status = "idle";
         existing.currentAction = null;
