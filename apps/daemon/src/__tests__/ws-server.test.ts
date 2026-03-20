@@ -604,4 +604,61 @@ describe("WsServer pushState", () => {
       rmSync(auditHome, { recursive: true, force: true });
     }
   });
+
+  it("does not leak the primary home directory into remote exec when cwd is omitted", async () => {
+    const harness = createServer([]);
+    const server = harness.server as unknown as {
+      handleApiRelay: (method: string, path: string, body: Record<string, unknown> | undefined, fromMachine: string) => Promise<Record<string, unknown>>;
+      registerSatelliteSocket: (ws: WebSocket, machineId: string) => void;
+      handleSatelliteMessage: (ws: WebSocket, machineId: string, msg: Record<string, unknown>) => void;
+    };
+    const satelliteWs = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+      close: vi.fn(),
+    } as unknown as WebSocket;
+
+    server.registerSatelliteSocket(satelliteWs, "remote-mac");
+    server.handleSatelliteMessage(satelliteWs, "remote-mac", {
+      type: "satellite_hello",
+      hostname: "Remote-Mac.local",
+      version: "test",
+    });
+
+    const pending = server.handleApiRelay("POST", "/api/exec", {
+      machine: "remote-mac",
+      command: "pwd",
+    }, "local");
+
+    const sentCalls = (satelliteWs.send as unknown as { mock: { calls: [string][] } }).mock.calls;
+    const execCall = sentCalls
+      .map(([raw]) => JSON.parse(raw) as Record<string, unknown>)
+      .find((msg) => msg.type === "satellite_exec");
+    expect(execCall).toBeTruthy();
+    expect(execCall).not.toHaveProperty("cwd");
+
+    server.handleSatelliteMessage(satelliteWs, "remote-mac", {
+      type: "satellite_result",
+      requestId: execCall!.requestId,
+      ok: true,
+      cwd: "/Users/rohitmangtani",
+      stdout: "/Users/rohitmangtani\n",
+      stderr: "",
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 6,
+    });
+
+    await expect(pending).resolves.toEqual({
+      ok: true,
+      machine: "remote-mac",
+      command: "pwd",
+      cwd: "/Users/rohitmangtani",
+      stdout: "/Users/rohitmangtani\n",
+      stderr: "",
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 6,
+    });
+  });
 });

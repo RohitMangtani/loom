@@ -500,18 +500,20 @@ export class WsServer {
       ? request.machine
       : (request.fromMachine && request.fromMachine !== "local" ? request.fromMachine : "local");
 
-    const resolved = resolveExecCwd(
-      request.cwd,
-      (value) => this.resolveProjectForMachine(targetMachine, value),
-      { validateExists: targetMachine === "local" },
-    );
-    if (!resolved.cwd) {
+    const resolved = targetMachine === "local" || request.cwd
+      ? resolveExecCwd(
+          request.cwd,
+          (value) => this.resolveProjectForMachine(targetMachine, value),
+          { validateExists: targetMachine === "local" },
+        )
+      : { cwd: undefined };
+    if (!resolved.cwd && request.cwd) {
       const error = resolved.error || "Invalid working directory";
       const result = {
         ok: false,
         machine: targetMachine,
         command: request.command,
-        cwd: request.cwd || homedir(),
+        cwd: request.cwd,
         stdout: "",
         stderr: "",
         exitCode: null,
@@ -540,7 +542,7 @@ export class WsServer {
           ok: false,
           machine: targetMachine,
           command: request.command,
-          cwd: resolved.cwd,
+          cwd: resolved.cwd || request.cwd || "~",
           stdout: "",
           stderr: "",
           exitCode: null,
@@ -554,7 +556,7 @@ export class WsServer {
           sourceMachine: request.fromMachine,
           targetMachine,
           command: request.command,
-          cwd: resolved.cwd,
+          cwd: resolved.cwd || request.cwd,
           ok: false,
           error,
         });
@@ -574,7 +576,7 @@ export class WsServer {
         ok: response.ok === true,
         machine: targetMachine,
         command: request.command,
-        cwd: (response.cwd as string) || resolved.cwd,
+        cwd: (response.cwd as string) || resolved.cwd || "~",
         stdout: (response.stdout as string) || "",
         stderr: (response.stderr as string) || "",
         exitCode: typeof response.exitCode === "number" ? response.exitCode as number : null,
