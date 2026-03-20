@@ -1195,9 +1195,21 @@ export class TelemetryReceiver {
   writeWorkersFile(): void {
     const workers = this.getAll().sort((a, b) => a.startedAt - b.startedAt);
 
-    // Remove dead workers from assignments
+    // Remove dead workers from assignments, then compact: re-number
+    // sequentially so closing a terminal shifts everyone back one.
+    // Q1, Q2, Q3 → close Q2 → Q1, Q2 (not Q1, Q3).
     for (const id of this.quadrantAssignments.keys()) {
       if (!this.workers.has(id)) this.quadrantAssignments.delete(id);
+    }
+    // Compact: sort remaining assignments by current slot, re-assign 1..N
+    const assigned = [...this.quadrantAssignments.entries()]
+      .sort((a, b) => a[1] - b[1]);
+    let nextSlot = 1;
+    for (const [id, oldSlot] of assigned) {
+      if (oldSlot !== nextSlot) {
+        this.quadrantAssignments.set(id, nextSlot);
+      }
+      nextSlot++;
     }
 
     // Fire off async position detection (throttled to every 3s).
