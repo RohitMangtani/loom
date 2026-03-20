@@ -162,6 +162,7 @@ export class WsServer {
       () => this.getAllCapabilities(),
       (request) => this.spawnViaControlPlane(request),
       (workerId, fromMachine) => this.killViaControlPlane(workerId, fromMachine),
+      (machineId, action, fromMachine) => this.maintainSatelliteViaControlPlane(machineId, action, fromMachine),
     );
 
     // Auto-commit: forward satellite commit requests to the correct satellite machine
@@ -929,6 +930,12 @@ export class WsServer {
         }
         return { error: "Missing workerId" };
 
+      case "satellites":
+        if (method === "POST" && segments[2] === "repair" && body?.machine) {
+          return this.maintainSatelliteViaControlPlane(body.machine as string, body.action as string | undefined, fromMachine);
+        }
+        return { error: "Missing machine" };
+
       case "projects":
         return this.getProjects();
 
@@ -998,6 +1005,36 @@ export class WsServer {
       machines: p.machines,
     }));
     return { projects };
+  }
+
+  private maintainSatelliteViaControlPlane(
+    machineId: string,
+    action?: string,
+    fromMachine?: string,
+  ): { ok: boolean; error?: string; [key: string]: unknown } {
+    const sat = this.satellites.get(machineId);
+    if (!sat) return { ok: false, error: `Machine "${machineId}" not connected` };
+
+    const normalizedAction = action === "update" || action === "repair" || action === "reinstall"
+      ? action
+      : (sat.version === "unknown" || !sat.capabilities?.projects ? "update" : "repair");
+
+    if (normalizedAction === "update") {
+      this.sendToSatellite(sat, {
+        type: "satellite_update",
+        requestId: `maint_${Date.now()}`,
+        fromMachine,
+      });
+    } else {
+      this.sendToSatellite(sat, {
+        type: "satellite_maintenance",
+        requestId: `maint_${Date.now()}`,
+        action: normalizedAction,
+        fromMachine,
+      });
+    }
+
+    return { ok: true, machine: machineId, action: normalizedAction };
   }
 
   private resolveProjectForMachine(machineId: string | undefined, project?: string): string {

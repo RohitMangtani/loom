@@ -64,6 +64,7 @@ interface SatelliteUpMessage {
 interface SatelliteDownMessage {
   type: string;
   requestId?: string;
+  action?: string;
   workerId?: string;      // prefixed ID (machineId:localId)
   localWorkerId?: string; // local ID on this machine
   project?: string;
@@ -922,6 +923,38 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           console.log(`[satellite] Update failed: ${errMsg}`);
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: errMsg });
+        }
+        break;
+      }
+
+      case "satellite_maintenance": {
+        const repoDir = join(import.meta.dirname, "..", "..", "..");
+        const action = msg.action === "repair" || msg.action === "reinstall" ? msg.action : "repair";
+        const logPath = join(homedir(), ".hive", "logs", action === "reinstall" ? "satellite-reinstall.log" : "satellite-repair.log");
+        const primaryUrlPath = join(homedir(), ".hive", "primary-url");
+        const primaryTokenPath = join(homedir(), ".hive", "primary-token");
+
+        const detachedCommand = action === "reinstall"
+          ? `cd '${repoDir}' && PRIMARY_URL=$(cat '${primaryUrlPath}' 2>/dev/null) && PRIMARY_TOKEN=$(cat '${primaryTokenPath}' 2>/dev/null) && [ -n "$PRIMARY_URL" ] && [ -n "$PRIMARY_TOKEN" ] && /usr/bin/git pull --ff-only && nohup bash scripts/install.sh --connect "$PRIMARY_URL" "$PRIMARY_TOKEN" > '${logPath}' 2>&1 &`
+          : `cd '${repoDir}' && nohup bash scripts/doctor.sh --repair-satellite > '${logPath}' 2>&1 &`;
+
+        console.log(`[satellite] Received maintenance command — action=${action}`);
+
+        try {
+          await new Promise<void>((resolve, reject) => {
+            execFile("/bin/zsh", ["-lc", detachedCommand], { timeout: 10_000 }, (err) => err ? reject(err) : resolve());
+          });
+          this.send({
+            type: "satellite_result",
+            requestId: msg.requestId,
+            ok: true,
+            action,
+            logPath,
+          } as unknown as SatelliteUpMessage);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.log(`[satellite] Maintenance failed: ${errMsg}`);
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: errMsg });
         }
         break;

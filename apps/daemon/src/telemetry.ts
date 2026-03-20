@@ -173,6 +173,7 @@ export class TelemetryReceiver {
   private swarmCapabilitiesGetter: (() => Record<string, MachineCapabilities>) | null = null;
   private swarmSpawnHandler: ((request: SwarmSpawnRequest) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
   private swarmKillHandler: ((workerId: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
+  private swarmSatelliteMaintenanceHandler: ((machineId: string, action?: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
 
   // Workflow handoffs: workflowId → handoff context from completed steps
   private workflowHandoffs = new Map<string, string[]>();
@@ -923,11 +924,13 @@ export class TelemetryReceiver {
     capabilitiesGetter: () => Record<string, MachineCapabilities>,
     spawnHandler: (request: SwarmSpawnRequest) => { ok: boolean; error?: string; [key: string]: unknown },
     killHandler: (workerId: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown },
+    satelliteMaintenanceHandler?: (machineId: string, action?: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown },
   ): void {
     this.swarmProjectsGetter = projectsGetter;
     this.swarmCapabilitiesGetter = capabilitiesGetter;
     this.swarmSpawnHandler = spawnHandler;
     this.swarmKillHandler = killHandler;
+    this.swarmSatelliteMaintenanceHandler = satelliteMaintenanceHandler || null;
   }
 
   getSwarmProjects(): { projects: SwarmProjectEntry[] } {
@@ -958,6 +961,11 @@ export class TelemetryReceiver {
   killViaSwarm(workerId: string, fromMachine?: string): { ok: boolean; error?: string; [key: string]: unknown } {
     if (!this.swarmKillHandler) return { ok: false, error: "Kill control not available" };
     return this.swarmKillHandler(workerId, fromMachine);
+  }
+
+  maintainSatelliteViaSwarm(machineId: string, action?: string, fromMachine?: string): { ok: boolean; error?: string; [key: string]: unknown } {
+    if (!this.swarmSatelliteMaintenanceHandler) return { ok: false, error: "Satellite maintenance control not available" };
+    return this.swarmSatelliteMaintenanceHandler(machineId, action, fromMachine);
   }
 
   private getWorkerSnapshot(workerId: string): WorkerState | undefined {

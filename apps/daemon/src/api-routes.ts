@@ -339,6 +339,22 @@ export function registerApiRoutes(
     res.json(result);
   });
 
+  // POST /api/satellites/repair
+  app.post("/api/satellites/repair", requireAuth, (req, res) => {
+    const { machine, action } = req.body as { machine?: string; action?: string };
+    if (!machine) {
+      res.status(400).json({ error: "Missing machine" });
+      return;
+    }
+    const result = receiver.maintainSatelliteViaSwarm(machine, action);
+    if (!result.ok) {
+      const message = typeof result.error === "string" ? result.error : `Machine ${machine} not found`;
+      res.status(message.includes("not connected") || message.includes("not found") ? 404 : 500).json({ error: message });
+      return;
+    }
+    res.json(result);
+  });
+
   // GET /api/models — returns built-in + custom agent types for spawn dialog
   app.get("/api/models", requireAuth, (_req, res) => {
     const builtIn = [
@@ -442,5 +458,5 @@ export function registerApiRoutes(
     res.json(receiver.getSwarmCapabilities());
   });
 
-  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/kill, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange, /api/capabilities");
+  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/kill, /api/satellites/repair, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange, /api/capabilities");
 }
