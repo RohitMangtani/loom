@@ -40,6 +40,17 @@ async function createHarness(): Promise<Harness> {
     spawnViaSwarm: vi.fn(() => ({ ok: true, machine: "satellite-1", model: "claude", project: "/Users/rohitmangtani/hive" })),
     killViaSwarm: vi.fn(() => ({ ok: true, workerId: "satellite-1:w1" })),
     maintainSatelliteViaSwarm: vi.fn(() => ({ ok: true, machine: "satellite-1", action: "reinstall" })),
+    execViaSwarm: vi.fn(async () => ({
+      ok: true,
+      machine: "satellite-1",
+      command: "pwd",
+      cwd: "/Users/rohitmangtani/hive",
+      stdout: "/Users/rohitmangtani/hive\n",
+      stderr: "",
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 12,
+    })),
     getSwarmProjects: vi.fn(() => ({
       projects: [
         {
@@ -152,5 +163,39 @@ describe("registerApiRoutes", () => {
 
     expect(harness.receiver.maintainSatelliteViaSwarm).toHaveBeenCalledWith("satellite-1", "reinstall");
     expect(await repairRes.json()).toEqual({ ok: true, machine: "satellite-1", action: "reinstall" });
+  });
+
+  it("routes exec requests through the swarm control plane", async () => {
+    const harness = await createHarness();
+    harnesses.push(harness);
+
+    const execRes = await fetch(`${harness.baseUrl}/api/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        machine: "satellite-1",
+        cwd: "hive",
+        command: "pwd",
+        timeoutMs: 5_000,
+      }),
+    });
+
+    expect(harness.receiver.execViaSwarm).toHaveBeenCalledWith({
+      machine: "satellite-1",
+      cwd: "hive",
+      command: "pwd",
+      timeoutMs: 5_000,
+    });
+    expect(await execRes.json()).toEqual({
+      ok: true,
+      machine: "satellite-1",
+      command: "pwd",
+      cwd: "/Users/rohitmangtani/hive",
+      stdout: "/Users/rohitmangtani/hive\n",
+      stderr: "",
+      exitCode: 0,
+      timedOut: false,
+      durationMs: 12,
+    });
   });
 });

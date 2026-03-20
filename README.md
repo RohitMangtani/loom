@@ -121,6 +121,8 @@ Satellite terminals show a machine badge on the dashboard so you can tell which 
 
 The connect install is idempotent. Re-running it on the same Mac updates the stored primary URL/token, cleans out stale satellite processes and duplicate launch agents, and re-installs the background service cleanly.
 
+If a satellite gets into a reconnect loop or stale launchd state, Hive now self-heals on the remote machine. A connected primary can trigger `update`, `repair`, or `reinstall`, and a disconnected satellite escalates from local repair to local reinstall automatically using the stored `~/.hive/primary-url` and `~/.hive/primary-token`.
+
 ### Local-only install (no Vercel needed)
 
 If you just want localhost access without deploying anywhere:
@@ -199,6 +201,14 @@ npm run doctor -- --repair-satellite
 ```
 
 Use this if a machine was migrated, manually started twice, or has stale launchd/runtime state. Hive now enforces a single primary daemon and a single satellite client per machine, and `doctor` resets drift without removing any dashboard features.
+
+Connected machines can also be repaired from the primary:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"machine":"your-macbook","action":"repair"}' \
+  http://localhost:3001/api/satellites/repair
+```
 
 **Agents** (open Terminal.app windows and run any supported CLI you installed)
 ```bash
@@ -311,6 +321,17 @@ All endpoints require the auth token from `~/.hive/token` via the `Authorization
 | `POST` | `/api/message` | `{workerId, content}` | Send a prompt to any agent. Queued if busy, returns message ID. |
 | `GET` | `/api/message-queue` | — | View queued messages with IDs, previews, and timestamps |
 | `DELETE` | `/api/message-queue/:id` | — | Cancel a queued message before it's delivered |
+
+### Cross-Machine Control
+| Method | Endpoint | Body / Query | Description |
+|--------|----------|--------------|-------------|
+| `POST` | `/api/exec` | `{command, cwd?, machine?, timeoutMs?}` | Run an audited shell command on the local machine or any connected satellite. Non-zero exit codes come back in the JSON response. |
+| `POST` | `/api/spawn` | `{project?, model?, task?, targetQuadrant?, machine?}` | Spawn an agent on the local machine or a connected satellite. |
+| `POST` | `/api/kill` | `{workerId}` | Kill a local or remote worker. |
+| `POST` | `/api/satellites/repair` | `{machine, action?}` | Ask a connected satellite to `update`, `repair`, or `reinstall` itself. |
+| `GET` | `/api/projects` | — | List projects merged across all machines. |
+| `GET` | `/api/capabilities` | — | List auto-detected machine capabilities and per-machine project paths. |
+| `GET` | `/api/control-plane-audit` | `?limit=100` (optional) | Read the append-only control-plane audit log for exec, spawn, kill, and maintenance actions. |
 
 ### Task Queue
 | Method | Endpoint | Body | Description |

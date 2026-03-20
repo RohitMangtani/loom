@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, appendFileSync, readFileSync, readdirSync, statS
 import type { ProcessManager } from "./process-mgr.js";
 import { ProcessDiscovery } from "./discovery.js";
 import type { TelemetryReceiver } from "./telemetry.js";
+import { getControlPlaneAuditPath, readControlPlaneAudit } from "./control-plane-audit.js";
 
 export function registerApiRoutes(
   app: ReturnType<typeof express>,
@@ -355,6 +356,45 @@ export function registerApiRoutes(
     res.json(result);
   });
 
+  // POST /api/exec
+  app.post("/api/exec", requireAuth, async (req, res) => {
+    const { command, cwd, timeoutMs, machine } = req.body as {
+      command?: string;
+      cwd?: string;
+      timeoutMs?: number;
+      machine?: string;
+    };
+    if (!command?.trim()) {
+      res.status(400).json({ error: "Missing command" });
+      return;
+    }
+    const result = await receiver.execViaSwarm({
+      command,
+      cwd,
+      timeoutMs,
+      machine,
+    });
+    if (result.error && result.exitCode == null) {
+      const message = result.error;
+      const status = result.timedOut ? 408
+        : message.includes("not connected") ? 404
+        : message.includes("Working directory not found") ? 400
+          : 500;
+      res.status(status).json(result);
+      return;
+    }
+    res.json(result);
+  });
+
+  // GET /api/control-plane-audit
+  app.get("/api/control-plane-audit", requireAuth, (req, res) => {
+    const limit = Number(req.query.limit || 100);
+    res.json({
+      path: getControlPlaneAuditPath(),
+      entries: readControlPlaneAudit(limit),
+    });
+  });
+
   // GET /api/models — returns built-in + custom agent types for spawn dialog
   app.get("/api/models", requireAuth, (_req, res) => {
     const builtIn = [
@@ -458,5 +498,5 @@ export function registerApiRoutes(
     res.json(receiver.getSwarmCapabilities());
   });
 
-  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/kill, /api/satellites/repair, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange, /api/capabilities");
+  console.log("  Dispatch API registered: /api/workers, /api/context, /api/message, /api/message-queue, /api/queue, /api/locks, /api/conflicts, /api/scratchpad, /api/audit, /api/artifacts, /api/learning, /api/signals, /api/debug, /api/spawn, /api/kill, /api/satellites/repair, /api/exec, /api/projects, /api/reviews, /api/notifications/config, /api/rearrange, /api/capabilities, /api/control-plane-audit");
 }

@@ -14,6 +14,8 @@ import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState, ConnectedMa
 import { execFileSync } from "child_process";
 import type { WebPushManager } from "./web-push.js";
 import { scanLocalProjects } from "./project-discovery.js";
+import { appendControlPlaneAudit, getControlPlaneAuditPath, readControlPlaneAudit } from "./control-plane-audit.js";
+import { normalizeExecTimeout, resolveExecCwd, runShellExec } from "./shell-exec.js";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
 function getLocalVersion(): string {
@@ -79,6 +81,7 @@ export class WsServer {
   private satelliteStuckFirstSeen = new Map<string, number>();
   // Pending satellite context requests: requestId → resolver
   private pendingSatelliteRequests = new Map<string, { resolve: (data: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pendingSatelliteCommands = new Map<string, { resolve: (data: Record<string, unknown>) => void; timer: ReturnType<typeof setTimeout> }>();
   // Satellite handshake race: buffer worker snapshots that arrive before hello.
   private pendingSatelliteWorkers = new Map<string, WorkerState[]>();
 
@@ -163,6 +166,7 @@ export class WsServer {
       (request) => this.spawnViaControlPlane(request),
       (workerId, fromMachine) => this.killViaControlPlane(workerId, fromMachine),
       (machineId, action, fromMachine) => this.maintainSatelliteViaControlPlane(machineId, action, fromMachine),
+      (request) => this.execViaControlPlane(request),
     );
 
     // Auto-commit: forward satellite commit requests to the correct satellite machine
@@ -449,6 +453,176 @@ export class WsServer {
     });
   }
 
+  private requestSatelliteCommand(
+    sat: SatelliteConnection,
+    requestId: string,
+    msg: Record<string, unknown>,
+    timeoutMs = 70_000,
+  ): Promise<Record<string, unknown>> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingSatelliteCommands.delete(requestId);
+        resolve({
+          ok: false,
+          error: `Satellite command timed out after ${timeoutMs}ms`,
+          exitCode: null,
+          timedOut: true,
+        });
+      }, timeoutMs);
+      this.pendingSatelliteCommands.set(requestId, { resolve, timer });
+      this.sendToSatellite(sat, msg);
+    });
+  }
+
+  private recordControlPlaneAudit(entry: Parameters<typeof appendControlPlaneAudit>[0]): void {
+    appendControlPlaneAudit(entry);
+  }
+
+  private async execViaControlPlane(request: {
+    command: string;
+    cwd?: string;
+    timeoutMs?: number;
+    machine?: string;
+    fromMachine?: string;
+  }): Promise<{
+    ok: boolean;
+    machine: string;
+    command: string;
+    cwd: string;
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+    timedOut: boolean;
+    durationMs: number;
+    error?: string;
+  }> {
+    const targetMachine = request.machine && request.machine !== "local"
+      ? request.machine
+      : (request.fromMachine && request.fromMachine !== "local" ? request.fromMachine : "local");
+
+    const resolved = resolveExecCwd(
+      request.cwd,
+      (value) => this.resolveProjectForMachine(targetMachine, value),
+      { validateExists: targetMachine === "local" },
+    );
+    if (!resolved.cwd) {
+      const error = resolved.error || "Invalid working directory";
+      const result = {
+        ok: false,
+        machine: targetMachine,
+        command: request.command,
+        cwd: request.cwd || homedir(),
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        timedOut: false,
+        durationMs: 0,
+        error,
+      };
+      this.recordControlPlaneAudit({
+        ts: Date.now(),
+        type: "exec",
+        sourceMachine: request.fromMachine,
+        targetMachine,
+        command: request.command,
+        cwd: request.cwd,
+        ok: false,
+        error,
+      });
+      return result;
+    }
+
+    if (targetMachine !== "local") {
+      const sat = this.satellites.get(targetMachine);
+      if (!sat) {
+        const error = `Machine "${targetMachine}" not connected`;
+        const result = {
+          ok: false,
+          machine: targetMachine,
+          command: request.command,
+          cwd: resolved.cwd,
+          stdout: "",
+          stderr: "",
+          exitCode: null,
+          timedOut: false,
+          durationMs: 0,
+          error,
+        };
+        this.recordControlPlaneAudit({
+          ts: Date.now(),
+          type: "exec",
+          sourceMachine: request.fromMachine,
+          targetMachine,
+          command: request.command,
+          cwd: resolved.cwd,
+          ok: false,
+          error,
+        });
+        return result;
+      }
+
+      const requestId = `exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const execTimeoutMs = normalizeExecTimeout(request.timeoutMs);
+      const response = await this.requestSatelliteCommand(sat, requestId, {
+        type: "satellite_exec",
+        requestId,
+        command: request.command,
+        cwd: resolved.cwd,
+        timeoutMs: execTimeoutMs,
+      }, execTimeoutMs + 5_000);
+      const result = {
+        ok: response.ok === true,
+        machine: targetMachine,
+        command: request.command,
+        cwd: (response.cwd as string) || resolved.cwd,
+        stdout: (response.stdout as string) || "",
+        stderr: (response.stderr as string) || "",
+        exitCode: typeof response.exitCode === "number" ? response.exitCode as number : null,
+        timedOut: response.timedOut === true,
+        durationMs: typeof response.durationMs === "number" ? response.durationMs as number : 0,
+        ...(typeof response.error === "string" ? { error: response.error as string } : {}),
+      };
+      this.recordControlPlaneAudit({
+        ts: Date.now(),
+        type: "exec",
+        sourceMachine: request.fromMachine,
+        targetMachine,
+        command: request.command,
+        cwd: result.cwd,
+        ok: result.ok,
+        exitCode: result.exitCode,
+        timedOut: result.timedOut,
+        durationMs: result.durationMs,
+        ...(result.error ? { error: result.error } : {}),
+      });
+      return result;
+    }
+
+    const result = await runShellExec({
+      command: request.command,
+      cwd: resolved.cwd,
+      timeoutMs: request.timeoutMs,
+    });
+    const response = {
+      ...result,
+      machine: "local",
+    };
+    this.recordControlPlaneAudit({
+      ts: Date.now(),
+      type: "exec",
+      sourceMachine: request.fromMachine,
+      targetMachine: "local",
+      command: request.command,
+      cwd: response.cwd,
+      ok: response.ok,
+      exitCode: response.exitCode,
+      timedOut: response.timedOut,
+      durationMs: response.durationMs,
+      ...(response.error ? { error: response.error } : {}),
+    });
+    return response;
+  }
+
   /** Handle messages from a satellite connection. */
   private handleSatelliteMessage(ws: WebSocket, machineId: string, msg: Record<string, unknown>): void {
     const activeSat = this.satellites.get(machineId);
@@ -548,6 +722,16 @@ export class WsServer {
       }
 
       case "satellite_result": {
+        const requestId = msg.requestId as string | undefined;
+        if (requestId) {
+          const pending = this.pendingSatelliteCommands.get(requestId);
+          if (pending) {
+            clearTimeout(pending.timer);
+            this.pendingSatelliteCommands.delete(requestId);
+            pending.resolve(msg);
+            break;
+          }
+        }
         // Command results — currently fire-and-forget, logged for debugging
         if (!(msg as Record<string, unknown>).ok) {
           console.log(`[satellite] Command failed on "${machineId}": ${msg.error || "unknown"}`);
@@ -936,11 +1120,29 @@ export class WsServer {
         }
         return { error: "Missing machine" };
 
+      case "exec":
+        if (method === "POST" && body?.command) {
+          return this.execViaControlPlane({
+            command: body.command as string,
+            cwd: body.cwd as string | undefined,
+            timeoutMs: body.timeoutMs as number | undefined,
+            machine: body.machine as string | undefined,
+            fromMachine,
+          });
+        }
+        return { error: "Missing command" };
+
       case "projects":
         return this.getProjects();
 
       case "capabilities":
         return this.getAllCapabilities();
+
+      case "control-plane-audit":
+        return {
+          path: getControlPlaneAuditPath(),
+          entries: readControlPlaneAudit(Number(query.get("limit") || 100)),
+        };
 
       case "rearrange":
         if (method === "POST") {
@@ -1013,7 +1215,19 @@ export class WsServer {
     fromMachine?: string,
   ): { ok: boolean; error?: string; [key: string]: unknown } {
     const sat = this.satellites.get(machineId);
-    if (!sat) return { ok: false, error: `Machine "${machineId}" not connected` };
+    if (!sat) {
+      const error = `Machine "${machineId}" not connected`;
+      this.recordControlPlaneAudit({
+        ts: Date.now(),
+        type: "maintenance",
+        sourceMachine: fromMachine,
+        targetMachine: machineId,
+        action,
+        ok: false,
+        error,
+      });
+      return { ok: false, error };
+    }
 
     const normalizedAction = action === "update" || action === "repair" || action === "reinstall"
       ? action
@@ -1034,6 +1248,14 @@ export class WsServer {
       });
     }
 
+    this.recordControlPlaneAudit({
+      ts: Date.now(),
+      type: "maintenance",
+      sourceMachine: fromMachine,
+      targetMachine: machineId,
+      action: normalizedAction,
+      ok: true,
+    });
     return { ok: true, machine: machineId, action: normalizedAction };
   }
 
@@ -1066,6 +1288,15 @@ export class WsServer {
     if (targetMachine) {
       const targetSat = this.satellites.get(targetMachine);
       if (!targetSat) {
+        this.recordControlPlaneAudit({
+          ts: Date.now(),
+          type: "spawn",
+          sourceMachine: request.fromMachine,
+          targetMachine,
+          cwd: request.project,
+          ok: false,
+          error: `Machine "${targetMachine}" not connected`,
+        });
         return { ok: false, error: `Machine "${targetMachine}" not connected` };
       }
       const satProject = this.resolveProjectForMachine(targetMachine, request.project);
@@ -1078,6 +1309,15 @@ export class WsServer {
         targetQuadrant: request.targetQuadrant,
       });
       console.log(`Spawn routed to satellite "${targetMachine}" project="${satProject}" (model=${request.model || "claude"})`);
+      this.recordControlPlaneAudit({
+        ts: Date.now(),
+        type: "spawn",
+        sourceMachine: request.fromMachine,
+        targetMachine,
+        cwd: satProject,
+        action: request.model || "claude",
+        ok: true,
+      });
       return { ok: true, model: request.model || "claude", project: satProject, machine: targetMachine };
     }
 
@@ -1137,14 +1377,35 @@ export class WsServer {
       });
     }
     console.log(`Spawned ${model} terminal for ${real} (tty=${termResult.tty})`);
+    this.recordControlPlaneAudit({
+      ts: Date.now(),
+      type: "spawn",
+      sourceMachine: request.fromMachine,
+      targetMachine: "local",
+      cwd: real,
+      action: model,
+      ok: true,
+    });
     return { ok: true, model, project: real, machine: "local" };
   }
 
-  private killViaControlPlane(workerId: string, _fromMachine?: string): { ok: boolean; error?: string; workerId?: string } {
+  private killViaControlPlane(workerId: string, fromMachine?: string): { ok: boolean; error?: string; workerId?: string } {
     const killSat = this.getSatelliteForWorker(workerId);
     if (killSat) {
       const parsed = this.parseSatelliteWorker(workerId);
-      if (!parsed) return { ok: false, error: `Worker ${workerId} not found` };
+      if (!parsed) {
+        const error = `Worker ${workerId} not found`;
+        this.recordControlPlaneAudit({
+          ts: Date.now(),
+          type: "kill",
+          sourceMachine: fromMachine,
+          targetMachine: "unknown",
+          workerId,
+          ok: false,
+          error,
+        });
+        return { ok: false, error };
+      }
       this.sendToSatellite(killSat, {
         type: "satellite_kill",
         requestId: `kill_${Date.now()}`,
@@ -1154,11 +1415,31 @@ export class WsServer {
       killSat.workers = killSat.workers.filter(w => w.id !== parsed.localId);
       this.lastWorkersSnapshot = null;
       console.log(`Killed satellite worker ${workerId}`);
+      this.recordControlPlaneAudit({
+        ts: Date.now(),
+        type: "kill",
+        sourceMachine: fromMachine,
+        targetMachine: killSat.machineId,
+        workerId,
+        ok: true,
+      });
       return { ok: true, workerId };
     }
 
     const worker = this.telemetry.get(workerId);
-    if (!worker) return { ok: false, error: `Worker ${workerId} not found` };
+    if (!worker) {
+      const error = `Worker ${workerId} not found`;
+      this.recordControlPlaneAudit({
+        ts: Date.now(),
+        type: "kill",
+        sourceMachine: fromMachine,
+        targetMachine: "local",
+        workerId,
+        ok: false,
+        error,
+      });
+      return { ok: false, error };
+    }
     const killPid = worker.pid;
     const killTty = worker.tty;
 
@@ -1181,6 +1462,14 @@ export class WsServer {
     }
 
     console.log(`Killed worker ${workerId} (pid=${killPid}, tty=${killTty})`);
+    this.recordControlPlaneAudit({
+      ts: Date.now(),
+      type: "kill",
+      sourceMachine: fromMachine,
+      targetMachine: worker.machine || "local",
+      workerId,
+      ok: true,
+    });
     return { ok: true, workerId };
   }
 

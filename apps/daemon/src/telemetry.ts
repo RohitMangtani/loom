@@ -70,6 +70,27 @@ interface SwarmSpawnRequest {
   fromMachine?: string;
 }
 
+interface SwarmExecRequest {
+  command: string;
+  cwd?: string;
+  timeoutMs?: number;
+  machine?: string;
+  fromMachine?: string;
+}
+
+interface SwarmExecResult {
+  ok: boolean;
+  machine: string;
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  durationMs: number;
+  error?: string;
+}
+
 export interface WorkerContextSnapshot {
   workerId: string;
   quadrant?: number;
@@ -174,6 +195,7 @@ export class TelemetryReceiver {
   private swarmSpawnHandler: ((request: SwarmSpawnRequest) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
   private swarmKillHandler: ((workerId: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
   private swarmSatelliteMaintenanceHandler: ((machineId: string, action?: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
+  private swarmExecHandler: ((request: SwarmExecRequest) => Promise<SwarmExecResult>) | null = null;
 
   // Workflow handoffs: workflowId → handoff context from completed steps
   private workflowHandoffs = new Map<string, string[]>();
@@ -925,12 +947,14 @@ export class TelemetryReceiver {
     spawnHandler: (request: SwarmSpawnRequest) => { ok: boolean; error?: string; [key: string]: unknown },
     killHandler: (workerId: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown },
     satelliteMaintenanceHandler?: (machineId: string, action?: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown },
+    execHandler?: (request: SwarmExecRequest) => Promise<SwarmExecResult>,
   ): void {
     this.swarmProjectsGetter = projectsGetter;
     this.swarmCapabilitiesGetter = capabilitiesGetter;
     this.swarmSpawnHandler = spawnHandler;
     this.swarmKillHandler = killHandler;
     this.swarmSatelliteMaintenanceHandler = satelliteMaintenanceHandler || null;
+    this.swarmExecHandler = execHandler || null;
   }
 
   getSwarmProjects(): { projects: SwarmProjectEntry[] } {
@@ -966,6 +990,24 @@ export class TelemetryReceiver {
   maintainSatelliteViaSwarm(machineId: string, action?: string, fromMachine?: string): { ok: boolean; error?: string; [key: string]: unknown } {
     if (!this.swarmSatelliteMaintenanceHandler) return { ok: false, error: "Satellite maintenance control not available" };
     return this.swarmSatelliteMaintenanceHandler(machineId, action, fromMachine);
+  }
+
+  async execViaSwarm(request: SwarmExecRequest): Promise<SwarmExecResult> {
+    if (!this.swarmExecHandler) {
+      return {
+        ok: false,
+        machine: request.machine || request.fromMachine || "local",
+        command: request.command,
+        cwd: request.cwd || HOME,
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        timedOut: false,
+        durationMs: 0,
+        error: "Exec control not available",
+      };
+    }
+    return this.swarmExecHandler(request);
   }
 
   private getWorkerSnapshot(workerId: string): WorkerState | undefined {

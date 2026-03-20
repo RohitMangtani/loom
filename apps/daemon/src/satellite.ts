@@ -25,6 +25,12 @@ import { patchHookUrls } from "./auth.js";
 import { AutoPilot } from "./auto-pilot.js";
 import { Watchdog } from "./watchdog.js";
 import type { WorkerState } from "./types.js";
+import { resolveExecCwd, runShellExec } from "./shell-exec.js";
+import {
+  chooseSatelliteRecoveryAction,
+  SATELLITE_STABLE_CONNECTION_MS,
+} from "./satellite-recovery.js";
+import { appendControlPlaneAudit } from "./control-plane-audit.js";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
 function getGitVersion(): string {
@@ -72,6 +78,9 @@ interface SatelliteDownMessage {
   targetQuadrant?: number;
   initialMessage?: string;
   content?: string;
+  command?: string;
+  cwd?: string;
+  timeoutMs?: number;
   optionIndex?: number;
   files?: string[];       // auto-commit: file paths to commit
   message?: string;       // auto-commit: commit message
@@ -192,6 +201,13 @@ export class SatelliteClient {
   // API relay: pending requests awaiting response from primary
   private pendingApiRequests = new Map<string, { resolve: (data: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
   private apiRequestId = 0;
+  private connectedAt = 0;
+  private offlineSince = 0;
+  private consecutiveFailures = 0;
+  private shortLivedConnections = 0;
+  private selfHealAttempts = 0;
+  private lastSelfHealAt = 0;
+  private selfHealInFlight = false;
 
   constructor(primaryUrl: string, token: string, localToken: string) {
     this.primaryUrl = primaryUrl;
@@ -288,6 +304,9 @@ export class SatelliteClient {
       }
       console.log(`[satellite] Connected to primary as "${this.machineId}"`);
       this.reconnectDelay = 1000;
+      this.connectedAt = Date.now();
+      this.offlineSince = 0;
+      this.selfHealInFlight = false;
 
       // Send hello with capabilities + version
       this.send({
@@ -316,18 +335,99 @@ export class SatelliteClient {
     ws.on("close", () => {
       if (this.ws !== ws) return;
       this.ws = null;
-      console.log(`[satellite] Disconnected. Reconnecting in ${this.reconnectDelay / 1000}s...`);
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectTimer = null;
-        this.connect();
-      }, this.reconnectDelay);
-      this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30_000);
+      this.handleDisconnect();
     });
 
     ws.on("error", () => {
       if (this.ws !== ws) return;
       // onclose will fire next — reconnect happens there
     });
+  }
+
+  private scheduleReconnect(): void {
+    console.log(`[satellite] Disconnected. Reconnecting in ${this.reconnectDelay / 1000}s...`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, this.reconnectDelay);
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30_000);
+  }
+
+  private handleDisconnect(): void {
+    const now = Date.now();
+    const wasConnectedAt = this.connectedAt;
+    const connectionAge = wasConnectedAt ? now - wasConnectedAt : 0;
+    const wasStable = connectionAge >= SATELLITE_STABLE_CONNECTION_MS;
+
+    if (!this.offlineSince) this.offlineSince = now;
+    if (wasStable) {
+      this.consecutiveFailures = 1;
+      this.shortLivedConnections = 0;
+      this.selfHealAttempts = 0;
+    } else {
+      this.consecutiveFailures += 1;
+      this.shortLivedConnections += 1;
+    }
+    this.connectedAt = 0;
+
+    const action = chooseSatelliteRecoveryAction({
+      consecutiveFailures: this.consecutiveFailures,
+      shortLivedConnections: this.shortLivedConnections,
+      offlineMs: now - this.offlineSince,
+      selfHealAttempts: this.selfHealAttempts,
+      msSinceLastSelfHeal: this.lastSelfHealAt ? now - this.lastSelfHealAt : Number.POSITIVE_INFINITY,
+    });
+
+    if (action !== "none") {
+      void this.triggerSelfHeal(action);
+      return;
+    }
+
+    this.scheduleReconnect();
+  }
+
+  private async triggerSelfHeal(action: "repair" | "reinstall"): Promise<void> {
+    if (this.selfHealInFlight) return;
+    this.selfHealInFlight = true;
+    this.selfHealAttempts += 1;
+    this.lastSelfHealAt = Date.now();
+
+    const repoDir = join(import.meta.dirname, "..", "..", "..");
+    const logPath = join(homedir(), ".hive", "logs", `satellite-self-heal-${action}.log`);
+    const primaryUrlPath = join(homedir(), ".hive", "primary-url");
+    const primaryTokenPath = join(homedir(), ".hive", "primary-token");
+    const detachedCommand = action === "reinstall"
+      ? `cd '${repoDir}' && PRIMARY_URL=$(cat '${primaryUrlPath}' 2>/dev/null) && PRIMARY_TOKEN=$(cat '${primaryTokenPath}' 2>/dev/null) && [ -n "$PRIMARY_URL" ] && [ -n "$PRIMARY_TOKEN" ] && nohup bash scripts/install.sh --connect "$PRIMARY_URL" "$PRIMARY_TOKEN" > '${logPath}' 2>&1 &`
+      : `cd '${repoDir}' && nohup bash scripts/doctor.sh --repair-satellite > '${logPath}' 2>&1 &`;
+
+    console.log(`[satellite] Self-heal triggered: ${action} (failures=${this.consecutiveFailures}, short=${this.shortLivedConnections})`);
+    appendControlPlaneAudit({
+      ts: Date.now(),
+      type: "maintenance",
+      targetMachine: this.machineId,
+      action: `self-heal:${action}`,
+      ok: true,
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        execFile("/bin/zsh", ["-lc", detachedCommand], { timeout: 10_000 }, (err) => err ? reject(err) : resolve());
+      });
+      setTimeout(() => process.exit(0), 1_000);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      console.log(`[satellite] Self-heal failed: ${error}`);
+      appendControlPlaneAudit({
+        ts: Date.now(),
+        type: "maintenance",
+        targetMachine: this.machineId,
+        action: `self-heal:${action}`,
+        ok: false,
+        error,
+      });
+      this.selfHealInFlight = false;
+      this.scheduleReconnect();
+    }
   }
 
   private send(msg: SatelliteUpMessage): void {
@@ -457,6 +557,7 @@ Daemon: http://127.0.0.1:3001 | Token: \`$(cat ~/.hive/token)\` | Auth header: \
 | \`GET /api/signals\` | Worker signals |
 | \`GET /api/models\` | Available agent models |
 | \`GET /api/projects\` | Available projects |
+| \`POST /api/exec {command, cwd?, machine?, timeoutMs?}\` | Execute an audited shell command on the local or a remote machine |
 
 ### Cross-Machine Communication
 
@@ -769,6 +870,51 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           requestId: msg.requestId,
           context,
           chatHistory,
+        } as unknown as SatelliteUpMessage);
+        break;
+      }
+
+      case "satellite_exec": {
+        const command = msg.command || "";
+        if (!command.trim()) {
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: "Missing command" });
+          return;
+        }
+
+        const resolved = resolveExecCwd(msg.cwd);
+        if (!resolved.cwd) {
+          this.send({
+            type: "satellite_result",
+            requestId: msg.requestId,
+            ok: false,
+            error: resolved.error || "Invalid working directory",
+            command,
+            cwd: msg.cwd,
+          } as unknown as SatelliteUpMessage);
+          return;
+        }
+
+        const result = await runShellExec({
+          command,
+          cwd: resolved.cwd,
+          timeoutMs: msg.timeoutMs,
+        });
+        appendControlPlaneAudit({
+          ts: Date.now(),
+          type: "exec",
+          targetMachine: this.machineId,
+          command,
+          cwd: result.cwd,
+          ok: result.ok,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          durationMs: result.durationMs,
+          ...(result.error ? { error: result.error } : {}),
+        });
+        this.send({
+          type: "satellite_result",
+          requestId: msg.requestId,
+          ...result,
         } as unknown as SatelliteUpMessage);
         break;
       }

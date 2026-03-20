@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { WsServer } from "../ws-server.js";
 
 type RemovalHandler = () => void;
@@ -519,5 +522,86 @@ describe("WsServer pushState", () => {
         { role: "assistant", content: "remote reply" },
       ],
     });
+  });
+
+  it("routes exec requests to the active satellite and waits for the result", async () => {
+    const auditHome = mkdtempSync(join(tmpdir(), "hive-audit-"));
+    const previousHiveHome = process.env.HIVE_HOME;
+    process.env.HIVE_HOME = auditHome;
+
+    const harness = createServer([]);
+    const server = harness.server as unknown as {
+      handleApiRelay: (method: string, path: string, body: Record<string, unknown> | undefined, fromMachine: string) => Promise<Record<string, unknown>>;
+      registerSatelliteSocket: (ws: WebSocket, machineId: string) => void;
+      handleSatelliteMessage: (ws: WebSocket, machineId: string, msg: Record<string, unknown>) => void;
+    };
+    const satelliteWs = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+      close: vi.fn(),
+    } as unknown as WebSocket;
+
+    try {
+      server.registerSatelliteSocket(satelliteWs, "remote-mac");
+      server.handleSatelliteMessage(satelliteWs, "remote-mac", {
+        type: "satellite_hello",
+        hostname: "Remote-Mac.local",
+        version: "test",
+        capabilities: {
+          projects: {
+            hive: "/Users/rohitmangtani/hive",
+          },
+        },
+      });
+
+      const pending = server.handleApiRelay("POST", "/api/exec", {
+        machine: "remote-mac",
+        cwd: "hive",
+        command: "pwd",
+      }, "local");
+
+      const sentCalls = (satelliteWs.send as unknown as { mock: { calls: [string][] } }).mock.calls;
+      const execCall = sentCalls
+        .map(([raw]) => JSON.parse(raw) as Record<string, unknown>)
+        .find((msg) => msg.type === "satellite_exec");
+      expect(execCall).toBeTruthy();
+      const sentPayload = execCall!;
+      expect(sentPayload).toMatchObject({
+        type: "satellite_exec",
+        command: "pwd",
+        cwd: "/Users/rohitmangtani/hive",
+      });
+
+      server.handleSatelliteMessage(satelliteWs, "remote-mac", {
+        type: "satellite_result",
+        requestId: sentPayload.requestId,
+        ok: true,
+        cwd: "/Users/rohitmangtani/hive",
+        stdout: "/Users/rohitmangtani/hive\n",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 9,
+      });
+
+      await expect(pending).resolves.toEqual({
+        ok: true,
+        machine: "remote-mac",
+        command: "pwd",
+        cwd: "/Users/rohitmangtani/hive",
+        stdout: "/Users/rohitmangtani/hive\n",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 9,
+      });
+    } finally {
+      if (previousHiveHome === undefined) {
+        delete process.env.HIVE_HOME;
+      } else {
+        process.env.HIVE_HOME = previousHiveHome;
+      }
+      rmSync(auditHome, { recursive: true, force: true });
+    }
   });
 });
