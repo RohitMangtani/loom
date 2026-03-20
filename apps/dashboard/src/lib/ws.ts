@@ -46,20 +46,41 @@ export function useHive(daemonUrl: string) {
     []
   );
 
-  /** Subscribe to a worker's chat stream */
+  // Track whether we received a non-empty full history for the current subscription.
+  // If not, retry after a delay (session file might not be mapped yet).
+  const chatReceivedRef = useRef(false);
+  const chatRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Subscribe to a worker's chat stream.
+   *  force=true bypasses the idempotent guard (re-subscribes even if already subscribed). */
   const subscribeTo = useCallback(
-    (workerId: string | null) => {
-      // Idempotent: skip if already subscribed to this worker.
+    (workerId: string | null, force?: boolean) => {
+      // Idempotent: skip if already subscribed to this worker (unless forced).
       // Prevents double-fire from onPointerDown + onClick racing.
-      if (workerId === subscribedRef.current) return;
+      if (!force && workerId === subscribedRef.current) return;
+
+      // Clear retry timer
+      if (chatRetryTimerRef.current) {
+        clearTimeout(chatRetryTimerRef.current);
+        chatRetryTimerRef.current = null;
+      }
 
       // Unsubscribe from previous
       if (subscribedRef.current) {
         send({ type: "unsubscribe", workerId: subscribedRef.current });
       }
       subscribedRef.current = workerId;
+      chatReceivedRef.current = false;
       if (workerId) {
         send({ type: "subscribe", workerId });
+        // Auto-retry if no full history received within 3s.
+        // Covers: session file not mapped yet, satellite relay delay, lost response.
+        const retryWid = workerId;
+        chatRetryTimerRef.current = setTimeout(() => {
+          if (subscribedRef.current === retryWid && !chatReceivedRef.current) {
+            send({ type: "subscribe", workerId: retryWid });
+          }
+        }, 3_000);
       }
     },
     [send]
@@ -82,7 +103,9 @@ export function useHive(daemonUrl: string) {
       ws.onopen = () => {
         setConnected(true);
         reconnectDelayRef.current = 500; // Reset backoff on success
-        // Re-subscribe if we had a subscription before reconnect
+        // Re-subscribe if we had a subscription before reconnect.
+        // Reset chatReceived so the retry timer kicks in if response is delayed.
+        chatReceivedRef.current = false;
         if (subscribedRef.current) {
           ws.send(JSON.stringify({ type: "subscribe", workerId: subscribedRef.current }));
         }
@@ -144,6 +167,8 @@ export function useHive(daemonUrl: string) {
               const newEntries = data.messages;
 
               if (data.full) {
+                // Mark that we received history — cancels the auto-retry timer.
+                chatReceivedRef.current = true;
                 // Full history — authoritative replace from server.
                 // Merge: server state is ground truth, but append any optimistic
                 // user messages that aren't yet reflected in the server history.
