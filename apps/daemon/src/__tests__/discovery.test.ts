@@ -130,4 +130,55 @@ describe("ProcessDiscovery idle-confirmed handling", () => {
     expect(worker.currentAction).toBe("Thinking...");
     expect(telemetry.setIdleConfirmed).toHaveBeenCalledWith("w1", false);
   });
+
+  it("falls back to CPU analysis when a Claude worker has no session file and hooks are stale", () => {
+    const { discovery } = createDiscoveryHarness();
+    const worker = {
+      id: "w1",
+      pid: 123,
+      project: "/Users/rmgtni/factory/projects/hive",
+      projectName: "hive",
+      status: "working",
+      currentAction: "Thinking...",
+      lastAction: "Run doctor.sh with --repair-satellite flag",
+      lastActionAt: Date.now() - 60_000,
+      errorCount: 0,
+      startedAt: Date.now() - 120_000,
+      task: null,
+      managed: false,
+      tty: "ttys000",
+      model: "claude",
+    };
+
+    discovery.runJsonlAnalysis("w1", worker, "ttys000", null, 0, 30_000, {});
+    expect(worker.status).toBe("working");
+
+    discovery.runJsonlAnalysis("w1", worker, "ttys000", null, 0, 30_000, {});
+    expect(worker.status).toBe("idle");
+    expect(worker.currentAction).toBeNull();
+  });
+
+  it("keeps the last Claude state when hooks are still fresh and no session file is mapped", () => {
+    const { discovery } = createDiscoveryHarness();
+    const worker = {
+      id: "w1",
+      pid: 123,
+      project: "/Users/rmgtni/factory/projects/hive",
+      projectName: "hive",
+      status: "working",
+      currentAction: "Thinking...",
+      lastAction: "Received prompt",
+      lastActionAt: Date.now(),
+      errorCount: 0,
+      startedAt: Date.now() - 10_000,
+      task: null,
+      managed: false,
+      tty: "ttys000",
+      model: "claude",
+    };
+
+    discovery.runJsonlAnalysis("w1", worker, "ttys000", null, 0, 3_000, {});
+    expect(worker.status).toBe("working");
+    expect(worker.currentAction).toBe("Thinking...");
+  });
 });

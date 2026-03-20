@@ -450,6 +450,13 @@ export class WsServer {
 
   /** Handle messages from a satellite connection. */
   private handleSatelliteMessage(ws: WebSocket, machineId: string, msg: Record<string, unknown>): void {
+    const activeSat = this.satellites.get(machineId);
+    if (msg.type !== "satellite_hello" && activeSat?.ws && activeSat.ws !== ws) {
+      if (msg.type !== "satellite_workers") {
+        console.log(`[satellite] Ignoring ${msg.type} from inactive socket for "${machineId}"`);
+      }
+      return;
+    }
     if (msg.type !== "satellite_workers") {
       console.log(`[satellite] Message from "${machineId}": ${msg.type}`);
     }

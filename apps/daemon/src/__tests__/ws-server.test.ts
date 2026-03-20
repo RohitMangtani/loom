@@ -244,6 +244,73 @@ describe("WsServer pushState", () => {
     });
   });
 
+  it("ignores worker reports from a superseded satellite connection", () => {
+    const harness = createServer([]);
+    const client = harness.addClient();
+    const server = harness.server as unknown as {
+      registerSatelliteSocket: (ws: WebSocket, machineId: string) => void;
+      handleSatelliteMessage: (ws: WebSocket, machineId: string, msg: Record<string, unknown>) => void;
+      pushState: () => void;
+    };
+    const satelliteWs1 = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+      close: vi.fn(),
+    } as unknown as WebSocket;
+    const satelliteWs2 = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+      close: vi.fn(),
+    } as unknown as WebSocket;
+
+    server.registerSatelliteSocket(satelliteWs1, "remote-mac");
+    server.handleSatelliteMessage(satelliteWs1, "remote-mac", {
+      type: "satellite_hello",
+      hostname: "Remote-Mac.local",
+      version: "test",
+    });
+    server.handleSatelliteMessage(satelliteWs1, "remote-mac", {
+      type: "satellite_workers",
+      workers: [{ id: "rw1", status: "working", model: "claude", currentAction: "Thinking..." }],
+    });
+
+    server.registerSatelliteSocket(satelliteWs2, "remote-mac");
+    server.handleSatelliteMessage(satelliteWs2, "remote-mac", {
+      type: "satellite_hello",
+      hostname: "Remote-Mac.local",
+      version: "test",
+    });
+    server.handleSatelliteMessage(satelliteWs2, "remote-mac", {
+      type: "satellite_workers",
+      workers: [{ id: "rw1", status: "idle", model: "claude", lastAction: "Session ended" }],
+    });
+
+    // Old socket can still deliver a late report before the TCP close lands.
+    // That stale snapshot must not overwrite the active connection's state.
+    server.handleSatelliteMessage(satelliteWs1, "remote-mac", {
+      type: "satellite_workers",
+      workers: [{ id: "rw1", status: "working", model: "claude", currentAction: "Thinking..." }],
+    });
+    server.pushState();
+
+    const workersCalls = (client.send.mock.calls as [string][])
+      .map(([raw]) => JSON.parse(raw))
+      .filter((msg: { type: string }) => msg.type === "workers");
+    expect(workersCalls).toHaveLength(1);
+    expect(workersCalls[0]).toEqual({
+      type: "workers",
+      workers: [{
+        id: "remote-mac:rw1",
+        status: "idle",
+        model: "claude",
+        lastAction: "Session ended",
+        machine: "remote-mac",
+        machineLabel: "Remote-Mac.local",
+        quadrant: 1,
+      }],
+    });
+  });
+
   it("keeps satellite workers visible when the old socket closes before the new hello", () => {
     const harness = createServer([]);
     const client = harness.addClient();

@@ -770,7 +770,9 @@ end tell
   ): void {
     if (!cachedPath) {
       // No cached JSONL path. For non-Claude workers, try finding their session file
-      // before falling back to CPU-only.
+      // before falling back to CPU-only. For Claude, fresh hooks are usually enough
+      // to bridge startup/compaction gaps, but once hooks go stale we must not keep
+      // a stale "working" state forever — fall back to CPU analysis instead.
       if (existing.model && existing.model !== "claude") {
         const codexFile = existing.model === "openclaw"
           ? this.findOpenClawSessionFile(existing.pid, existing.startedAt)
@@ -787,7 +789,11 @@ end tell
         }
         this.runCpuOnlyAnalysis(id, existing, tty, auditCtx);
       } else {
-        this.checkTransition(id, tty, existing.status, "no cachedPath, keep last", auditCtx);
+        if (hookAge < 15_000) {
+          this.checkTransition(id, tty, existing.status, `no cachedPath, hooks fresh (${Math.round(hookAge / 1000)}s)`, auditCtx);
+        } else {
+          this.runCpuOnlyAnalysis(id, existing, tty, { ...auditCtx, missingSessionFile: true, hookAge });
+        }
       }
       return;
     }
