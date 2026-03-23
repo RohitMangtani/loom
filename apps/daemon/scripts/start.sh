@@ -86,8 +86,16 @@ try:
             print(t['public_url']); break
 except: pass
 " 2>/dev/null || echo "")"
-  elif command -v cloudflared &>/dev/null; then
-    echo "  Starting cloudflared tunnel (install ngrok for stable URLs)..."
+    if [ -z "$TUNNEL_URL" ]; then
+      echo "  ngrok did not produce a usable tunnel URL. Falling back..."
+      kill "$TUNNEL_PID" 2>/dev/null || true
+      rm -f "$TUNNEL_PID_FILE"
+      TUNNEL_PID=""
+    fi
+  fi
+
+  if { [ -z "$TUNNEL_PID" ] || [ -z "$TUNNEL_URL" ]; } && command -v cloudflared &>/dev/null; then
+    echo "  Starting cloudflared tunnel (fallback)..."
     cloudflared tunnel --url http://localhost:3002 --no-autoupdate > "$HIVE_DIR/cloudflared.log" 2>&1 &
     TUNNEL_PID=$!
     echo "$TUNNEL_PID" > "$TUNNEL_PID_FILE"
@@ -103,8 +111,17 @@ except: pass
       if [ -n "$TUNNEL_URL" ]; then break; fi
       sleep 1
     done
-  else
-    echo "  No tunnel tool found. Install ngrok (brew install ngrok) or cloudflared (brew install cloudflared)."
+    if [ -z "$TUNNEL_URL" ]; then
+      echo "  cloudflared did not produce a usable tunnel URL."
+      kill "$TUNNEL_PID" 2>/dev/null || true
+      rm -f "$TUNNEL_PID_FILE"
+      TUNNEL_PID=""
+    fi
+  fi
+
+  if [ -z "$TUNNEL_PID" ] || [ -z "$TUNNEL_URL" ]; then
+    echo "  No usable public tunnel is available."
+    echo "  Install ngrok (brew install ngrok) or cloudflared (brew install cloudflared)."
     echo "  Without a tunnel, only localhost access is available."
     echo "  Continuing without tunnel..."
   fi

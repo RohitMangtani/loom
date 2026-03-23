@@ -2,7 +2,22 @@
 # Hive setup — run once after cloning.
 # Usage: bash setup.sh
 
-set -e
+set -euo pipefail
+
+install_dependencies() {
+  local log_file
+  log_file="$(mktemp)"
+
+  if npm install --silent >"$log_file" 2>&1; then
+    rm -f "$log_file"
+    return 0
+  fi
+
+  echo "  ✗ Dependency install failed. Last 50 lines:"
+  tail -50 "$log_file" 2>/dev/null | sed 's/^/    /'
+  rm -f "$log_file"
+  exit 1
+}
 
 echo ""
 echo "  Setting up Hive..."
@@ -72,7 +87,7 @@ fi
 
 echo ""
 echo "  Installing dependencies..."
-npm install --silent 2>&1 | tail -1
+install_dependencies
 echo "  ✓ Dependencies installed"
 
 # ── Compile send-return binary (auto-pilot needs this — optional) ────

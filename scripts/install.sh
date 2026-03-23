@@ -12,6 +12,22 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+install_dependencies() {
+  local log_file
+  log_file="$(mktemp)"
+
+  if npm install --silent >"$log_file" 2>&1; then
+    rm -f "$log_file"
+    return 0
+  fi
+
+  echo ""
+  echo "  ✗ Dependency install failed. Last 50 lines:"
+  tail -50 "$log_file" 2>/dev/null | sed 's/^/    /'
+  rm -f "$log_file"
+  exit 1
+}
+
 cleanup_hive_satellite_runtime() {
   mkdir -p "$HOME/.hive/runtime" "$HOME/Library/LaunchAgents"
 
@@ -26,6 +42,44 @@ cleanup_hive_satellite_runtime() {
 
   pkill -f 'apps/daemon/src/index.ts --satellite|dist/index.js --satellite' 2>/dev/null || true
   rm -f "$HOME/.hive/runtime/satellite.json"
+}
+
+ensure_tunnel_tools() {
+  local have_ngrok=0
+  local have_cloudflared=0
+
+  if command -v ngrok &>/dev/null; then
+    echo "  ✓ ngrok"
+    have_ngrok=1
+  fi
+
+  if command -v cloudflared &>/dev/null; then
+    echo "  ✓ cloudflared"
+    have_cloudflared=1
+  fi
+
+  if [ "$have_ngrok" -eq 1 ] && [ "$have_cloudflared" -eq 0 ] && command -v brew &>/dev/null; then
+    echo ""
+    echo "  Installing cloudflared fallback (keeps hosted launch working if ngrok is unavailable)..."
+    brew install cloudflared
+    echo "  ✓ cloudflared installed"
+    have_cloudflared=1
+  fi
+
+  if [ "$have_ngrok" -eq 0 ] && [ "$have_cloudflared" -eq 0 ]; then
+    if command -v brew &>/dev/null; then
+      echo ""
+      echo "  Installing cloudflared (fallback tunnel for remote dashboard access)..."
+      brew install cloudflared
+      echo "  ✓ cloudflared installed"
+      have_cloudflared=1
+    else
+      echo "  ✗ No public tunnel tool found."
+      echo "    Install Homebrew (https://brew.sh), ngrok, or cloudflared and re-run."
+      echo "    Or use: npm run launch:local  (localhost only, no remote access)"
+      exit 1
+    fi
+  fi
 }
 
 # ── Parse flags ──────────────────────────────────────────────────────
@@ -127,7 +181,7 @@ else
   echo "  ✓ Already set up"
   # Always ensure dependencies are current (git pull may have changed them)
   echo "  Installing dependencies..."
-  npm install --silent 2>&1 | tail -1
+  install_dependencies
   echo "  ✓ Dependencies up to date"
 fi
 
@@ -262,23 +316,9 @@ fi
 # Primary mode (default) — unchanged from original install flow
 # ══════════════════════════════════════════════════════════════════════
 
-# ── 2. Cloudflared ────────────────────────────────────────────────────
+# ── 2. Tunnel tooling ────────────────────────────────────────────────
 
-if ! command -v cloudflared &>/dev/null; then
-  if command -v brew &>/dev/null; then
-    echo ""
-    echo "  Installing cloudflared (for remote dashboard access)..."
-    brew install cloudflared
-    echo "  ✓ cloudflared installed"
-  else
-    echo "  ✗ cloudflared not found and Homebrew not available."
-    echo "    Install Homebrew (https://brew.sh) and re-run, or use:"
-    echo "    npm run launch:local  (localhost only, no remote access)"
-    exit 1
-  fi
-else
-  echo "  ✓ cloudflared"
-fi
+ensure_tunnel_tools
 
 # ── 3. Vercel login ──────────────────────────────────────────────────
 
@@ -291,6 +331,8 @@ echo "  ✓ Vercel authenticated"
 
 # ── 4. Start daemon + tunnel ──────────────────────────────────────────
 
+DAEMON_START_MODE="existing"
+
 if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
   echo "  ✓ Daemon already running on :3001"
 else
@@ -302,12 +344,14 @@ else
   # dialog the first time — click OK.
   if osascript -e "tell application \"Terminal\" to do script \"cd '$ROOT' && npm start\"" 2>/dev/null; then
     echo "  ✓ Daemon started in a new Terminal window"
+    DAEMON_START_MODE="terminal_window"
   else
     # Fallback: background process (X button won't close terminal windows)
     echo "  Could not open Terminal window — starting in background..."
     nohup npm start > "$HOME/.hive/daemon.log" 2>&1 &
     disown "$!" 2>/dev/null || true
     echo "  ✓ Daemon started in background (log: ~/.hive/daemon.log)"
+    DAEMON_START_MODE="background"
   fi
 fi
 
@@ -326,7 +370,13 @@ for _ in $(seq 1 90); do
 done
 
 if [ -z "$TUNNEL_URL" ]; then
-  echo "  ✗ Timed out waiting for tunnel. Check ~/.hive/daemon.log"
+  echo "  ✗ Timed out waiting for tunnel."
+  if [ "$DAEMON_START_MODE" = "terminal_window" ]; then
+    echo "    Check the Terminal window Hive opened for daemon output."
+  elif [ "$DAEMON_START_MODE" = "background" ]; then
+    echo "    Check ~/.hive/daemon.log for daemon output."
+  fi
+  echo "    Tunnel logs: ~/.hive/ngrok.log or ~/.hive/cloudflared.log"
   exit 1
 fi
 echo "  ✓ Tunnel ready"
@@ -354,13 +404,24 @@ echo ""
 echo "  Open the dashboard, paste your token, and start"
 echo "  running agents in Terminal windows."
 echo ""
+if [ "$DAEMON_START_MODE" = "terminal_window" ]; then
+  echo "  The daemon is running in a separate Terminal window."
+  echo "  Keep that window open while Hive is running."
+  echo ""
+elif [ "$DAEMON_START_MODE" = "background" ]; then
+  echo "  The daemon is running in the background."
+  echo "  Log: ~/.hive/daemon.log"
+  echo ""
+else
+  echo "  The daemon was already running on :3001."
+  echo ""
+fi
 echo "  ── Connect another machine ──"
 echo ""
 echo "  On the other computer, clone Hive and run:"
 echo "  bash scripts/install.sh --connect $WS_URL $TOKEN"
 echo ""
-echo "  The daemon runs in the background."
-echo "  Log: ~/.hive/daemon.log"
+echo "  Tunnel logs: ~/.hive/ngrok.log or ~/.hive/cloudflared.log"
 echo "  Stop: kill \$(lsof -tiTCP:3001)"
 echo ""
 echo "  ────────────────────────────────────────────────"
