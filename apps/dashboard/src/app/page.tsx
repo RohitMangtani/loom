@@ -405,7 +405,10 @@ export default function Home() {
               {numbered.length < MAX_SLOTS && (
                 <button
                   type="button"
-                  onClick={() => setShowSpawnDialog(true)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowSpawnDialog(true);
+                  }}
                   className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
                 >
                   + Agent
@@ -413,7 +416,10 @@ export default function Home() {
               )}
               <button
                 type="button"
-                onClick={() => setShowInviteDialog(true)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowInviteDialog(true);
+                }}
                 className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
               >
                 Invite
@@ -421,7 +427,10 @@ export default function Home() {
               {numbered.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setManaging(true)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setManaging(true);
+                  }}
                   className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
                 >
                   Manage

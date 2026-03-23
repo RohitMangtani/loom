@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 interface InviteDialogProps {
   send: (msg: Record<string, unknown>) => boolean;
@@ -144,11 +145,16 @@ export function InviteDialog({ send, onClose }: InviteDialogProps) {
     setView("invite");
   };
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} role="presentation" />
 
-      <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-lg w-full max-w-sm mx-4 overflow-hidden">
+      <div
+        className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-lg w-full max-w-sm mx-4 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
 
         {view === "members" && (
           <div className="p-6">
@@ -321,6 +327,7 @@ export function InviteDialog({ send, onClose }: InviteDialogProps) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
