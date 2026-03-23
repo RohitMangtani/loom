@@ -54,6 +54,8 @@ The publish target for the external installer CLI is:
 npx @rohitmangtani/hive init
 ```
 
+The published CLI clones or reuses Hive at `~/hive` by default. Pass `--dir /path/to/hive` if you want a different install location.
+
 ### After install: one-time macOS approvals
 
 Once setup finishes and Hive is running, macOS may ask for a couple more permissions the first time you use certain features:

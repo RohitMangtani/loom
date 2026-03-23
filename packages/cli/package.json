@@ -2,10 +2,31 @@
   "name": "@rohitmangtani/hive",
   "version": "0.1.0",
   "description": "CLI installer and runtime helper for Hive",
+  "license": "MIT",
   "type": "module",
   "bin": {
-    "hive": "./bin/hive.js"
+    "hive": "bin/hive.js"
   },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RohitMangtani/hive.git"
+  },
+  "homepage": "https://github.com/RohitMangtani/hive#readme",
+  "bugs": {
+    "url": "https://github.com/RohitMangtani/hive/issues"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "cli",
+    "dashboard",
+    "llm",
+    "orchestration"
+  ],
   "publishConfig": {
     "access": "public"
   },

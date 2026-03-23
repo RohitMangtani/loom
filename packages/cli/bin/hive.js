@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
+import { homedir } from "os";
 import process from "process";
 import { createInterface } from "readline/promises";
 import { fileURLToPath } from "url";
 
 const BIN_DIR = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(BIN_DIR, "../../..");
-const INSTALL_SCRIPT = resolve(ROOT, "scripts/install.sh");
-const DOCTOR_SCRIPT = resolve(ROOT, "scripts/doctor.sh");
+const PACKAGE_ROOT = resolve(BIN_DIR, "../../..");
+const DEFAULT_REPO_URL = "https://github.com/RohitMangtani/hive.git";
+const DEFAULT_REPO_REF = "main";
+const DEFAULT_INSTALL_DIR = resolve(homedir(), "hive");
+const HIVE_HOME = resolve(homedir(), ".hive");
+const INSTALL_ROOT_FILE = resolve(HIVE_HOME, "install-root");
 const NPM_BIN = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function quoteArg(value) {
@@ -26,8 +30,8 @@ function printUsage() {
   console.log(`Hive CLI
 
 Usage:
-  hive init [--desktop | --fresh | --connect <url> <token>] [--dry-run]
-  hive doctor [doctor-args] [--dry-run]
+  hive init [--desktop | --fresh | --connect <url> <token>] [--dir <path>] [--repo <url>] [--ref <git-ref>] [--dry-run]
+  hive doctor [doctor-args] [--dir <path>] [--dry-run]
   hive help
 
 Commands:
@@ -38,6 +42,7 @@ Examples:
   hive init --fresh
   hive init --connect wss://example.trycloudflare.com YOUR_TOKEN
   hive init --desktop
+  hive init --dir ~/src/hive
   hive doctor --repair-daemon
 `);
 }
@@ -60,23 +65,76 @@ function extractDryRun(args) {
   return { args: filtered, dryRun };
 }
 
-function ensureRepoScripts() {
-  for (const requiredPath of [INSTALL_SCRIPT, DOCTOR_SCRIPT, resolve(ROOT, "package.json")]) {
-    if (!existsSync(requiredPath)) {
-      fail(`Hive CLI could not find ${requiredPath}. Run it from a full Hive checkout.`);
-    }
+function requireValue(args, index, flag) {
+  const value = args[index + 1];
+  if (!value) {
+    fail(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
+function resolvePath(inputPath) {
+  if (!inputPath) return inputPath;
+  if (inputPath.startsWith("~/")) {
+    return resolve(homedir(), inputPath.slice(2));
+  }
+  return resolve(inputPath);
+}
+
+function isHiveRepoRoot(root) {
+  return existsSync(resolve(root, "package.json")) &&
+    existsSync(resolve(root, "scripts/install.sh")) &&
+    existsSync(resolve(root, "scripts/doctor.sh"));
+}
+
+function getBundledRepoRoot() {
+  return isHiveRepoRoot(PACKAGE_ROOT) ? PACKAGE_ROOT : null;
+}
+
+function getInstallScript(root) {
+  return resolve(root, "scripts/install.sh");
+}
+
+function getDoctorScript(root) {
+  return resolve(root, "scripts/doctor.sh");
+}
+
+function readSavedInstallRoot() {
+  if (!existsSync(INSTALL_ROOT_FILE)) return null;
+  const saved = readFileSync(INSTALL_ROOT_FILE, "utf-8").trim();
+  if (!saved) return null;
+  const normalized = resolvePath(saved);
+  return isHiveRepoRoot(normalized) ? normalized : null;
+}
+
+function rememberInstallRoot(root, dryRun) {
+  if (dryRun) {
+    console.log(`# would remember install root: ${root}`);
+    return;
+  }
+  mkdirSync(HIVE_HOME, { recursive: true });
+  writeFileSync(INSTALL_ROOT_FILE, `${root}\n`, "utf-8");
+}
+
+function ensureCommand(command) {
+  const result = spawnSync(command, ["--version"], {
+    stdio: "ignore",
+  });
+  if (result.error) {
+    fail(`Required command not found: ${command}`);
   }
 }
 
-function run(command, args, dryRun) {
+function run(command, args, options = {}) {
+  const { cwd = process.cwd(), dryRun = false } = options;
   const printable = formatCommand(command, args);
   if (dryRun) {
-    console.log(printable);
+    console.log(`(cd ${quoteArg(cwd)} && ${printable})`);
     return;
   }
 
   const result = spawnSync(command, args, {
-    cwd: ROOT,
+    cwd,
     stdio: "inherit",
   });
 
@@ -88,11 +146,91 @@ function run(command, args, dryRun) {
   }
 }
 
-function runDesktopInit(dryRun) {
-  run(NPM_BIN, ["install"], dryRun);
-  run(NPM_BIN, ["run", "desktop:prepare"], dryRun);
-  run(NPM_BIN, ["run", "desktop:smoke"], dryRun);
-  run(NPM_BIN, ["run", "desktop:dev"], dryRun);
+function cloneRepo(targetDir, repoUrl, ref, dryRun) {
+  ensureCommand("git");
+  run("git", ["clone", "--depth", "1", "--branch", ref, repoUrl, targetDir], { dryRun });
+}
+
+function ensureRepoDirectory(targetDir, repoUrl, ref, dryRun) {
+  if (existsSync(targetDir)) {
+    if (isHiveRepoRoot(targetDir)) {
+      return targetDir;
+    }
+    const entries = readdirSync(targetDir);
+    if (entries.length === 0) {
+      cloneRepo(targetDir, repoUrl, ref, dryRun);
+      return targetDir;
+    }
+    fail(`Target directory already exists and is not a Hive repo: ${targetDir}`);
+  }
+
+  cloneRepo(targetDir, repoUrl, ref, dryRun);
+  return targetDir;
+}
+
+function resolveRepoOptions(rawArgs, allowRepoFlags) {
+  const repoOptions = {
+    dir: null,
+    repoUrl: DEFAULT_REPO_URL,
+    ref: DEFAULT_REPO_REF,
+  };
+  const remaining = [];
+
+  for (let i = 0; i < rawArgs.length; i += 1) {
+    const arg = rawArgs[i];
+    if (arg === "--dir") {
+      repoOptions.dir = resolvePath(requireValue(rawArgs, i, "--dir"));
+      i += 1;
+      continue;
+    }
+    if (allowRepoFlags && arg === "--repo") {
+      repoOptions.repoUrl = requireValue(rawArgs, i, "--repo");
+      i += 1;
+      continue;
+    }
+    if (allowRepoFlags && arg === "--ref") {
+      repoOptions.ref = requireValue(rawArgs, i, "--ref");
+      i += 1;
+      continue;
+    }
+    remaining.push(arg);
+  }
+
+  return { repoOptions, remaining };
+}
+
+function resolveManagedRepoRoot(repoOptions, options = {}) {
+  const { bootstrap = false, dryRun = false } = options;
+  if (repoOptions.dir) {
+    const dir = ensureRepoDirectory(repoOptions.dir, repoOptions.repoUrl, repoOptions.ref, dryRun);
+    rememberInstallRoot(dir, dryRun);
+    return dir;
+  }
+
+  const bundled = getBundledRepoRoot();
+  if (bundled) {
+    return bundled;
+  }
+
+  const saved = readSavedInstallRoot();
+  if (saved) {
+    return saved;
+  }
+
+  if (!bootstrap) {
+    fail("Hive install root not found. Run `hive init` first or pass --dir /path/to/hive.");
+  }
+
+  const repoRoot = ensureRepoDirectory(DEFAULT_INSTALL_DIR, repoOptions.repoUrl, repoOptions.ref, dryRun);
+  rememberInstallRoot(repoRoot, dryRun);
+  return repoRoot;
+}
+
+function runDesktopInit(repoRoot, dryRun) {
+  run(NPM_BIN, ["install"], { cwd: repoRoot, dryRun });
+  run(NPM_BIN, ["run", "desktop:prepare"], { cwd: repoRoot, dryRun });
+  run(NPM_BIN, ["run", "desktop:smoke"], { cwd: repoRoot, dryRun });
+  run(NPM_BIN, ["run", "desktop:dev"], { cwd: repoRoot, dryRun });
 }
 
 async function promptForInitMode() {
@@ -133,55 +271,53 @@ async function promptForInitMode() {
 }
 
 async function resolveInitPlan(args) {
-  const normalized = [...args];
-  if (normalized[0] === "desktop") {
-    normalized.shift();
-    normalized.unshift("--desktop");
+  const { repoOptions, remaining } = resolveRepoOptions(args, true);
+  let mode = null;
+  let connect = null;
+
+  for (let i = 0; i < remaining.length; i += 1) {
+    const arg = remaining[i];
+    if (arg === "desktop" || arg === "--desktop") {
+      if (mode) fail("Use only one init mode: --desktop, --fresh, or --connect <url> <token>.");
+      mode = "desktop";
+      continue;
+    }
+    if (arg === "--fresh") {
+      if (mode) fail("Use only one init mode: --desktop, --fresh, or --connect <url> <token>.");
+      mode = "fresh";
+      continue;
+    }
+    if (arg === "--connect") {
+      if (mode) fail("Use only one init mode: --desktop, --fresh, or --connect <url> <token>.");
+      const url = requireValue(remaining, i, "--connect");
+      const token = remaining[i + 2];
+      if (!token) {
+        fail("Connect mode requires: hive init --connect <url> <token>");
+      }
+      connect = { url, token };
+      mode = "connect";
+      i += 2;
+      continue;
+    }
+    fail(`Unknown init arguments: ${remaining.join(" ")}`);
   }
 
-  const hasDesktop = normalized.includes("--desktop");
-  const hasFresh = normalized.includes("--fresh");
-  const connectIndex = normalized.indexOf("--connect");
-  const hasConnect = connectIndex !== -1;
-  const explicitModeCount = [hasDesktop, hasFresh, hasConnect].filter(Boolean).length;
-
-  if (explicitModeCount > 1) {
-    fail("Use only one init mode: --desktop, --fresh, or --connect <url> <token>.");
+  if (mode === "desktop") {
+    return { kind: "desktop", repoOptions };
   }
-
-  if (hasDesktop) {
-    if (normalized.length !== 1) {
-      fail("Desktop mode does not take extra arguments.");
-    }
-    return { kind: "desktop" };
+  if (mode === "fresh") {
+    return { kind: "fresh", repoOptions };
   }
-  if (hasFresh) {
-    if (normalized.length !== 1) {
-      fail("Fresh mode does not take extra arguments.");
-    }
-    return { kind: "fresh" };
-  }
-  if (hasConnect) {
-    const url = normalized[connectIndex + 1];
-    const token = normalized[connectIndex + 2];
-    if (!url || !token) {
-      fail("Connect mode requires: hive init --connect <url> <token>");
-    }
-    if (normalized.length !== 3) {
-      fail("Connect mode only accepts: hive init --connect <url> <token>");
-    }
-    return { kind: "connect", url, token };
-  }
-
-  if (normalized.length > 0) {
-    fail(`Unknown init arguments: ${normalized.join(" ")}`);
+  if (mode === "connect" && connect) {
+    return { kind: "connect", url: connect.url, token: connect.token, repoOptions };
   }
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    return { kind: "fresh" };
+    return { kind: "fresh", repoOptions };
   }
 
-  return promptForInitMode();
+  const prompted = await promptForInitMode();
+  return { ...prompted, repoOptions };
 }
 
 async function handleInit(rawArgs, dryRun) {
@@ -190,17 +326,27 @@ async function handleInit(rawArgs, dryRun) {
     return;
   }
   const plan = await resolveInitPlan(rawArgs);
+  const repoRoot = resolveManagedRepoRoot(plan.repoOptions, {
+    bootstrap: true,
+    dryRun,
+  });
   if (plan.kind === "desktop") {
-    runDesktopInit(dryRun);
+    runDesktopInit(repoRoot, dryRun);
     return;
   }
 
   if (plan.kind === "connect") {
-    run("bash", [INSTALL_SCRIPT, "--connect", plan.url, plan.token], dryRun);
+    run("bash", [getInstallScript(repoRoot), "--connect", plan.url, plan.token], {
+      cwd: repoRoot,
+      dryRun,
+    });
     return;
   }
 
-  run("bash", [INSTALL_SCRIPT, "--fresh"], dryRun);
+  run("bash", [getInstallScript(repoRoot), "--fresh"], {
+    cwd: repoRoot,
+    dryRun,
+  });
 }
 
 function handleDoctor(rawArgs, dryRun) {
@@ -208,12 +354,15 @@ function handleDoctor(rawArgs, dryRun) {
     printUsage();
     return;
   }
-  run("bash", [DOCTOR_SCRIPT, ...rawArgs], dryRun);
+  const { repoOptions, remaining } = resolveRepoOptions(rawArgs, false);
+  const repoRoot = resolveManagedRepoRoot(repoOptions, { dryRun });
+  run("bash", [getDoctorScript(repoRoot), ...remaining], {
+    cwd: repoRoot,
+    dryRun,
+  });
 }
 
 async function main() {
-  ensureRepoScripts();
-
   const [command = "help", ...rest] = process.argv.slice(2);
   const { args, dryRun } = extractDryRun(rest);
 
