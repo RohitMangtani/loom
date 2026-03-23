@@ -57,8 +57,6 @@ export interface WorkerState {
   machine?: string;
   /** Human-readable machine label for peer summaries and workers.json snapshots. */
   machineLabel?: string;
-  /** Provider-level error detected from terminal output (quota exceeded, billing, rate limit). */
-  providerError?: string | null;
 }
 
 export interface WorkerContextSnapshot {

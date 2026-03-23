@@ -262,52 +262,6 @@ end tell
    * false-positives on old error messages that have scrolled up.
    * Caches results for 10 seconds (avoids AppleScript spam).
    */
-  private providerErrorCache = new Map<string, { checkedAt: number; result: string | null }>();
-  detectProviderError(tty: string): string | null {
-    const cached = this.providerErrorCache.get(tty);
-    if (cached && Date.now() - cached.checkedAt < 10_000) return cached.result;
-
-    const content = this.readTerminalContent(tty);
-    if (!content) {
-      this.providerErrorCache.set(tty, { checkedAt: Date.now(), result: null });
-      return null;
-    }
-
-    const tail = content.trimEnd().slice(-1500).toLowerCase();
-
-    // OpenAI / Codex quota patterns
-    if (tail.includes("usage limit") || tail.includes("usage cap") ||
-        tail.includes("rate limit exceeded") || tail.includes("quota exceeded") ||
-        tail.includes("insufficient_quota") ||
-        (tail.includes("billing") && tail.includes("limit")) ||
-        (tail.includes("exceeded your") && (tail.includes("limit") || tail.includes("quota"))) ||
-        tail.includes("limit reached")) {
-      const msg = "Provider quota or rate limit reached";
-      this.providerErrorCache.set(tty, { checkedAt: Date.now(), result: msg });
-      return msg;
-    }
-
-    // Anthropic patterns
-    if ((tail.includes("credit balance") && tail.includes("too low")) ||
-        tail.includes("overloaded_error") ||
-        (tail.includes("rate_limit_error") && tail.includes("exceeded"))) {
-      const msg = "Provider rate limit or credit issue";
-      this.providerErrorCache.set(tty, { checkedAt: Date.now(), result: msg });
-      return msg;
-    }
-
-    // Generic API error patterns
-    if ((tail.includes("api key") && (tail.includes("invalid") || tail.includes("expired"))) ||
-        (tail.includes("authentication") && tail.includes("failed") && tail.includes("api"))) {
-      const msg = "API key invalid or expired";
-      this.providerErrorCache.set(tty, { checkedAt: Date.now(), result: msg });
-      return msg;
-    }
-
-    this.providerErrorCache.set(tty, { checkedAt: Date.now(), result: null });
-    return null;
-  }
-
   /**
    * Read terminal content for a worker with no session yet.
    * Returns the visible text trimmed to the last meaningful lines.
