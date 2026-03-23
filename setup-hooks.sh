@@ -164,3 +164,39 @@ console.log('Installed Hive hooks for UserPromptSubmit, PreToolUse, PostToolUse,
 console.log(`Identity hook: ${identityCmd}`);
 console.log(`Auto-approve hook: ${autoApproveCmd}`);
 NODE
+
+# --- Install dispatch templates ---
+# Copy CLAUDE.md and AGENTS.md templates so every agent knows
+# how to discover peers and dispatch messages via the Hive API.
+
+TEMPLATE_DIR="$REPO_ROOT/templates"
+CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+AGENTS_MD="$HOME/AGENTS.md"
+
+# CLAUDE.md: append Hive section if not already present
+if [ -f "$TEMPLATE_DIR/CLAUDE.md" ]; then
+  if [ ! -f "$CLAUDE_MD" ]; then
+    cp "$TEMPLATE_DIR/CLAUDE.md" "$CLAUDE_MD"
+    echo "Created $CLAUDE_MD with Hive dispatch docs"
+  elif ! grep -q "Hive -- Multi-Agent Coordination" "$CLAUDE_MD" 2>/dev/null; then
+    echo "" >> "$CLAUDE_MD"
+    cat "$TEMPLATE_DIR/CLAUDE.md" >> "$CLAUDE_MD"
+    echo "Appended Hive dispatch docs to $CLAUDE_MD"
+  else
+    echo "Hive dispatch docs already in $CLAUDE_MD"
+  fi
+fi
+
+# AGENTS.md: for Codex and other agents that read ~/AGENTS.md
+if [ -f "$TEMPLATE_DIR/AGENTS.md" ]; then
+  if [ ! -f "$AGENTS_MD" ]; then
+    cp "$TEMPLATE_DIR/AGENTS.md" "$AGENTS_MD"
+    echo "Created $AGENTS_MD with Hive dispatch docs"
+  elif ! grep -q "Hive -- Multi-Agent Coordination" "$AGENTS_MD" 2>/dev/null; then
+    echo "" >> "$AGENTS_MD"
+    cat "$TEMPLATE_DIR/AGENTS.md" >> "$AGENTS_MD"
+    echo "Appended Hive dispatch docs to $AGENTS_MD"
+  else
+    echo "Hive dispatch docs already in $AGENTS_MD"
+  fi
+fi
