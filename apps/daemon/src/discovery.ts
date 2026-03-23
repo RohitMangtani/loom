@@ -528,9 +528,10 @@ end tell
                 existing.terminalPreview = undefined;
                 this.clearPromptCache(proc.tty);
               }
-          } else if (!cachedSessionFile && proc.tty && !existing.promptType && Date.now() - proc.startedAt < 600_000) {
+          } else if (!cachedSessionFile && proc.tty && !existing.promptType) {
             // No session file, no prompt set  --  check for trust/sandbox prompts.
-            // Runs for up to 10 minutes (previously 2 min was too short).
+            // No age limit: an agent can sit at the trust prompt indefinitely.
+            // The 500-char tail in detectPrompt prevents false positives on old agents.
             // Skip if hooks have been received: the agent is established and
             // any prompt text in the terminal is stale from initialization.
             if (!this.telemetry.hasReceivedHook(id)) {
@@ -753,7 +754,7 @@ end tell
       // cross-contaminate and set sessionFile even when the agent is genuinely at
       // the trust prompt. The prompt patterns only match recent terminal text, so
       // false positives on established agents are prevented by the 500-char tail limit.
-      if (proc.tty && processAge < 180_000) {
+      if (proc.tty) {
         const prompt = this.detectPrompt(proc.tty);
         if (prompt) {
           worker.status = "waiting";
