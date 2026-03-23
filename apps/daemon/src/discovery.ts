@@ -218,19 +218,21 @@ end tell
     // Matching on full history would false-positive on established agents
     // that passed through the prompt minutes/hours ago.
     const tail = content.slice(-500);
+    const tailLower = tail.toLowerCase();
 
     // Claude CLI trust prompt patterns
-    if (tail.includes("Yes, I trust") ||
-        tail.includes("trust this folder") ||
-        tail.includes("Is this a project you created") ||
-        tail.includes("Enter to confirm")) {
+    if (tailLower.includes("yes, i trust") ||
+        tailLower.includes("trust this folder") ||
+        tailLower.includes("trust this project folder") ||
+        tailLower.includes("is this a project you created") ||
+        tailLower.includes("enter to confirm")) {
       this.promptCheckedTtys.set(tty, { checkedAt: Date.now(), result: "trust" });
       return { type: "trust", message: "Trust this project folder?", content };
     }
 
     // Claude CLI sandbox prompt patterns
-    if (tail.includes("sandboxed") ||
-        (tail.includes("sandbox") && tail.includes("bash"))) {
+    if (tailLower.includes("sandboxed") ||
+        (tailLower.includes("sandbox") && tailLower.includes("bash"))) {
       this.promptCheckedTtys.set(tty, { checkedAt: Date.now(), result: "sandbox" });
       return { type: "sandbox", message: "Allow bash commands?", content };
     }
