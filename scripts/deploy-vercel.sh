@@ -88,3 +88,13 @@ if [ -n "$DEPLOY_URL" ]; then
   echo "$DEPLOY_URL" > "$DASHBOARD_FILE"
   echo "Dashboard URL: $DEPLOY_URL"
 fi
+
+# Safety net: clear the repo homepage if Vercel's GitHub integration set it.
+# The Hive repo must NEVER have a homepage URL (see hive-learnings.md).
+if command -v gh >/dev/null 2>&1; then
+  CURRENT_HOMEPAGE="$(gh api repos/RohitMangtani/hive --jq '.homepage // empty' 2>/dev/null || true)"
+  if [ -n "$CURRENT_HOMEPAGE" ]; then
+    gh api repos/RohitMangtani/hive -X PATCH -f homepage="" >/dev/null 2>&1 || true
+    echo "Cleared repo homepage (was: $CURRENT_HOMEPAGE)"
+  fi
+fi

@@ -1,4 +1,7 @@
 {
   "buildCommand": "npx turbo build --filter=@hive/dashboard",
-  "outputDirectory": "apps/dashboard/out"
+  "outputDirectory": "apps/dashboard/out",
+  "github": {
+    "silent": true
+  }
 }
