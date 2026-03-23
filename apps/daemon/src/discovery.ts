@@ -10,6 +10,7 @@ import { readTail, describeBashCommand } from "./utils.js";
 interface AuditEntry {
   ts: string;
   tty: string;
+  workerId?: string;
   from: string;
   to: string;
   reason: string;
@@ -257,6 +258,7 @@ end tell
     const entry: AuditEntry = {
       ts: new Date().toISOString(),
       tty,
+      workerId,
       from,
       to,
       reason,

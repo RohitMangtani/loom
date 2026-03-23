@@ -113,8 +113,29 @@ export interface ConnectedMachine {
   capabilities?: MachineCapabilities;
 }
 
+export interface ControlPlaneTimelineLink {
+  kind: "context" | "output";
+  label: string;
+  path: string;
+}
+
+export interface ControlPlaneTimelineEntry {
+  id: string;
+  ts: number;
+  type: "spawn" | "message" | "route" | "approval" | "kill" | "exec" | "maintenance" | "satellite" | "completion";
+  workerId?: string;
+  workerLabel?: string;
+  quadrant?: number;
+  machine?: string;
+  machineLabel?: string;
+  summary: string;
+  detail?: string;
+  ok?: boolean;
+  links?: ControlPlaneTimelineLink[];
+}
+
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "control_plane_timeline";
   workerId?: string;
   project?: string;
   task?: string;
@@ -143,6 +164,8 @@ export interface DaemonMessage {
   includeHistory?: boolean;
   /** Max history entries to include in a worker context response. */
   historyLimit?: number;
+  /** Max timeline entries to include in a control-plane timeline response. */
+  limit?: number;
 }
 
 export interface ChatEntry {
@@ -168,7 +191,7 @@ export interface ReviewItem {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context";
+  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "control_plane_timeline";
   workers?: WorkerState[];
   worker?: WorkerState;
   /** Connected satellite machines (for spawn dialog machine picker). */
@@ -188,4 +211,6 @@ export interface DaemonResponse {
   subscribed?: boolean;
   /** On-demand worker context snapshot used by the dashboard viewer. */
   context?: WorkerContextSnapshot | null;
+  /** On-demand control-plane timeline used by the dashboard timeline drawer. */
+  timeline?: ControlPlaneTimelineEntry[];
 }

@@ -24,6 +24,7 @@ import { SuggestionEngine } from "./suggestion-engine.js";
 import { ReviewStore } from "./review-store.js";
 import type { ReviewItem } from "./review-store.js";
 import { scanLocalProjects } from "./project-discovery.js";
+import { appendControlPlaneAudit, extractRoutedContextPath, summarizeTimelineText } from "./control-plane-audit.js";
 
 const IDLE_THRESHOLD = 30_000;
 const HOME = process.env.HOME || `/Users/${process.env.USER}`;
@@ -1730,6 +1731,23 @@ export class TelemetryReceiver {
     this.suggestionEngine.recordApply(appliedLabel, shownLabels, worker?.project);
   }
 
+  private recordMessageAudit(workerId: string, worker: WorkerState, content: string, source: string): void {
+    const contextPath = extractRoutedContextPath(content);
+    appendControlPlaneAudit({
+      ts: Date.now(),
+      type: contextPath ? "route" : "message",
+      sourceMachine: source.startsWith("satellite:") ? source.replace("satellite:", "") : undefined,
+      targetMachine: worker.machine || "local",
+      workerId,
+      tty: worker.tty?.replace("/dev/", ""),
+      summary: summarizeTimelineText(content),
+      detail: source,
+      contextPath,
+      outputPath: !workerId.includes(":") ? (this.streamer?.getSessionFile(workerId) || undefined) : undefined,
+      ok: true,
+    });
+  }
+
   // --- Message queue ---
 
   sendToWorker(
@@ -1882,6 +1900,7 @@ export class TelemetryReceiver {
         options.autoCommit,
       );
     }
+    this.recordMessageAudit(workerId, worker, content, options.source);
     if (!remoteWorker) this.notifyExternal(worker);
     return { ok: true };
   }
@@ -2036,6 +2055,7 @@ export class TelemetryReceiver {
       return { ok: false, error };
     }
 
+    this.recordMessageAudit(workerId, worker, content, options.source);
     return { ok: true };
   }
 

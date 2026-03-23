@@ -14,7 +14,8 @@ import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState, ConnectedMa
 import { execFileSync } from "child_process";
 import type { WebPushManager } from "./web-push.js";
 import { scanLocalProjects } from "./project-discovery.js";
-import { appendControlPlaneAudit, getControlPlaneAuditPath, readControlPlaneAudit } from "./control-plane-audit.js";
+import { appendControlPlaneAudit, extractRoutedContextPath, getControlPlaneAuditPath, readControlPlaneAudit, summarizeTimelineText } from "./control-plane-audit.js";
+import { buildControlPlaneTimeline } from "./control-plane-timeline.js";
 import { normalizeExecTimeout, resolveExecCwd, runShellExec } from "./shell-exec.js";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
@@ -59,6 +60,7 @@ export class WsServer {
   private lastModelsSnapshot: string | null = null;
   private lastMachinesSnapshot: string | null = null;
   private lastBroadcastPrimaryUrl: string | null = null;
+  private localPrevStatus = new Map<string, string>();
   private pushMgr: WebPushManager | null = null;
 
   // Satellite connections: machineId → connection
@@ -106,6 +108,22 @@ export class WsServer {
     this.viewerToken = viewerToken;
 
     this.telemetry.onUpdate((workerId, worker) => {
+      const prevStatus = this.localPrevStatus.get(workerId);
+      if (prevStatus === "working" && worker.status === "idle") {
+        this.recordControlPlaneAudit({
+          ts: Date.now(),
+          type: "completion",
+          targetMachine: worker.machine || "local",
+          workerId,
+          tty: worker.tty?.replace("/dev/", ""),
+          summary: worker.lastAction || "Session ended",
+          detail: worker.currentAction || worker.lastAction,
+          contextPath: extractRoutedContextPath(worker.lastDirection),
+          outputPath: this.streamer.getSessionFile(workerId) || undefined,
+          ok: true,
+        });
+      }
+      this.localPrevStatus.set(workerId, worker.status);
       this.broadcast({
         type: "worker_update",
         worker,
@@ -118,6 +136,21 @@ export class WsServer {
         type: "review_added",
         review,
       });
+    });
+
+    this.onSatelliteStatusChange((workerId, worker, prevStatus) => {
+      if (prevStatus === "working" && worker.status === "idle") {
+        this.recordControlPlaneAudit({
+          ts: Date.now(),
+          type: "completion",
+          targetMachine: worker.machine || "local",
+          workerId,
+          tty: worker.tty?.replace("/dev/", ""),
+          summary: worker.lastAction || "Session ended",
+          detail: worker.currentAction || worker.lastAction,
+          ok: true,
+        });
+      }
     });
 
     // Satellite relay: let the REST API route messages to satellite workers
@@ -143,6 +176,7 @@ export class WsServer {
           remote.lastAction = from ? `Message from ${from}` : "Message via API";
           remote.lastActionAt = Date.now();
         }
+        this.recordMessageAudit(workerId, content, from ? `satellite:${from}` : "satellite-relay", sat.machineId, remote?.tty);
         this.lastWorkersSnapshot = null;
         return { ok: true };
       },
@@ -192,6 +226,7 @@ export class WsServer {
     });
 
     this.telemetry.onRemoval((removedId) => {
+      this.localPrevStatus.delete(removedId);
       this.broadcast({ type: "worker_removed", workerId: removedId });
       const workers = this.getAllWorkers();
       this.lastWorkersSnapshot = JSON.stringify(workers);
@@ -512,6 +547,22 @@ export class WsServer {
 
   private recordControlPlaneAudit(entry: Parameters<typeof appendControlPlaneAudit>[0]): void {
     appendControlPlaneAudit(entry);
+  }
+
+  private recordMessageAudit(workerId: string, content: string, source: string, targetMachine: string, tty?: string): void {
+    const contextPath = extractRoutedContextPath(content);
+    this.recordControlPlaneAudit({
+      ts: Date.now(),
+      type: contextPath ? "route" : "message",
+      sourceMachine: source.startsWith("satellite:") ? source.replace("satellite:", "") : undefined,
+      targetMachine,
+      workerId,
+      tty: tty?.replace("/dev/", ""),
+      summary: summarizeTimelineText(content),
+      detail: source,
+      contextPath,
+      ok: true,
+    });
   }
 
   private async execViaControlPlane(request: {
@@ -948,6 +999,22 @@ export class WsServer {
     if (existingSat && existingSat.ws !== ws) {
       existingSat.ws = ws;
       existingSat.lastSeen = Date.now();
+      this.recordControlPlaneAudit({
+        ts: Date.now(),
+        type: "satellite",
+        targetMachine: machineId,
+        action: "reconnected",
+        detail: existingSat.hostname,
+        ok: true,
+      });
+    } else if (!existingSat) {
+      this.recordControlPlaneAudit({
+        ts: Date.now(),
+        type: "satellite",
+        targetMachine: machineId,
+        action: "connected",
+        ok: true,
+      });
     }
     for (const [existingWs, existingMachineId] of this.satelliteWs.entries()) {
       if (existingMachineId !== machineId || existingWs === ws) continue;
@@ -969,6 +1036,13 @@ export class WsServer {
 
     this.satellites.delete(machineId);
     this.pendingSatelliteWorkers.delete(machineId);
+    this.recordControlPlaneAudit({
+      ts: Date.now(),
+      type: "satellite",
+      targetMachine: machineId,
+      action: "disconnected",
+      ok: true,
+    });
     this.lastWorkersSnapshot = null;
     this.pushState();
     this.broadcastMachines();
@@ -998,6 +1072,7 @@ export class WsServer {
           const msgSat = this.getSatelliteForWorker(workerId);
           if (msgSat) {
             const parsed = this.parseSatelliteWorker(workerId)!;
+            const remote = msgSat.workers.find(w => w.id === parsed.localId);
             this.sendToSatellite(msgSat, {
               type: "satellite_message",
               requestId: `relay_msg_${Date.now()}`,
@@ -1005,6 +1080,7 @@ export class WsServer {
               localWorkerId: parsed.localId,
               content,
             });
+            this.recordMessageAudit(workerId, content, `satellite:${fromMachine}`, msgSat.machineId, remote?.tty);
             return { ok: true, relayed: true };
           }
 
@@ -1838,7 +1914,7 @@ export class WsServer {
 
   private handleMessage(ws: WebSocket, msg: DaemonMessage): void {
     // Read-only viewers can only request the worker list or manage push subscriptions
-    if (this.readOnlyClients.has(ws) && msg.type !== "list" && msg.type !== "push_subscribe" && msg.type !== "push_unsubscribe" && msg.type !== "worker_context") {
+    if (this.readOnlyClients.has(ws) && msg.type !== "list" && msg.type !== "push_subscribe" && msg.type !== "push_unsubscribe" && msg.type !== "worker_context" && msg.type !== "control_plane_timeline") {
       this.send(ws, { type: "error", error: "Read-only access" });
       return;
     }
@@ -1959,6 +2035,14 @@ export class WsServer {
             project: satProject,
             model: msg.model || "claude",
             initialMessage: msg.task?.trim() || undefined,
+          });
+          this.recordControlPlaneAudit({
+            ts: Date.now(),
+            type: "spawn",
+            targetMachine: msg.machine,
+            cwd: satProject,
+            action: msg.model || "claude",
+            ok: true,
           });
           console.log(`Spawn routed to satellite "${msg.machine}" project="${satProject}" (model=${msg.model || "claude"})`);
           break;
@@ -2107,6 +2191,14 @@ export class WsServer {
           type: "workers",
           workers: this.telemetry.getAll(),
         });
+        this.recordControlPlaneAudit({
+          ts: Date.now(),
+          type: "spawn",
+          targetMachine: "local",
+          cwd: real,
+          action: model,
+          ok: true,
+        });
         console.log(`Spawned ${model} terminal for ${msg.project} (tty=${termResult.tty})`);
         break;
       }
@@ -2130,6 +2222,13 @@ export class WsServer {
           // Remove from satellite's worker list immediately
           killSat.workers = killSat.workers.filter(w => w.id !== parsed.localId);
           this.lastWorkersSnapshot = null;
+          this.recordControlPlaneAudit({
+            ts: Date.now(),
+            type: "kill",
+            targetMachine: killSat.machineId,
+            workerId: msg.workerId,
+            ok: true,
+          });
           console.log(`Killed satellite worker ${msg.workerId}`);
           break;
         }
@@ -2169,6 +2268,14 @@ export class WsServer {
             }
           }, 500);
         }
+        this.recordControlPlaneAudit({
+          ts: Date.now(),
+          type: "kill",
+          targetMachine: killWorker?.machine || "local",
+          workerId: msg.workerId,
+          tty: killTty?.replace("/dev/", ""),
+          ok: true,
+        });
         console.log(`Killed worker ${msg.workerId} (pid=${killPid}, tty=${killTty})`);
         break;
       }
@@ -2186,6 +2293,7 @@ export class WsServer {
         const msgSat = this.getSatelliteForWorker(msg.workerId);
         if (msgSat) {
           const parsed = this.parseSatelliteWorker(msg.workerId)!;
+          const msgRemote = msgSat.workers.find(w => w.id === parsed.localId);
           this.sendToSatellite(msgSat, {
             type: "satellite_message",
             requestId: `msg_${Date.now()}`,
@@ -2196,7 +2304,6 @@ export class WsServer {
           // Optimistic update + clear hysteresis so satellite stays green
           const dashSatKey = `${msgSat.machineId}:${parsed.localId}`;
           this.satelliteIdleCounts.set(dashSatKey, 0);
-          const msgRemote = msgSat.workers.find(w => w.id === parsed.localId);
           if (msgRemote) {
             msgRemote.status = "working";
             msgRemote.currentAction = "Thinking...";
@@ -2204,6 +2311,7 @@ export class WsServer {
             msgRemote.lastActionAt = Date.now();
             this.lastWorkersSnapshot = null;
           }
+          this.recordMessageAudit(msg.workerId, msg.content, "dashboard", msgSat.machineId, msgRemote?.tty);
           break;
         }
 
@@ -2263,6 +2371,15 @@ export class WsServer {
               lastAction: "User approved from dashboard",
             });
           }
+          this.recordControlPlaneAudit({
+            ts: Date.now(),
+            type: "approval",
+            targetMachine: selSat.machineId,
+            workerId: msg.workerId,
+            action: "selection",
+            detail: String(msg.optionIndex || 0),
+            ok: true,
+          });
           break;
         }
 
@@ -2285,6 +2402,18 @@ export class WsServer {
           this.telemetry.markInputSent(msg.workerId, "dashboard:selection");
           this.telemetry.notifyExternal(selWorker);
           this.streamer.nudge(msg.workerId);
+          this.recordControlPlaneAudit({
+            ts: Date.now(),
+            type: "approval",
+            targetMachine: selWorker.machine || "local",
+            workerId: msg.workerId,
+            tty: selWorker.tty?.replace("/dev/", ""),
+            action: "selection",
+            detail: String(msg.optionIndex || 0),
+            contextPath: extractRoutedContextPath(selWorker.lastDirection),
+            outputPath: this.streamer.getSessionFile(msg.workerId) || undefined,
+            ok: true,
+          });
           console.log(`Selection sent to ${selWorker.tty}: option ${msg.optionIndex || 0}`);
         } else {
           this.send(ws, { type: "error", error: selResult.error || "Selection failed" });
@@ -2324,6 +2453,21 @@ export class WsServer {
             type: "error",
             error: err instanceof Error ? err.message : "Failed to load worker context",
           });
+        });
+        break;
+      }
+
+      case "control_plane_timeline": {
+        const limit = typeof msg.limit === "number"
+          ? Math.max(10, Math.min(200, Math.trunc(msg.limit)))
+          : 80;
+        this.send(ws, {
+          type: "control_plane_timeline",
+          timeline: buildControlPlaneTimeline({
+            limit,
+            workers: this.getAllWorkers(),
+            streamer: this.streamer,
+          }),
         });
         break;
       }
@@ -2398,6 +2542,14 @@ export class WsServer {
               lastAction: "Prompt approved from dashboard",
             });
           }
+          this.recordControlPlaneAudit({
+            ts: Date.now(),
+            type: "approval",
+            targetMachine: approveSat.machineId,
+            workerId: msg.workerId,
+            action: "approve_prompt",
+            ok: true,
+          });
           break;
         }
 
@@ -2427,6 +2579,17 @@ export class WsServer {
             this.discovery.suppressPrompt(promptWorker.tty);
           }
           this.telemetry.notifyExternal(promptWorker);
+          this.recordControlPlaneAudit({
+            ts: Date.now(),
+            type: "approval",
+            targetMachine: promptWorker.machine || "local",
+            workerId: msg.workerId,
+            tty: promptWorker.tty?.replace("/dev/", ""),
+            action: "approve_prompt",
+            contextPath: extractRoutedContextPath(promptWorker.lastDirection),
+            outputPath: this.streamer.getSessionFile(msg.workerId) || undefined,
+            ok: true,
+          });
           console.log(`Prompt approved for ${promptWorker.tty}`);
         } else {
           this.send(ws, { type: "error", error: approveResult.error || "Failed to approve prompt" });

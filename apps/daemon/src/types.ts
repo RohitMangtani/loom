@@ -8,4 +8,6 @@ export type {
   DaemonResponse,
   ConnectedMachine,
   MachineCapabilities,
+  ControlPlaneTimelineEntry,
+  ControlPlaneTimelineLink,
 } from "@hive/types";

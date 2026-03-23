@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { hostname, tmpdir } from "os";
 import { join } from "path";
 import { WsServer } from "../ws-server.js";
@@ -59,6 +59,7 @@ function createServer(initialWorkers: unknown[] = []) {
   };
 
   const streamer = {
+    getSessionFile: vi.fn(() => null),
     unsubscribe: vi.fn(),
     readHistory: vi.fn(() => []),
     subscribe: vi.fn(),
@@ -198,6 +199,59 @@ describe("WsServer pushState", () => {
         contextSummary: "demo context",
       }),
     });
+  });
+
+  it("allows read-only clients to request the control-plane timeline", () => {
+    const tempHome = mkdtempSync(join(tmpdir(), "hive-ws-timeline-"));
+    const hiveDir = join(tempHome, ".hive");
+    mkdirSync(hiveDir, { recursive: true });
+    writeFileSync(join(hiveDir, "control-plane.log"), `${JSON.stringify({
+      ts: 1_777_000_000_000,
+      type: "route",
+      targetMachine: "local",
+      workerId: "w1",
+      summary: "Read /Users/test/.hive/context-messages/msg-1.md and follow it exactly.",
+      contextPath: "/Users/test/.hive/context-messages/msg-1.md",
+      outputPath: "/Users/test/.codex/sessions/run-1.jsonl",
+      ok: true,
+    })}\n`);
+
+    const prevHome = process.env.HOME;
+    const prevHiveHome = process.env.HIVE_HOME;
+    process.env.HOME = tempHome;
+    process.env.HIVE_HOME = tempHome;
+
+    try {
+      const harness = createServer([{ id: "w1", status: "idle", tty: "ttys001" }]);
+      const server = harness.server as unknown as {
+        handleMessage: (ws: WebSocket, msg: Record<string, unknown>) => void;
+        readOnlyClients: Set<WebSocket>;
+      };
+      const viewerWs = {
+        readyState: WebSocket.OPEN,
+        send: vi.fn(),
+      } as unknown as WebSocket;
+
+      server.readOnlyClients.add(viewerWs);
+      server.handleMessage(viewerWs, { type: "control_plane_timeline", limit: 20 });
+
+      const sent = (viewerWs.send as unknown as { mock: { calls: [string][] } }).mock.calls
+        .map(([raw]) => JSON.parse(raw) as Record<string, unknown>);
+      expect(sent).toContainEqual({
+        type: "control_plane_timeline",
+        timeline: [
+          expect.objectContaining({
+            type: "route",
+            workerId: "w1",
+            summary: "Read /Users/test/.hive/context-messages/msg-1.md and follow it exactly.",
+          }),
+        ],
+      });
+    } finally {
+      if (prevHome == null) delete process.env.HOME; else process.env.HOME = prevHome;
+      if (prevHiveHome == null) delete process.env.HIVE_HOME; else process.env.HIVE_HOME = prevHiveHome;
+      rmSync(tempHome, { recursive: true, force: true });
+    }
   });
 
   it("keeps immediate worker_update broadcasts unchanged", () => {

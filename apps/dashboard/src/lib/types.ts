@@ -7,6 +7,8 @@ export type {
   DaemonResponse,
   ReviewItem,
   ConnectedMachine,
+  ControlPlaneTimelineEntry,
+  ControlPlaneTimelineLink,
 } from "@hive/types";
 
 /** Available agent type for the spawn dialog (sent by daemon over WS). */

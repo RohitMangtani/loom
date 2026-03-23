@@ -9,6 +9,7 @@ import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { SpawnDialog } from "@/components/SpawnDialog";
 import { QuickStartDialog } from "@/components/QuickStartDialog";
 import { OutputViewerDialog } from "@/components/OutputViewerDialog";
+import { TimelineDrawer } from "@/components/TimelineDrawer";
 import type { WorkerState } from "@/lib/types";
 import { usePushSubscription } from "@/components/ServiceWorker";
 
@@ -87,6 +88,7 @@ export default function Home() {
   const [flaggedIds, setFlaggedIds] = useState<Set<string>>(new Set());
   const previewUrlsRef = useRef<Map<string, string>>(new Map());
   const [showReviews, setShowReviews] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
   const [showQuickStartDialog, setShowQuickStartDialog] = useState(false);
@@ -137,7 +139,7 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, requestWorkerContext, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, requestWorkerContext, requestControlPlaneTimeline, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, timelineEntries, models, vapidKey, machines } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
 
@@ -163,6 +165,10 @@ export default function Home() {
       subscribeTo(selectedId);
     }
   }, [connected, selectedId, subscribeTo]);
+
+  useEffect(() => {
+    if (showTimeline) requestControlPlaneTimeline(120);
+  }, [showTimeline, requestControlPlaneTimeline]);
 
   useEffect(() => {
     if (selectedId) sessionStorage.setItem("hive_selected_agent", selectedId);
@@ -371,11 +377,18 @@ export default function Home() {
           <p className="text-center text-[10px] text-[#f87171] mt-2">Wrong token</p>
         )}
 
-        <div className="flex items-center justify-center gap-3 mt-2 text-[10px] text-[var(--text-light)]">
+          <div className="flex items-center justify-center gap-3 mt-2 text-[10px] text-[var(--text-light)]">
           <span className="font-medium">{numbered.length}/{MAX_SLOTS} agents</span>
           {activeCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-active)]" />{activeCount} active</span>}
           {stuckCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-needs)]" />{stuckCount} waiting</span>}
           {idleCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-offline)]" />{idleCount} idle</span>}
+          <button
+            type="button"
+            onClick={() => setShowTimeline(true)}
+            className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+          >
+            Timeline
+          </button>
           {!isViewer && managing ? (
             <button
               type="button"
@@ -564,6 +577,12 @@ export default function Home() {
         onMarkSeen={markReviewSeen}
         onMarkAllSeen={markAllReviewsSeen}
         onClearAll={clearAllReviews}
+      />
+
+      <TimelineDrawer
+        open={showTimeline}
+        events={timelineEntries}
+        onClose={() => setShowTimeline(false)}
       />
 
       {showSpawnDialog && (

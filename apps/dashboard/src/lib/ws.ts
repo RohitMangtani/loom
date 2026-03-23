@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, ReviewItem, WorkerContextSnapshot, WorkerState } from "@/lib/types";
+import type { AgentModel, ChatEntry, ConnectedMachine, ControlPlaneTimelineEntry, DaemonMessage, DaemonResponse, ReviewItem, WorkerContextSnapshot, WorkerState } from "@/lib/types";
 
 /** Extended response type for message types beyond the base DaemonResponse union */
 type ExtendedResponse = DaemonResponse | { type: "models"; models?: AgentModel[] } | { type: "vapid_key"; vapidKey?: string } | { type: "push_status"; subscribed?: boolean };
@@ -18,6 +18,7 @@ export function useHive(daemonUrl: string) {
   const [workerContexts, setWorkerContexts] = useState<Map<string, WorkerContextSnapshot>>(new Map());
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [timelineEntries, setTimelineEntries] = useState<ControlPlaneTimelineEntry[]>([]);
   const [models, setModels] = useState<AgentModel[]>([
     { id: "claude", label: "Claude" },
     { id: "codex", label: "Codex" },
@@ -314,6 +315,13 @@ export function useHive(daemonUrl: string) {
             break;
           }
 
+          case "control_plane_timeline": {
+            if (data.timeline && Array.isArray(data.timeline)) {
+              setTimelineEntries(data.timeline);
+            }
+            break;
+          }
+
           case "auth": {
             setIsAdmin(data.admin ?? false);
             break;
@@ -443,9 +451,20 @@ export function useHive(daemonUrl: string) {
     [send]
   );
 
+  const requestControlPlaneTimeline = useCallback(
+    (limit = 80) => {
+      send({
+        type: "control_plane_timeline",
+        limit,
+      });
+    },
+    [send]
+  );
+
   return {
     connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect,
     requestWorkerContext,
-    reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines,
+    requestControlPlaneTimeline,
+    reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, timelineEntries, models, vapidKey, machines,
   };
 }
