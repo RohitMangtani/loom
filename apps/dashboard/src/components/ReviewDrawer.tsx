@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatEntry, ReviewItem, WorkerState } from "@/lib/types";
-import type { ActivitySnapshot } from "@/lib/snapshot-store";
-import { createSnapshotPayload, loadSnapshots, persistSnapshots } from "@/lib/snapshot-store";
 import type { RevertHistoryEntry } from "@hive/types";
 
 interface ReviewDrawerProps {
@@ -18,7 +16,6 @@ interface ReviewDrawerProps {
   workers: Map<string, WorkerState>;
   chatEntries: Map<string, ChatEntry[]>;
   activity: { text: string; timestamp: number } | null;
-  onRequestSnapshotUndo: (snapshot: ActivitySnapshot) => void;
 }
 
 function typeIcon(type: ReviewItem["type"]): string {
@@ -57,32 +54,6 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-const SNAPSHOT_LIMIT = 6;
-
-function buildAgentSummary(workers: Map<string, WorkerState>): string {
-  if (workers.size === 0) return "No agents connected";
-  return Array.from(workers.values())
-    .slice(0, 3)
-    .map((worker) => {
-      const quadrant = worker.quadrant ? `Q${worker.quadrant}` : "Q?";
-      const model = worker.model || "agent";
-      const project = worker.projectName || "unknown project";
-      const status = worker.status || "idle";
-      return `${quadrant} ${model} on ${project} (${status})`;
-    })
-    .join(" · ");
-}
-
-function chatSnippet(workerId: string | undefined, chatEntries: Map<string, ChatEntry[]>): string {
-  if (!workerId) return "";
-  const entries = chatEntries.get(workerId);
-  if (!entries || entries.length === 0) return "";
-  const slice = entries.slice(-2);
-  return slice
-    .map((entry) => `${entry.role === "user" ? "You" : "Agent"}: ${entry.text}`)
-    .join(" · ");
-}
-
 /** Swipeable review item  --  swipe right to dismiss */
 function SwipeableItem({
   review,
@@ -101,7 +72,7 @@ function SwipeableItem({
   const [dismissed, setDismissed] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(false);
 
-  const THRESHOLD = 100; // px to trigger dismiss
+  const THRESHOLD = 100;
 
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     startX.current = e.touches[0].clientX;
@@ -109,13 +80,9 @@ function SwipeableItem({
     swiping.current = true;
   }, []);
 
-  const now = Date.now();
-  const RECENT_WINDOW = 4000;
-
   const onTouchMove = useCallback((e: React.TouchEvent) => {
     if (!swiping.current) return;
     const delta = e.touches[0].clientX - startX.current;
-    // Only allow swiping right (positive direction)
     currentX.current = Math.max(0, delta);
     setOffset(currentX.current);
   }, []);
@@ -124,7 +91,7 @@ function SwipeableItem({
     swiping.current = false;
     if (currentX.current > THRESHOLD) {
       setDismissed(true);
-      setOffset(400); // slide out
+      setOffset(400);
       setTimeout(onDismiss, 250);
     } else {
       setOffset(0);
@@ -156,7 +123,6 @@ function SwipeableItem({
       onTouchEnd={onTouchEnd}
     >
       <div className="flex items-start gap-3">
-        {/* Type badge */}
         <div
           className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold mt-0.5"
           style={{
@@ -171,7 +137,6 @@ function SwipeableItem({
           {typeIcon(review.type)}
         </div>
 
-        {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
             {review.quadrant ? (
@@ -203,7 +168,6 @@ function SwipeableItem({
             {review.summary}
           </p>
 
-          {/* Artifacts (expandable) */}
           {review.artifacts && review.artifacts.length > 0 && (
             <div className="mt-1">
               <button
@@ -226,7 +190,6 @@ function SwipeableItem({
             </div>
           )}
 
-          {/* Action row */}
           <div className="flex items-center gap-2 mt-1.5">
             {review.url && (
               <a
@@ -267,97 +230,8 @@ export function ReviewDrawer({
   workers,
   chatEntries,
   activity,
-  onRequestSnapshotUndo,
 }: ReviewDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
-  const [snapshots, setSnapshots] = useState<ActivitySnapshot[]>([]);
-  const [snapshotLabel, setSnapshotLabel] = useState("");
-  const [snapshotNotes, setSnapshotNotes] = useState("");
-  const [snapshotStatus, setSnapshotStatus] = useState<string | null>(null);
-  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleStatusClear = useCallback(() => {
-    if (statusTimerRef.current) {
-      clearTimeout(statusTimerRef.current);
-    }
-    statusTimerRef.current = setTimeout(() => {
-      setSnapshotStatus(null);
-      statusTimerRef.current = null;
-    }, 2500);
-  }, []);
-
-  useEffect(() => () => {
-    if (statusTimerRef.current) {
-      clearTimeout(statusTimerRef.current);
-    }
-  }, []);
-
-  const agentSummary = useMemo(() => buildAgentSummary(workers), [workers]);
-  const primaryWorkerId = useMemo(() => {
-    if (reviews.length > 0 && reviews[0].workerId) return reviews[0].workerId;
-    const firstWorker = workers.values().next();
-    return firstWorker.done ? undefined : firstWorker.value.id;
-  }, [reviews, workers]);
-  const reviewSummaryText = useMemo(() => {
-    if (reviews.length === 0) return "Manual snapshot";
-    const first = reviews[0];
-    return `${typeLabel(first.type)} — ${first.summary}`;
-  }, [reviews]);
-  const reviewIds = useMemo(() => reviews.slice(0, 4).map((r) => r.id), [reviews]);
-  const contextSummary = useMemo(() => {
-    const pieces: string[] = [];
-    if (activity?.text) pieces.push(activity.text);
-    const snippet = chatSnippet(primaryWorkerId, chatEntries);
-    if (snippet) pieces.push(snippet);
-    return pieces.join(" · ") || "No context yet.";
-  }, [activity, chatEntries, primaryWorkerId]);
-
-  useEffect(() => {
-    setSnapshots(loadSnapshots());
-  }, []);
-
-  const now = Date.now();
-  const RECENT_WINDOW = 4000;
-
-  const handleSaveSnapshot = useCallback(() => {
-    const payload = createSnapshotPayload(
-      snapshotLabel,
-      snapshotNotes,
-      agentSummary,
-      contextSummary,
-      reviewSummaryText,
-      reviewIds,
-      primaryWorkerId,
-    );
-    setSnapshots((prev) => {
-      const next = [payload, ...prev].slice(0, SNAPSHOT_LIMIT);
-      persistSnapshots(next);
-      return next;
-    });
-    setSnapshotLabel("");
-    setSnapshotNotes("");
-    setSnapshotStatus(`Saved snapshot “${payload.label}”`);
-    scheduleStatusClear();
-  }, [
-    snapshotLabel,
-    snapshotNotes,
-    agentSummary,
-    contextSummary,
-    reviewSummaryText,
-    reviewIds,
-    primaryWorkerId,
-    scheduleStatusClear,
-  ]);
-
-  const handleCopyContext = useCallback((message: string) => {
-    const text = message.trim();
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(text);
-      setSnapshotStatus("Context copied to clipboard");
-    } else {
-      setSnapshotStatus("Clipboard not available");
-    }
-    scheduleStatusClear();
-  }, []);
 
   const [reverts, setReverts] = useState<RevertHistoryEntry[]>([]);
   const [loadingReverts, setLoadingReverts] = useState(false);
@@ -390,7 +264,7 @@ export function ReviewDrawer({
       setRevertStatus("Admin token required for reverts.");
       return;
     }
-    const confirmation = window.prompt(`Type ${entry.commit} to confirm reverting ${entry.projectName}`)?.trim();
+    const confirmation = window.prompt(`Type "${entry.commit}" to confirm reverting ${entry.projectName}`)?.trim();
     if (!confirmation) return;
     setRevertingId(entry.id);
     setRevertStatus(null);
@@ -416,32 +290,26 @@ export function ReviewDrawer({
   }, [apiUrlWithToken, isAdmin, loadReverts]);
 
   useEffect(() => {
-    if (open) {
-      loadReverts();
-    }
+    if (open) loadReverts();
   }, [open, loadReverts]);
 
   // Mark items as seen when drawer opens
   useEffect(() => {
     if (open) {
       const unseen = reviews.filter(r => !r.seen);
-      for (const r of unseen) {
-        onMarkSeen(r.id);
-      }
+      for (const r of unseen) onMarkSeen(r.id);
     }
   }, [open, reviews, onMarkSeen]);
 
   // Close on escape
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  // Swipe drawer closed (touch right edge and swipe right)
+  // Swipe drawer closed
   const drawerStartX = useRef(0);
   const drawerSwiping = useRef(false);
   const [drawerOffset, setDrawerOffset] = useState(0);
@@ -459,20 +327,17 @@ export function ReviewDrawer({
 
   const onDrawerTouchEnd = useCallback(() => {
     drawerSwiping.current = false;
-    if (drawerOffset > 120) {
-      onClose();
-    }
+    if (drawerOffset > 120) onClose();
     setDrawerOffset(0);
   }, [drawerOffset, onClose]);
 
-  // Reset drawer offset when closing
-  useEffect(() => {
-    if (!open) setDrawerOffset(0);
-  }, [open]);
+  useEffect(() => { if (!open) setDrawerOffset(0); }, [open]);
+
+  const now = Date.now();
+  const RECENT_WINDOW = 4000;
 
   return (
     <>
-      {/* Backdrop */}
       {open && (
         <div
           className="fixed inset-0 bg-black/40 z-40 transition-opacity"
@@ -480,7 +345,6 @@ export function ReviewDrawer({
         />
       )}
 
-      {/* Drawer */}
       <div
         ref={drawerRef}
         className="fixed top-0 right-0 h-full z-50 flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)]"
@@ -523,146 +387,61 @@ export function ReviewDrawer({
           </div>
         </div>
 
-        {/* Items  --  scrollable */}
+        {/* Content  --  scrollable */}
         <div
-          className="flex-1 overflow-y-auto overscroll-contain space-y-2"
+          className="flex-1 overflow-y-auto overscroll-contain"
           style={{ WebkitOverflowScrolling: "touch" }}
         >
-          <div className="px-4 py-3 border-b border-[var(--border)] space-y-2">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-[var(--text)]">Snapshots</p>
-                <p className="text-[10px] text-[var(--text-light)]">{contextSummary}</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleSaveSnapshot}
-                className="text-[10px] font-semibold text-[var(--text-light)] hover:text-[var(--text)] transition-colors cursor-pointer border border-[var(--border)] rounded-full px-3 py-1"
-              >
-                Save snapshot
-              </button>
-            </div>
-            <input
-              type="text"
-              value={snapshotLabel}
-              onChange={(e) => setSnapshotLabel(e.target.value)}
-              placeholder="Snapshot label (e.g., commit name)"
-              className="w-full rounded border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[10px] text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-            />
-            <textarea
-              rows={2}
-              value={snapshotNotes}
-              onChange={(e) => setSnapshotNotes(e.target.value)}
-              placeholder="Describe why this snapshot matters (auto-filled notes will show recent reviews)"
-              className="w-full resize-none rounded border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[10px] text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-            />
-            {snapshotStatus && (
-              <p className="text-[10px] text-[var(--accent)]">{snapshotStatus}</p>
-            )}
-          </div>
-
-          {snapshots.length > 0 && (
-            <div className="px-4 space-y-2">
-              {snapshots.map((snapshot) => {
-                const isFreshSnapshot = now - snapshot.timestamp < RECENT_WINDOW;
-                return (
-                  <article
-                    key={snapshot.id}
-                    className={`space-y-1 rounded-lg border border-[var(--border)] bg-[var(--bg-alt)] px-3 py-2 ${isFreshSnapshot ? "activity-flash" : ""}`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-[11px] font-semibold text-[var(--text)]">{snapshot.label}</p>
-                        <p className="text-[9px] text-[var(--text-light)]">
-                          {new Date(snapshot.timestamp).toLocaleDateString([], {
-                            month: "short",
-                            day: "numeric",
-                          })}{" "}
-                          {formatTime(snapshot.timestamp)}
-                        </p>
-                      </div>
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          onClick={() => onRequestSnapshotUndo(snapshot)}
-                          className="text-[10px] font-semibold text-[var(--text)] hover:text-[var(--accent)] transition-colors"
-                          disabled={!snapshot.workerId}
-                          title={snapshot.workerId ? "Request rewind" : "No worker context yet"}
-                        >
-                          Rewind
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyContext(`${snapshot.context} · ${snapshot.notes}`)}
-                          className="text-[10px] text-[var(--text-light)] hover:text-[var(--text)] transition-colors"
-                        >
-                          Copy context
-                        </button>
-                      </div>
-                    </div>
-                    <p className="text-xs text-[var(--text-light)]">{snapshot.reviewSummary}</p>
-                    <p className="text-[10px] text-[var(--text-muted)]">{snapshot.agentSummary}</p>
-                    {snapshot.notes && (
-                      <p className="text-[10px] text-[var(--text-light)]">Notes: {snapshot.notes}</p>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-
+          {/* Revert history */}
           <div className="px-4 py-3 border-b border-[var(--border)] space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-xs font-semibold text-[var(--text)]">Revert history</p>
-                <p className="text-[10px] text-[var(--text-light)]">
-                  {loadingReverts
-                    ? "Refreshing history…"
-                    : reverts.length
-                      ? `${reverts.length} tracked commit${reverts.length === 1 ? "" : "s"}`
-                      : "No revert entries yet."}
-                </p>
-              </div>
+              <p className="text-xs font-semibold text-[var(--text)]">Revert history</p>
               {revertStatus && (
                 <p className="text-[10px] text-[var(--accent)]">{revertStatus}</p>
               )}
             </div>
-            {reverts.length === 0 && !loadingReverts && (
+            {loadingReverts && (
+              <p className="text-[10px] text-[var(--text-muted)]">Loading...</p>
+            )}
+            {!loadingReverts && reverts.length === 0 && (
               <p className="text-[10px] text-[var(--text-muted)]">
-                Revert entries appear after commits or pushes are auto-detected.
+                Revert entries appear after agents push commits.
               </p>
             )}
             {reverts.length > 0 && (
               <div className="space-y-2">
                 {reverts.map((entry) => {
-                  const isFreshRevert = now - entry.timestamp < RECENT_WINDOW;
+                  const isFresh = now - entry.timestamp < RECENT_WINDOW;
                   return (
                     <article
                       key={entry.id}
-                      className={`space-y-1 rounded-lg border border-[var(--border)] bg-[var(--bg-alt)] px-3 py-2 ${isFreshRevert ? "activity-flash" : ""}`}
+                      className={`rounded-lg border border-[var(--border)] px-3 py-2.5 ${isFresh ? "activity-flash" : ""}`}
+                      style={{ background: "rgba(255,255,255,0.02)" }}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-[11px] font-semibold text-[var(--text)]">{entry.label}</p>
-                          <p className="text-[9px] text-[var(--text-muted)]">
-                            {entry.projectName} · {entry.branch ?? "branch"}
-                            {entry.quadrant ? ` · Q${entry.quadrant}` : ""} · {formatTime(entry.timestamp)}
-                          </p>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-[var(--text)] truncate">{entry.label}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[9px] font-mono text-[var(--accent)]">{entry.commit}</span>
+                            <span className="text-[9px] text-[var(--text-muted)]">{entry.projectName}</span>
+                            {entry.quadrant && (
+                              <span className="text-[9px] text-[var(--text-muted)]">Q{entry.quadrant}</span>
+                            )}
+                            <span className="text-[9px] text-[var(--text-muted)]">{timeAgo(entry.timestamp)}</span>
+                          </div>
                         </div>
                         <button
                           type="button"
                           onClick={() => handleRevert(entry)}
                           disabled={isAdmin !== true || revertingId === entry.id}
-                          className="text-[10px] font-semibold text-[var(--text-light)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+                          className="shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded border border-[rgba(239,68,68,0.25)] text-[#f87171] hover:bg-[rgba(239,68,68,0.1)] transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-default"
                           title={isAdmin === true ? `Revert to ${entry.commit}` : "Admin token required"}
                         >
-                          {revertingId === entry.id ? "Reverting…" : "Revert"}
+                          {revertingId === entry.id ? "Reverting..." : "Revert"}
                         </button>
                       </div>
-                      <p className="text-[10px] text-[var(--text-light)]">{entry.description}</p>
-                      <p className="text-[10px] text-[var(--text-muted)]">Commit {entry.commit}</p>
-                      {entry.context && (
-                        <p className="text-[10px] text-[var(--text-muted)]">Context: {entry.context}</p>
+                      {entry.description && (
+                        <p className="text-[10px] text-[var(--text-light)] mt-1 leading-relaxed">{entry.description}</p>
                       )}
                     </article>
                   );
@@ -671,20 +450,21 @@ export function ReviewDrawer({
             )}
           </div>
 
+          {/* Review items */}
           {reviews.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-[var(--text-light)] text-xs">
+            <div className="flex items-center justify-center py-12 text-[var(--text-light)] text-xs">
               No recent activity
             </div>
           ) : (
             <div className="py-2">
               {reviews.map((review) => {
-                const isRecentReview = now - review.createdAt < RECENT_WINDOW;
+                const isRecent = now - review.createdAt < RECENT_WINDOW;
                 return (
                   <SwipeableItem
                     key={review.id}
                     review={review}
                     onDismiss={() => onDismiss(review.id)}
-                    highlight={isRecentReview}
+                    highlight={isRecent}
                   />
                 );
               })}

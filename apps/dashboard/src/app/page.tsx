@@ -9,7 +9,6 @@ import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { SpawnDialog } from "@/components/SpawnDialog";
 import { InviteDialog } from "@/components/InviteDialog";
 import type { WorkerState } from "@/lib/types";
-import type { ActivitySnapshot } from "@/lib/snapshot-store";
 import { usePushSubscription } from "@/components/ServiceWorker";
 
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
@@ -141,24 +140,6 @@ export default function Home() {
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
   const workerList = useMemo(() => Array.from(workers.values()), [workers]);
-  const handleSnapshotUndo = useCallback((snapshot: ActivitySnapshot) => {
-    if (!snapshot.workerId) {
-      if (typeof window !== "undefined") {
-        window.alert("Snapshot needs an agent context before it can be reverted.");
-      }
-      return;
-    }
-    const content = [
-      `Undo snapshot: ${snapshot.label}`,
-      `Context: ${snapshot.context}`,
-      snapshot.notes ? `Notes: ${snapshot.notes}` : "Notes: none",
-    ].join("\n");
-    if (!send({ type: "message", workerId: snapshot.workerId, content })) {
-      if (typeof window !== "undefined") {
-        window.alert("Unable to reach Hive daemon. Try again when connected.");
-      }
-    }
-  }, [send]);
 
   useEffect(() => {
     if (isAdmin === true && mode === "viewer") {
@@ -611,7 +592,6 @@ export default function Home() {
         workers={workers}
         chatEntries={chatEntries}
         activity={activity}
-        onRequestSnapshotUndo={handleSnapshotUndo}
         onClose={() => setShowReviews(false)}
         onDismiss={dismissReview}
         onMarkSeen={markReviewSeen}
