@@ -188,15 +188,15 @@ export class NotificationManager {
   private isCompletionTransition(workerId: string, state: WorkerState, prevStatus?: string): boolean {
     if (prevStatus !== "working" || state.status !== "idle") return false;
     if (state.currentAction) return false;
-    const lastAction = state.lastAction?.trim();
-    if (!lastAction) return false;
-    const action = lastAction;
-    const now = Date.now();
-    const record = this.completionCache.get(workerId);
-    if (record && record.action === action && now - record.ts < 30_000) {
-      return false;
-    }
-    this.completionCache.set(workerId, { action, ts: now });
+
+    // Only notify once per input. If the agent already notified for the last
+    // task it received, don't notify again until new input arrives. This
+    // prevents idle agents from re-notifying on status flickers.
+    const lastInput = this.telemetryRef?.getLastInputSent(workerId) || 0;
+    if (lastInput === 0) return false; // Never received input — nothing to complete
+    const lastNotify = this.lastPushed.get(workerId) || 0;
+    if (lastNotify > lastInput) return false; // Already notified for this input
+
     return true;
   }
 
