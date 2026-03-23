@@ -57,7 +57,9 @@ If you want Claude Code or Codex to run the setup for you, approve a few one-tim
 
 Paste this into Claude Code or Codex:
 
-> Install Hive for me. Clone https://github.com/RohitMangtani/hive. Before running the install script, ask me: "Do you want to (1) start a new Hive environment with your own dashboard, or (2) join an existing Hive network on another computer?" If I choose 1, run `bash scripts/install.sh --fresh`. It handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end. If I choose 2, ask me for the tunnel URL and token from the other machine, then run `bash scripts/install.sh --connect <URL> <TOKEN>` with what I provide. Give me whatever it prints at the end.
+> Install Hive for me from https://github.com/RohitMangtani/hive. First ask me which setup I want: (1) Desktop app on this Mac, (2) New Hive environment with my own dashboard, or (3) Connect this Mac to an existing Hive network. If I choose 1, clone the repo, run `npm install`, then run `npm run desktop:prepare`, `npm run desktop:smoke`, and `npm run desktop:dev`. If I choose 2, clone the repo and run `bash scripts/install.sh --fresh`. If I choose 3, ask me for the tunnel URL and token from the other machine, then clone the repo and run `bash scripts/install.sh --connect <URL> <TOKEN>`. Before any command that needs approval, tell me exactly what prompt to accept. When you're done, give me the dashboard URL and token, or tell me the desktop app is running and what to open next.
+
+That prompt is the shortest guided path if you prefer pasting one instruction into an LLM CLI instead of running commands yourself.
 
 **What you need beforehand for the hosted/script paths:**
 - macOS with Node.js 20+ installed
