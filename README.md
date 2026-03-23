@@ -14,7 +14,7 @@ One person. Multiple models. Multiple machines. The output of a team.
 
 Paste this into Claude Code or Codex:
 
-> Install Hive for me. Clone https://github.com/RohitMangtani/hive. Before running the install script, ask me: "Do you want to (1) start a new Hive environment with your own dashboard, or (2) join an existing Hive network on another computer?" If I choose 1, run `bash scripts/install.sh --fresh`. It handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end. If I choose 2, ask me for the tunnel URL and token from the other machine, then run `bash scripts/install.sh --connect <URL> <TOKEN>` with what I provide. Give me whatever it prints at the end.
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive. Before running the install script, ask me: "Which setup do you want? (1) Desktop app on this Mac, (2) New Hive environment with your own hosted dashboard, or (3) Connect this Mac to an existing Hive network on another computer." If I choose 1, run `npm install`, then `npm run desktop:prepare`, `npm run desktop:smoke`, and `npm run desktop:dev`. If I choose 2, run `bash scripts/install.sh --fresh`. It handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end. If I choose 3, ask me for the tunnel URL and token from the other machine, then run `bash scripts/install.sh --connect <URL> <TOKEN>` with what I provide. Give me whatever it prints at the end.
 
 When the agent runs, approve these one-time prompts:
 
