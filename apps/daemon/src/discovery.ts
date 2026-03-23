@@ -65,6 +65,15 @@ export class ProcessDiscovery {
   private readonly terminal?: TerminalIO;
   private discoveredPids = new Set<number>();
   private daemonPid = process.pid;
+
+  /** Pre-seed discoveredPids from state import so restored workers go through
+   *  the existing-worker path (not new-worker) on the first scan after restart.
+   *  Prevents the new-worker path from overwriting clean imported state. */
+  seedFromImport(pids: number[]): void {
+    for (const pid of pids) {
+      if (pid > 0) this.discoveredPids.add(pid);
+    }
+  }
   private prevStatus = new Map<string, string>();
   private auditLog: AuditEntry[] = [];
   // Hysteresis: count consecutive idle signals per worker.

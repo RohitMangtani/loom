@@ -158,6 +158,10 @@ if (satFlagIdx !== -1) {
   const snapshot = StateStore.load();
   if (snapshot) {
     telemetry.importState(snapshot);
+    // Pre-seed discovery so restored workers go through the existing-worker
+    // path on the first scan. Without this, discovery treats them as "new"
+    // and overwrites clean imported state with stale JSONL analysis.
+    discovery.seedFromImport(snapshot.workers.map(w => w.pid));
   }
 
   // Register push notifications on stuck transitions (local workers)
