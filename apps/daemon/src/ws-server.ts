@@ -2195,10 +2195,12 @@ export class WsServer {
                 current.currentAction = prompt.message;
                 current.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
                 this.telemetry.notifyExternal(current);
-              } else if (current.promptType && polls >= 2) {
+              } else if (current.promptType && polls >= 8) {
                 // Pre-set promptType (e.g. trust for Claude) but no prompt detected
-                // after 2+ polls (~3s)  --  folder was already trusted. Clear the prompt
-                // so the dashboard doesn't show a stale "Trust folder" button.
+                // after 8 polls (~12s). The CLI takes 3-5s to boot, so we wait long
+                // enough to be confident the folder was already trusted before clearing.
+                // (Old threshold of 2 polls / ~3s was too aggressive and caused the
+                // approval button to vanish before the CLI finished loading.)
                 current.promptType = null;
                 current.promptMessage = undefined;
                 current.status = "idle";

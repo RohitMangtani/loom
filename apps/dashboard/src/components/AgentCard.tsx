@@ -220,9 +220,9 @@ export type { DotColor };
 const FLAG_COLOR = "#f97316";
 
 export function AgentCard({
-  worker, num, selected, flagged, managing, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill,
+  worker, num, selected, flagged, managing, fill, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill,
 }: {
-  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void;
+  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; fill?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void;
 }) {
   const [finishedPulse, setFinishedPulse] = useState(false);
   const prevStatusRef = useRef(worker.status);
@@ -248,7 +248,7 @@ export function AgentCard({
     <div
       onClick={managing ? undefined : onClick}
       onPointerDown={managing ? undefined : onPointerDown}
-      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""}`}
+      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""} ${fill ? "h-full" : ""}`}
       style={{ borderLeftColor: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
       {finishedPulse && (

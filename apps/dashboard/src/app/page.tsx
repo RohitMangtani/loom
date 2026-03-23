@@ -472,7 +472,7 @@ export default function Home() {
           style={!isViewer && selectedEntry ? { maxHeight: chatExpanded ? "0px" : "40vh", overflow: chatExpanded ? "hidden" : "auto", padding: chatExpanded ? "0px" : undefined, gap: chatExpanded ? "0px" : undefined } : undefined}
         >
           {machineGroups.map(({ machine, agents }) => (
-            <div key={machine || "__local"} className={`shrink-0 flex flex-col ${!isViewer && selectedEntry ? "gap-1.5" : "gap-3"}`}>
+            <div key={machine || "__local"} className={`flex flex-col ${!isViewer && selectedEntry ? "shrink-0 gap-1.5" : "flex-1 min-h-0 gap-3"}`}>
               {machine && (
                 <div className="flex items-center gap-2 px-1 shrink-0">
                   <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--text-muted)]">{machine}</span>
@@ -480,13 +480,14 @@ export default function Home() {
                 </div>
               )}
               {agents.map(({ worker: w, num }) => (
-                <div key={w.id} className="shrink-0">
+                <div key={w.id} className={!isViewer && selectedEntry ? "shrink-0" : "flex-1 min-h-0"}>
                   <AgentCard
                     worker={w}
                     num={num}
                     selected={!isViewer && selectedId === w.id}
                     flagged={flaggedIds.has(w.id)}
                     managing={managing}
+                    fill={isViewer || !selectedEntry}
                     onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
                     onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
                     onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
