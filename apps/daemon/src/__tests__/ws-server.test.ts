@@ -130,6 +130,30 @@ describe("WsServer pushState", () => {
     });
   });
 
+  it("blocks mutating messages from read-only clients but still allows list", () => {
+    const harness = createServer([{ id: "w1", status: "idle" }]);
+    const server = harness.server as unknown as {
+      handleMessage: (ws: WebSocket, msg: Record<string, unknown>) => void;
+      readOnlyClients: Set<WebSocket>;
+    };
+    const viewerWs = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+
+    server.readOnlyClients.add(viewerWs);
+    server.handleMessage(viewerWs, { type: "spawn", model: "claude", project: "~" });
+    server.handleMessage(viewerWs, { type: "list" });
+
+    const sent = (viewerWs.send as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([raw]) => JSON.parse(raw) as Record<string, unknown>);
+    expect(sent[0]).toEqual({ type: "error", error: "Read-only access" });
+    expect(sent[1]).toEqual({
+      type: "workers",
+      workers: [{ id: "w1", status: "idle" }],
+    });
+  });
+
   it("keeps immediate worker_update broadcasts unchanged", () => {
     const harness = createServer([{ id: "w1", status: "idle" }]);
     const client = harness.addClient();

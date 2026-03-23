@@ -8,7 +8,9 @@ interface Harness {
   receiver: Record<string, unknown>;
 }
 
-async function createHarness(): Promise<Harness> {
+async function createHarness(options?: {
+  requireAuth?: Parameters<typeof registerApiRoutes>[1];
+}): Promise<Harness> {
   const app = express();
   app.use(express.json());
 
@@ -80,7 +82,13 @@ async function createHarness(): Promise<Harness> {
 
   const procMgr = {} as never;
   const discovery = { getAuditLog: vi.fn(() => []) } as never;
-  registerApiRoutes(app, (_req, _res, next) => next(), receiver as never, procMgr, discovery);
+  registerApiRoutes(
+    app,
+    options?.requireAuth || ((_req, _res, next) => next()),
+    receiver as never,
+    procMgr,
+    discovery,
+  );
 
   const server = await new Promise<import("http").Server>((resolve) => {
     const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
@@ -197,5 +205,119 @@ describe("registerApiRoutes", () => {
       timedOut: false,
       durationMs: 12,
     });
+  });
+
+  it("rejects unauthorized exec and kill requests before touching the control plane", async () => {
+    const requireAuth = (
+      req: Parameters<Parameters<typeof registerApiRoutes>[1]>[0],
+      res: Parameters<Parameters<typeof registerApiRoutes>[1]>[1],
+      next: Parameters<Parameters<typeof registerApiRoutes>[1]>[2],
+    ) => {
+      if (req.headers.authorization !== "Bearer secret") {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+      next();
+    };
+    const harness = await createHarness({ requireAuth });
+    harnesses.push(harness);
+
+    const execRes = await fetch(`${harness.baseUrl}/api/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "pwd" }),
+    });
+    const killRes = await fetch(`${harness.baseUrl}/api/kill`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workerId: "satellite-1:w1" }),
+    });
+
+    expect(execRes.status).toBe(401);
+    expect(await execRes.json()).toEqual({ error: "Unauthorized" });
+    expect(killRes.status).toBe(401);
+    expect(await killRes.json()).toEqual({ error: "Unauthorized" });
+    expect(harness.receiver.execViaSwarm).not.toHaveBeenCalled();
+    expect(harness.receiver.killViaSwarm).not.toHaveBeenCalled();
+  });
+
+  it("maps exec control-plane failures to the correct HTTP statuses", async () => {
+    const harness = await createHarness();
+    harnesses.push(harness);
+
+    vi.mocked(harness.receiver.execViaSwarm as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: false,
+        command: "sleep 10",
+        cwd: "/Users/rmgtni/factory/projects/hive",
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        timedOut: true,
+        durationMs: 5_000,
+        error: "Command timed out",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        command: "pwd",
+        cwd: "hive",
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        timedOut: false,
+        durationMs: 12,
+        error: 'Machine "satellite-9" not connected',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        command: "pwd",
+        cwd: "missing-project",
+        stdout: "",
+        stderr: "",
+        exitCode: null,
+        timedOut: false,
+        durationMs: 8,
+        error: "Working directory not found: /missing-project",
+      });
+
+    const timeoutRes = await fetch(`${harness.baseUrl}/api/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "sleep 10" }),
+    });
+    const missingMachineRes = await fetch(`${harness.baseUrl}/api/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ machine: "satellite-9", command: "pwd", cwd: "hive" }),
+    });
+    const missingCwdRes = await fetch(`${harness.baseUrl}/api/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "pwd", cwd: "missing-project" }),
+    });
+
+    expect(timeoutRes.status).toBe(408);
+    expect((await timeoutRes.json()).timedOut).toBe(true);
+    expect(missingMachineRes.status).toBe(404);
+    expect((await missingMachineRes.json()).error).toContain("not connected");
+    expect(missingCwdRes.status).toBe(400);
+    expect((await missingCwdRes.json()).error).toContain("Working directory not found");
+  });
+
+  it("maps missing worker kill requests to 404", async () => {
+    const harness = await createHarness();
+    harnesses.push(harness);
+
+    vi.mocked(harness.receiver.killViaSwarm as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce({ ok: false, error: "Worker satellite-1:w404 not found" });
+
+    const killRes = await fetch(`${harness.baseUrl}/api/kill`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workerId: "satellite-1:w404" }),
+    });
+
+    expect(killRes.status).toBe(404);
+    expect(await killRes.json()).toEqual({ error: "Worker satellite-1:w404 not found" });
   });
 });

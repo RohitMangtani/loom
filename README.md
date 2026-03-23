@@ -235,6 +235,14 @@ Multi-layer detection pipeline determines real-time status:
 3. **CPU signal** -falls back to CPU usage (>8% = working) when hooks are delayed (all agents)
 4. **PTY output** -detects terminal output flow for agents actively generating text
 
+### Control Modes
+Hive controls agents through two deliberate paths:
+
+1. **Discovered terminal mode** -you launch `claude`, `codex`, or `openclaw` yourself in Terminal.app, Hive discovers the session, and the daemon routes input back into that existing tab through TTY-targeted macOS automation. This is the zero-config compatibility path.
+2. **Managed worker mode** -when Hive owns the worker lifecycle directly, the daemon can talk over stdin/stdout instead of driving a live Terminal tab. This path is cleaner and more testable, and it is where the architecture is headed over time.
+
+Both paths feed the same queue, locks, scratchpad, workflow handoffs, and dashboard state. The Terminal automation layer exists because Hive works with real pre-existing terminal sessions, not because the daemon lacks a cleaner control model.
+
 ### Auto-Pilot
 Auto-approves permission prompts so agents never sit idle waiting for you. The daemon detects when an agent is stuck on a prompt, waits a 3-second grace window (so you can override from the dashboard), then sends a Return keystroke via the `send-return` binary.
 
