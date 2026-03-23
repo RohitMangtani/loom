@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync, chmodSync, readFileSync } from "fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, chmodSync, readFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
@@ -12,6 +12,7 @@ const daemonDist = join(repoRoot, "apps", "daemon", "dist");
 const hookDir = join(repoRoot, "apps", "daemon", "src", "hooks");
 const dashboardOut = join(repoRoot, "apps", "dashboard", "out");
 const launcherSrc = join(desktopDir, "scripts", "desktop-launcher.mjs");
+const desktopDaemonSrc = join(desktopDir, "scripts", "desktop-daemon.mjs");
 const runtimeNodeModules = join(hiveRuntimeRoot, "node_modules");
 const daemonPackage = JSON.parse(readFileSync(join(repoRoot, "apps", "daemon", "package.json"), "utf8"));
 
@@ -29,13 +30,24 @@ mkdirSync(join(hiveRuntimeRoot, "apps", "daemon", "src"), { recursive: true });
 mkdirSync(join(hiveRuntimeRoot, "apps", "dashboard"), { recursive: true });
 mkdirSync(join(generatedRoot, "launcher"), { recursive: true });
 mkdirSync(join(generatedRoot, "bin"), { recursive: true });
+mkdirSync(join(generatedRoot, "lib"), { recursive: true });
 
 cpSync(daemonDist, join(hiveRuntimeRoot, "apps", "daemon", "dist"), { recursive: true });
 cpSync(hookDir, join(hiveRuntimeRoot, "apps", "daemon", "src", "hooks"), { recursive: true });
 cpSync(dashboardOut, join(hiveRuntimeRoot, "apps", "dashboard", "out"), { recursive: true });
 cpSync(launcherSrc, join(generatedRoot, "launcher", "desktop-launcher.mjs"));
+cpSync(desktopDaemonSrc, join(generatedRoot, "launcher", "desktop-daemon.mjs"));
 cpSync(process.execPath, join(generatedRoot, "bin", "node"));
 chmodSync(join(generatedRoot, "bin", "node"), 0o755);
+
+const nodeLibDir = resolve(dirname(process.execPath), "..", "lib");
+if (existsSync(nodeLibDir)) {
+  for (const entry of readdirSync(nodeLibDir)) {
+    if (entry.startsWith("libnode") && entry.endsWith(".dylib")) {
+      cpSync(join(nodeLibDir, entry), join(generatedRoot, "lib", entry));
+    }
+  }
+}
 
 const runtimePackageJson = {
   name: "hive-desktop-runtime",
