@@ -89,6 +89,7 @@ export default function Home() {
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [presenceMinimized, setPresenceMinimized] = useState(false);
   const contextAttachmentsRef = useRef<Map<string, string[]>>(new Map());
 
   useEffect(() => {
@@ -375,20 +376,24 @@ export default function Home() {
 
         {presence.length >= 2 && (
           <div className="presence-bar">
-            <div className="presence-header">
+            <div className="presence-header cursor-pointer" onClick={() => setPresenceMinimized((p) => !p)}>
               <span className="presence-label">Connected people</span>
-              <span className="presence-count">{presence.length} online</span>
+              <span className="presence-count">{presence.length} online {presenceMinimized ? "\u25B8" : "\u25BE"}</span>
             </div>
-            <div className="presence-list">
-              {presence.map((user) => (
-                <span key={user.id} className={`presence-chip role-${user.role}`}>
-                  <span className="presence-dot" />
-                  {user.name}
-                </span>
-              ))}
-            </div>
-            {activity && (
-              <p className="presence-activity">{activity.text} · {new Date(activity.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p>
+            {!presenceMinimized && (
+              <>
+                <div className="presence-list">
+                  {presence.map((user) => (
+                    <span key={user.id} className={`presence-chip role-${user.role}`}>
+                      <span className="presence-dot" />
+                      {user.name}
+                    </span>
+                  ))}
+                </div>
+                {activity && (
+                  <p className="presence-activity">{activity.text} · {new Date(activity.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p>
+                )}
+              </>
             )}
           </div>
         )}
