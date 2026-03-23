@@ -30,99 +30,79 @@ const ROLE_COLORS: Record<Role, string> = {
   viewer: "#94a3b8",
 };
 
+// Ensure the shared event target exists BEFORE any component mounts
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, EventTarget>).__hiveInviteTarget ||= new EventTarget();
+}
+
+function getEventTarget(): EventTarget | null {
+  if (typeof window === "undefined") return null;
+  return (window as unknown as Record<string, EventTarget>).__hiveInviteTarget || null;
+}
+
 export function InviteDialog({ send, onClose }: InviteDialogProps) {
   const [view, setView] = useState<View>("members");
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Invite form state
   const [inviteName, setInviteName] = useState("");
   const [inviteRole, setInviteRole] = useState<Role>("operator");
   const [inviteResult, setInviteResult] = useState<{ token: string; name: string; role: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Confirm delete
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const mountedRef = useRef(false);
 
-  // Listen for WS responses via a global handler registered once
-  const handlersRef = useRef<{
-    onUserList?: (users: UserInfo[]) => void;
-    onUserCreated?: (user: { token: string; name: string; role: string; id: string }) => void;
-    onUserRemoved?: (userId: string, ok: boolean) => void;
-  }>({});
-
+  // Listen for WS responses
   useEffect(() => {
-    // Register a temporary message listener on the WebSocket
-    const handler = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "user_list" && data.users) {
-          handlersRef.current.onUserList?.(data.users);
-        } else if (data.type === "user_created" && data.user) {
-          handlersRef.current.onUserCreated?.(data.user);
-        } else if (data.type === "user_removed") {
-          handlersRef.current.onUserRemoved?.(data.userId, data.ok);
-        }
-      } catch { /* ignore non-JSON */ }
-    };
+    mountedRef.current = true;
+    const target = getEventTarget();
+    if (!target) return;
 
-    // Find the active WebSocket. It's stored in the useHive hook's wsRef.
-    // We can't access it directly, so we'll listen on all WebSocket instances.
-    // Simpler approach: just poll via send + listen on window message events.
-    // Actually the cleanest approach: add the handler to the existing WS.
-    // The WS object dispatches 'message' events. We need the raw WS reference.
-    // Let's use a different approach: the send() function returns true if connected.
-    // We'll use the send function and handle responses through a shared event target.
-
-    // Use a shared event target for WS responses
-    const target = (window as unknown as Record<string, EventTarget>).__hiveInviteTarget ||
-      ((window as unknown as Record<string, EventTarget>).__hiveInviteTarget = new EventTarget());
-
-    const onMsg = (e: Event) => {
+    const handler = (e: Event) => {
+      if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
-      if (detail.type === "user_list") handlersRef.current.onUserList?.(detail.users || []);
-      if (detail.type === "user_created") handlersRef.current.onUserCreated?.(detail.user);
-      if (detail.type === "user_removed") handlersRef.current.onUserRemoved?.(detail.userId, detail.ok);
+      if (detail.type === "user_list" && detail.users) {
+        setUsers(detail.users);
+        setLoading(false);
+      } else if (detail.type === "user_created" && detail.user) {
+        setInviteResult({ token: detail.user.token, name: detail.user.name, role: detail.user.role });
+        setView("invite-ready");
+        // Refresh list
+        send({ type: "user_list" });
+      } else if (detail.type === "user_removed") {
+        if (detail.ok) {
+          setUsers(prev => prev.filter(u => u.id !== detail.userId));
+        }
+        setConfirmDeleteId(null);
+      }
     };
-    target.addEventListener("msg", onMsg);
-    return () => target.removeEventListener("msg", onMsg);
-  }, []);
 
-  // Fetch users on mount
-  useEffect(() => {
-    handlersRef.current.onUserList = (list) => {
-      setUsers(list);
-      setLoading(false);
+    target.addEventListener("msg", handler);
+
+    // Request user list after listener is registered
+    const timer = setTimeout(() => {
+      send({ type: "user_list" });
+    }, 100);
+
+    // Fallback timeout
+    const fallback = setTimeout(() => setLoading(false), 3000);
+
+    return () => {
+      mountedRef.current = false;
+      target.removeEventListener("msg", handler);
+      clearTimeout(timer);
+      clearTimeout(fallback);
     };
-    send({ type: "user_list" });
-    // Timeout fallback
-    const timer = setTimeout(() => setLoading(false), 3000);
-    return () => clearTimeout(timer);
   }, [send]);
 
   const handleInvite = useCallback(() => {
     if (!inviteName.trim()) return;
     setError(null);
-
-    handlersRef.current.onUserCreated = (user) => {
-      setInviteResult({ token: user.token, name: user.name, role: user.role });
-      setView("invite-ready");
-      // Refresh user list
-      send({ type: "user_list" });
-    };
-
     const sent = send({ type: "user_create", userName: inviteName.trim(), userRole: inviteRole });
-    if (!sent) setError("Not connected to dashboard");
+    if (!sent) setError("Not connected");
   }, [inviteName, inviteRole, send]);
 
   const handleRemove = useCallback((id: string) => {
-    handlersRef.current.onUserRemoved = (removedId, ok) => {
-      if (ok) {
-        setUsers((prev) => prev.filter((u) => u.id !== removedId));
-      }
-      setConfirmDeleteId(null);
-    };
     send({ type: "user_remove", userId: id });
   }, [send]);
 
@@ -150,142 +130,67 @@ export function InviteDialog({ send, onClose }: InviteDialogProps) {
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} role="presentation" />
-
       <div
         className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-lg w-full max-w-sm mx-4 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-
         {view === "members" && (
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Team</h2>
-              <button
-                type="button"
-                onClick={resetInvite}
-                className="px-3 py-1 text-xs rounded-md bg-[var(--accent)] text-white font-medium"
-              >
-                + Invite
-              </button>
+              <button type="button" onClick={resetInvite} className="px-3 py-1 text-xs rounded-md bg-[var(--accent)] text-white font-medium">+ Invite</button>
             </div>
-
             {loading ? (
               <p className="text-sm text-[var(--text-muted)]">Loading...</p>
             ) : users.length === 0 ? (
-              <p className="text-sm text-[var(--text-muted)]">No team members yet. Invite someone to get started.</p>
+              <p className="text-sm text-[var(--text-muted)]">No team members yet.</p>
             ) : (
               <div className="space-y-1 max-h-64 overflow-y-auto">
                 {users.map((user) => (
-                  <div
-                    key={user.id}
-                    className="flex items-center justify-between px-3 py-2 rounded-md hover:bg-[var(--bg-secondary)] transition-colors group"
-                  >
+                  <div key={user.id} className="flex items-center justify-between px-3 py-2 rounded-md hover:bg-[var(--bg-secondary)] transition-colors">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: ROLE_COLORS[user.role] || "#94a3b8" }}
-                      />
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: ROLE_COLORS[user.role] || "#94a3b8" }} />
                       <span className="text-sm font-medium truncate">{user.name}</span>
                       <span className="text-xs text-[var(--text-muted)] capitalize">{user.role}</span>
                     </div>
-
                     {confirmDeleteId === user.id ? (
                       <div className="flex gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleRemove(user.id)}
-                          className="px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-400 hover:bg-red-500/30"
-                        >
-                          Remove
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(null)}
-                          className="px-2 py-0.5 text-xs rounded border border-[var(--border)] text-[var(--text-muted)]"
-                        >
-                          Cancel
-                        </button>
+                        <button type="button" onClick={() => handleRemove(user.id)} className="px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-400">Remove</button>
+                        <button type="button" onClick={() => setConfirmDeleteId(null)} className="px-2 py-0.5 text-xs rounded border border-[var(--border)] text-[var(--text-muted)]">Cancel</button>
                       </div>
                     ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteId(user.id)}
-                      className="text-xs text-[var(--text-muted)] hover:text-red-400 transition-colors"
-                    >
-                      Revoke
-                    </button>
+                      <button type="button" onClick={() => setConfirmDeleteId(user.id)} className="text-xs text-[var(--text-muted)] hover:text-red-400">Revoke</button>
                     )}
                   </div>
                 ))}
               </div>
             )}
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-full mt-4 px-3 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] transition-colors"
-            >
-              Done
-            </button>
+            <button type="button" onClick={onClose} className="w-full mt-4 px-3 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] transition-colors">Done</button>
           </div>
         )}
 
         {view === "invite" && (
           <div className="p-6">
             <h2 className="text-lg font-semibold mb-4">Invite to Hive</h2>
-
             <div className="mb-4">
               <label className="block text-xs text-[var(--text-muted)] mb-1.5">Name</label>
-              <input
-                type="text"
-                value={inviteName}
-                onChange={(e) => setInviteName(e.target.value)}
-                placeholder="Alex"
-                className="w-full px-3 py-2 text-sm rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-zinc-500"
-                autoFocus
-                onKeyDown={(e) => e.key === "Enter" && handleInvite()}
-              />
+              <input type="text" value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Alex" className="w-full px-3 py-2 text-sm rounded-md border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-zinc-500" autoFocus onKeyDown={(e) => e.key === "Enter" && handleInvite()} />
             </div>
-
             <div className="mb-4">
               <label className="block text-xs text-[var(--text-muted)] mb-1.5">Role</label>
               <div className="space-y-2">
                 {(["operator", "viewer", "admin"] as Role[]).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setInviteRole(r)}
-                    className={`w-full text-left px-3 py-2 text-sm rounded-md border transition-colors ${
-                      inviteRole === r
-                        ? "border-[var(--accent)] bg-[var(--accent)]/10"
-                        : "border-[var(--border)] hover:border-zinc-600"
-                    }`}
-                  >
+                  <button key={r} type="button" onClick={() => setInviteRole(r)} className={`w-full text-left px-3 py-2 text-sm rounded-md border transition-colors ${inviteRole === r ? "border-[var(--accent)] bg-[var(--accent)]/10" : "border-[var(--border)] hover:border-zinc-600"}`}>
                     <span className="font-medium capitalize">{r}</span>
                     <span className="block text-xs text-[var(--text-muted)] mt-0.5">{ROLE_DESCRIPTIONS[r]}</span>
                   </button>
                 ))}
               </div>
             </div>
-
             {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
-
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setView("members")}
-                className="flex-1 px-3 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] transition-colors"
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                onClick={handleInvite}
-                disabled={!inviteName.trim()}
-                className="flex-1 px-3 py-2 text-sm rounded-md bg-[var(--accent)] text-white font-medium disabled:opacity-40 transition-opacity"
-              >
-                Create Invite
-              </button>
+              <button type="button" onClick={() => setView("members")} className="flex-1 px-3 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] transition-colors">Back</button>
+              <button type="button" onClick={handleInvite} disabled={!inviteName.trim()} className="flex-1 px-3 py-2 text-sm rounded-md bg-[var(--accent)] text-white font-medium disabled:opacity-40 transition-opacity">Create Invite</button>
             </div>
           </div>
         )}
@@ -293,36 +198,18 @@ export function InviteDialog({ send, onClose }: InviteDialogProps) {
         {view === "invite-ready" && inviteResult && (
           <div className="p-6">
             <h2 className="text-lg font-semibold mb-1">Invite Ready</h2>
-            <p className="text-xs text-[var(--text-muted)] mb-4">
-              Send this to {inviteResult.name}. The token is shown once.
-            </p>
-
+            <p className="text-xs text-[var(--text-muted)] mb-4">Send this to {inviteResult.name}. The token is shown once.</p>
             <div className="p-3 rounded-md bg-[var(--bg)] border border-[var(--border)] mb-4">
               <p className="text-xs text-[var(--text-muted)] mb-1">Dashboard</p>
               <p className="text-sm font-mono break-all">{typeof window !== "undefined" ? window.location.origin : ""}</p>
-
               <p className="text-xs text-[var(--text-muted)] mt-3 mb-1">Token</p>
               <p className="text-sm font-mono break-all select-all">{inviteResult.token}</p>
-
               <p className="text-xs text-[var(--text-muted)] mt-3 mb-1">Role</p>
               <p className="text-sm capitalize">{inviteResult.role}</p>
             </div>
-
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => { setView("members"); setInviteResult(null); }}
-                className="flex-1 px-3 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] transition-colors"
-              >
-                Back to Team
-              </button>
-              <button
-                type="button"
-                onClick={handleCopy}
-                className="flex-1 px-3 py-2 text-sm rounded-md bg-[var(--accent)] text-white font-medium transition-opacity"
-              >
-                {copied ? "Copied!" : "Copy Invite"}
-              </button>
+              <button type="button" onClick={() => { setView("members"); setInviteResult(null); }} className="flex-1 px-3 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] transition-colors">Back to Team</button>
+              <button type="button" onClick={handleCopy} className="flex-1 px-3 py-2 text-sm rounded-md bg-[var(--accent)] text-white font-medium transition-opacity">{copied ? "Copied!" : "Copy Invite"}</button>
             </div>
           </div>
         )}
