@@ -94,9 +94,9 @@ export class NotificationManager {
           if (!current || current.status !== "idle") return;
           if (this.telemetryRef && this.telemetryRef.isToolInFlight(workerId)) return;
           const idleStart = this.idleSince.get(workerId);
-          if (!idleStart || Date.now() - idleStart < 60_000) return;
+          if (!idleStart || Date.now() - idleStart < 15_000) return;
           this.pushComplete(workerId, current);
-        }, 60_000));
+        }, 15_000));
       }
     }
   }
@@ -136,8 +136,8 @@ export class NotificationManager {
     // Working → Idle → push notification. Only fires when the agent's
     // full response is complete and it's waiting for the next user message.
     // Guards against mid-processing false positives:
-    //   1. 60s debounce: API thinking gaps can be 30-50s between tool calls
-    //   2. Continuous idle: must have been idle for 60+ uninterrupted seconds
+    //   1. 15s debounce: short enough to be useful, long enough to skip brief flickers
+    //   2. Continuous idle: must have been idle for 15+ uninterrupted seconds
     //      (any working flicker resets the counter via idleSince)
     //   3. idleConfirmed: discovery verified idle via hysteresis
     //   4. No tool in flight: no subagent or tool call pending
@@ -151,9 +151,9 @@ export class NotificationManager {
           if (this.telemetryRef && !this.telemetryRef.isIdleConfirmed(workerId)) return;
           // Verify continuous idle: agent must have been idle for 60s+ straight
           const idleStart = this.idleSince.get(workerId);
-          if (!idleStart || Date.now() - idleStart < 60_000) return;
+          if (!idleStart || Date.now() - idleStart < 15_000) return;
           this.pushComplete(workerId, current);
-        }, 60_000));
+        }, 15_000));
       }
     }
   }
