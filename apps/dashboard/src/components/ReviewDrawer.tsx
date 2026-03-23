@@ -85,9 +85,11 @@ function chatSnippet(workerId: string | undefined, chatEntries: Map<string, Chat
 function SwipeableItem({
   review,
   onDismiss,
+  highlight = false,
 }: {
   review: ReviewItem;
   onDismiss: () => void;
+  highlight?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const startX = useRef(0);
@@ -104,6 +106,9 @@ function SwipeableItem({
     currentX.current = 0;
     swiping.current = true;
   }, []);
+
+  const now = Date.now();
+  const RECENT_WINDOW = 4000;
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
     if (!swiping.current) return;
@@ -137,7 +142,7 @@ function SwipeableItem({
   return (
     <div
       ref={ref}
-      className="group px-4 py-3 hover:bg-[rgba(255,255,255,0.03)] transition-colors relative"
+      className={`group px-4 py-3 hover:bg-[rgba(255,255,255,0.03)] transition-colors relative ${highlight ? "activity-flash" : ""}`}
       style={{
         opacity: review.seen ? 0.6 : 1,
         borderLeft: review.seen ? "2px solid transparent" : "2px solid var(--accent)",
@@ -306,6 +311,9 @@ export function ReviewDrawer({
   useEffect(() => {
     setSnapshots(loadSnapshots());
   }, []);
+
+  const now = Date.now();
+  const RECENT_WINDOW = 4000;
 
   const handleSaveSnapshot = useCallback(() => {
     const payload = createSnapshotPayload(
@@ -490,48 +498,51 @@ export function ReviewDrawer({
 
           {snapshots.length > 0 && (
             <div className="px-4 space-y-2">
-              {snapshots.map((snapshot) => (
-                <article
-                  key={snapshot.id}
-                  className="space-y-1 rounded-lg border border-[var(--border)] bg-[var(--bg-alt)] px-3 py-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-[11px] font-semibold text-[var(--text)]">{snapshot.label}</p>
-                      <p className="text-[9px] text-[var(--text-light)]">
-                        {new Date(snapshot.timestamp).toLocaleDateString([], {
-                          month: "short",
-                          day: "numeric",
-                        })}{" "}
-                        {formatTime(snapshot.timestamp)}
-                      </p>
+              {snapshots.map((snapshot) => {
+                const isFreshSnapshot = now - snapshot.timestamp < RECENT_WINDOW;
+                return (
+                  <article
+                    key={snapshot.id}
+                    className={`space-y-1 rounded-lg border border-[var(--border)] bg-[var(--bg-alt)] px-3 py-2 ${isFreshSnapshot ? "activity-flash" : ""}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] font-semibold text-[var(--text)]">{snapshot.label}</p>
+                        <p className="text-[9px] text-[var(--text-light)]">
+                          {new Date(snapshot.timestamp).toLocaleDateString([], {
+                            month: "short",
+                            day: "numeric",
+                          })}{" "}
+                          {formatTime(snapshot.timestamp)}
+                        </p>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => onRequestSnapshotUndo(snapshot)}
+                          className="text-[10px] font-semibold text-[var(--text)] hover:text-[var(--accent)] transition-colors"
+                          disabled={!snapshot.workerId}
+                          title={snapshot.workerId ? "Request rewind" : "No worker context yet"}
+                        >
+                          Rewind
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyContext(`${snapshot.context} · ${snapshot.notes}`)}
+                          className="text-[10px] text-[var(--text-light)] hover:text-[var(--text)] transition-colors"
+                        >
+                          Copy context
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => onRequestSnapshotUndo(snapshot)}
-                        className="text-[10px] font-semibold text-[var(--text)] hover:text-[var(--accent)] transition-colors"
-                        disabled={!snapshot.workerId}
-                        title={snapshot.workerId ? "Request rewind" : "No worker context yet"}
-                      >
-                        Rewind
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyContext(`${snapshot.context} · ${snapshot.notes}`)}
-                        className="text-[10px] text-[var(--text-light)] hover:text-[var(--text)] transition-colors"
-                      >
-                        Copy context
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-[var(--text-light)]">{snapshot.reviewSummary}</p>
-                  <p className="text-[10px] text-[var(--text-muted)]">{snapshot.agentSummary}</p>
-                  {snapshot.notes && (
-                    <p className="text-[10px] text-[var(--text-light)]">Notes: {snapshot.notes}</p>
-                  )}
-                </article>
-              ))}
+                    <p className="text-xs text-[var(--text-light)]">{snapshot.reviewSummary}</p>
+                    <p className="text-[10px] text-[var(--text-muted)]">{snapshot.agentSummary}</p>
+                    {snapshot.notes && (
+                      <p className="text-[10px] text-[var(--text-light)]">Notes: {snapshot.notes}</p>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           )}
 
@@ -541,13 +552,17 @@ export function ReviewDrawer({
             </div>
           ) : (
             <div className="py-2">
-              {reviews.map((review) => (
-                <SwipeableItem
-                  key={review.id}
-                  review={review}
-                  onDismiss={() => onDismiss(review.id)}
-                />
-              ))}
+              {reviews.map((review) => {
+                const isRecentReview = now - review.createdAt < RECENT_WINDOW;
+                return (
+                  <SwipeableItem
+                    key={review.id}
+                    review={review}
+                    onDismiss={() => onDismiss(review.id)}
+                    highlight={isRecentReview}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
