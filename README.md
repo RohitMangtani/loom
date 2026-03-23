@@ -14,7 +14,7 @@ One person. Multiple models. Multiple machines. The output of a team.
 
 Hive has three install paths. You do not need to paste a prompt into a CLI unless you want the agent-assisted setup.
 
-### 1. Desktop wrapper (macOS, recommended)
+### 1. Desktop wrapper (macOS)
 
 ```bash
 git clone https://github.com/RohitMangtani/hive.git
