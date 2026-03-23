@@ -122,18 +122,19 @@ export class NotificationManager {
       this.notify(workerId, state);
     }
 
-    // Working → Idle (green → red) → heavily debounced push notification.
-    // API thinking gaps between tool calls can last 10-30s where the agent
-    // looks idle but is actually waiting for a response. We wait 30s and
-    // verify: still idle, idle is confirmed by discovery, and no tool in flight.
+    // Working → Idle (green → red) → push notification for ALL terminals.
+    // Every agent that finishes gets a "done" notification. The guards ensure
+    // it only fires when the agent is TRULY done (not mid-processing):
+    //   1. 30s debounce: absorbs API thinking gaps between tool calls
+    //   2. idleConfirmed: discovery has verified the agent is genuinely idle
+    //   3. No tool in flight: no subagent or tool call pending
+    //   4. Cancelled if agent goes back to working during the 30s window
     if (this.config.pushOnComplete && this.isCompletionTransition(workerId, state, prev)) {
       if (!this.pendingCompletions.has(workerId)) {
         this.pendingCompletions.set(workerId, setTimeout(() => {
           this.pendingCompletions.delete(workerId);
           const current = this.telemetryRef?.get(workerId);
           if (!current || current.status !== "idle") return;
-          // Extra checks: discovery must have confirmed idle (not a transient flicker)
-          // and no tool call must be in flight (agent might be in a subagent)
           if (this.telemetryRef && this.telemetryRef.isToolInFlight(workerId)) return;
           if (this.telemetryRef && !this.telemetryRef.isIdleConfirmed(workerId)) return;
           this.pushComplete(workerId, current);
