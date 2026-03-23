@@ -1,9 +1,13 @@
 {
-  "name": "@hive/cli",
-  "private": true,
+  "name": "@rohitmangtani/hive",
+  "version": "0.1.0",
+  "description": "CLI installer and runtime helper for Hive",
   "type": "module",
   "bin": {
     "hive": "./bin/hive.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=20.0.0"

@@ -48,6 +48,12 @@ npm run hive -- init --connect URL TOKEN
 npm run hive -- init --desktop
 ```
 
+The publish target for the external installer CLI is:
+
+```bash
+npx @rohitmangtani/hive init
+```
+
 ### After install: one-time macOS approvals
 
 Once setup finishes and Hive is running, macOS may ask for a couple more permissions the first time you use certain features:

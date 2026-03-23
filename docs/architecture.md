@@ -142,7 +142,7 @@ The dashboard is a Next.js static export deployed to Vercel. It connects via Web
 
 | Package | Purpose |
 |---------|---------|
-| `@hive/cli` | Local CLI wrapper for `hive init` and `hive doctor` flows |
+| `@rohitmangtani/hive` | CLI package for `hive init` and `hive doctor` flows |
 | `@hive/types` | Shared TypeScript interfaces (WorkerState, etc.) |
 | `@hive/protocol` | Typed definitions for all REST, WebSocket, and hook contracts |
 
