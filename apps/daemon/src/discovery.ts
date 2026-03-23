@@ -816,6 +816,21 @@ end tell
     const ctx = this.readSessionContextFromFile(cachedPath);
     const tailCtx = { ...auditCtx, tailStatus: ctx.status, tailAction: ctx.latestAction, tailFileAgeMs: Math.round(ctx.fileAgeMs) };
 
+    // Cross-contamination guard: verify the cached session file actually belongs
+    // to this worker. When multiple workers share the same project directory
+    // (e.g., both at ~/), session file resolution can accidentally map one
+    // worker's active JSONL to another. If the file's UUID is registered to a
+    // different worker, don't trust the JSONL analysis — fall through to CPU.
+    const fileUuid = basename(cachedPath).replace(/\.jsonl$/, "");
+    if (fileUuid && this.telemetry.isSessionOwnedByOther(fileUuid, id)) {
+      this.telemetry.recordSignal(id, "jsonl_analysis", `session file ${fileUuid.slice(0, 8)} owned by another worker — skipping JSONL`);
+      this.checkTransition(id, tty, existing.status, `JSONL file cross-contamination detected (${fileUuid.slice(0, 8)} belongs to another worker)`, tailCtx);
+      // Don't clear subscriptions — just invalidate the cached path so
+      // discovery re-resolves on the next scan via findNewerSessionFile.
+      this.streamer.clearSessionPath(id);
+      return;
+    }
+
     if (ctx.projectName && ctx.projectPath) {
       existing.project = ctx.projectPath;
       existing.projectName = ctx.projectName;
@@ -845,7 +860,12 @@ end tell
       // typed directly in Terminal — no markInputSent, but JSONL has real user
       // input at tail). Safe: highConfidence=false for noise, so phantom green
       // can't sneak through.
-      const jsonlOverride = ctx.status === "working" && ctx.highConfidence;
+      // Extra guard: even high-confidence JSONL can't override idleConfirmed
+      // without corroboration when no hooks have EVER been seen for this worker.
+      // This catches the startup race where session file resolution is wrong
+      // and isSessionOwnedByOther can't help (neither UUID registered yet).
+      const neverHadHooks = !this.telemetry.getLastHookTime(id);
+      const jsonlOverride = ctx.status === "working" && ctx.highConfidence && !neverHadHooks;
       // LAYER 8 override: CPU activity can break out of idleConfirmed.
       // This catches the case where an idle agent starts thinking (high CPU)
       // but no hooks fire because it hasn't called any tools yet.

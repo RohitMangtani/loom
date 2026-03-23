@@ -25,6 +25,8 @@ function createDiscoveryHarness(options?: {
     setIdleConfirmed: vi.fn(),
     recordSignal: vi.fn(),
     isRecentSpawn: vi.fn(() => false),
+    isSessionOwnedByOther: vi.fn(() => false),
+    getLastHookTime: vi.fn(() => Date.now()),
   };
   const discovery = new ProcessDiscovery(telemetry as never, {} as never) as unknown as {
     runJsonlAnalysis: (

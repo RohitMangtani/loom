@@ -50,6 +50,12 @@ export class SessionStreamer {
     return this.sessionFiles.get(workerId) || null;
   }
 
+  /** Clear just the cached session file path (not subscriptions).
+   *  Forces discovery to re-resolve the file on the next scan. */
+  clearSessionPath(workerId: string): void {
+    this.sessionFiles.delete(workerId);
+  }
+
   /** Check if a file path is already mapped to a different worker */
   isFileMappedToOther(filePath: string, excludeWorkerId: string): boolean {
     for (const [wid, path] of this.sessionFiles) {
