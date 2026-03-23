@@ -502,14 +502,15 @@ end tell
             // seconds of a new terminal tab. Without this, the session file
             // appearing immediately clears the prompt and the dashboard
             // never shows the approval button.
-              const holdExpiry = this.promptHoldUntil.get(id);
-              const holdActive = holdExpiry !== undefined && Date.now() < holdExpiry;
-              if (holdActive) {
-                this.telemetry.notifyExternal(existing);
-              }
-              if (holdExpiry && !holdActive) {
-                this.promptHoldUntil.delete(id);
-              }
+            const holdExpiry = this.promptHoldUntil.get(id);
+            const holdActive = holdExpiry !== undefined && Date.now() < holdExpiry;
+            if (holdActive) {
+              this.telemetry.notifyExternal(existing);
+              continue;
+            }
+            if (holdExpiry && !holdActive) {
+              this.promptHoldUntil.delete(id);
+            }
               // If the agent is young (<10min), verify the prompt is actually
               // gone before clearing. Older agents always clear  --  their
               // terminal history contains stale prompt text.
