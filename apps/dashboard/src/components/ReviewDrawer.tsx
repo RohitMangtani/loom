@@ -16,6 +16,7 @@ interface ReviewDrawerProps {
   workers: Map<string, WorkerState>;
   chatEntries: Map<string, ChatEntry[]>;
   activity: { text: string; timestamp: number } | null;
+  send: (msg: Record<string, unknown>) => boolean;
 }
 
 function typeIcon(type: ReviewItem["type"]): string {
@@ -230,6 +231,7 @@ export function ReviewDrawer({
   workers,
   chatEntries,
   activity,
+  send,
 }: ReviewDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -238,28 +240,37 @@ export function ReviewDrawer({
   const [revertingId, setRevertingId] = useState<string | null>(null);
   const [revertStatus, setRevertStatus] = useState<string | null>(null);
 
-  const apiUrlWithToken = useCallback((path: string) => {
-    if (typeof window === "undefined") return path;
-    const token = localStorage.getItem("hive_token");
-    return token ? `${path}?token=${encodeURIComponent(token)}` : path;
-  }, []);
+  // Listen for WS responses (reverts list + revert results)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (window as unknown as Record<string, EventTarget>).__hiveRevertTarget ||= new EventTarget();
+    const handler = (e: Event) => {
+      const data = (e as CustomEvent).detail;
+      if (data?.type === "reverts" && Array.isArray(data.reverts)) {
+        setReverts(data.reverts);
+        setLoadingReverts(false);
+      } else if (data?.type === "revert_result") {
+        setRevertingId(null);
+        if (data.ok) {
+          setRevertStatus(data.message || "Revert succeeded");
+          send({ type: "list_reverts" });
+        } else {
+          setRevertStatus(data.error || "Revert failed");
+        }
+      }
+    };
+    const target = (window as unknown as Record<string, EventTarget>).__hiveRevertTarget;
+    if (target) target.addEventListener("msg", handler);
+    return () => { if (target) target.removeEventListener("msg", handler); };
+  }, [send]);
 
-  const loadReverts = useCallback(async () => {
+  const loadReverts = useCallback(() => {
     setLoadingReverts(true);
     setRevertStatus(null);
-    try {
-      const res = await fetch(apiUrlWithToken("/api/reverts"), { credentials: "same-origin" });
-      if (!res.ok) throw new Error("Unable to load revert history");
-      const payload = (await res.json()) as RevertHistoryEntry[];
-      setReverts(Array.isArray(payload) ? payload : []);
-    } catch (error) {
-      setRevertStatus(error instanceof Error ? error.message : "Unable to load revert history");
-    } finally {
-      setLoadingReverts(false);
-    }
-  }, [apiUrlWithToken]);
+    send({ type: "list_reverts" });
+  }, [send]);
 
-  const handleRevert = useCallback(async (entry: RevertHistoryEntry) => {
+  const handleRevert = useCallback((entry: RevertHistoryEntry) => {
     if (isAdmin !== true) {
       setRevertStatus("Admin token required for reverts.");
       return;
@@ -268,26 +279,8 @@ export function ReviewDrawer({
     if (!confirmation) return;
     setRevertingId(entry.id);
     setRevertStatus(null);
-    try {
-      const res = await fetch(apiUrlWithToken("/api/revert"), {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: entry.id, confirmation }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error || "Revert failed");
-      }
-      const success = await res.json();
-      setRevertStatus(success.message || "Revert succeeded");
-      loadReverts();
-    } catch (error) {
-      setRevertStatus(error instanceof Error ? error.message : "Revert failed");
-    } finally {
-      setRevertingId(null);
-    }
-  }, [apiUrlWithToken, isAdmin, loadReverts]);
+    send({ type: "revert", revertId: entry.id, revertConfirmation: confirmation });
+  }, [isAdmin, send]);
 
   useEffect(() => {
     if (open) loadReverts();

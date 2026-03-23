@@ -598,6 +598,7 @@ export default function Home() {
         onMarkAllSeen={markAllReviewsSeen}
         onClearAll={clearAllReviews}
         isAdmin={isAdmin}
+        send={(msg) => send(msg as unknown as import("@/lib/types").DaemonMessage)}
       />
 
       {showSpawnDialog && (

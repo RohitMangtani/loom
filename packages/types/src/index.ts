@@ -130,7 +130,7 @@ export interface ConnectedMachine {
 }
 
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file" | "user_list" | "user_create" | "user_remove" | "context_transfer";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file" | "user_list" | "user_create" | "user_remove" | "context_transfer" | "list_reverts" | "revert";
   workerId?: string;
   project?: string;
   task?: string;
@@ -177,6 +177,10 @@ export interface DaemonMessage {
   sourceWorkerIds?: string[];
   /** Context transfer: target worker ID to send the concatenated context to. */
   targetWorkerId?: string;
+  /** Revert: entry ID to revert. */
+  revertId?: string;
+  /** Revert: confirmation hash typed by user. */
+  revertConfirmation?: string;
 }
 
 export interface ChatEntry {
@@ -217,7 +221,7 @@ export interface RevertHistoryEntry {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result" | "presence" | "activity" | "user_list" | "user_created" | "user_removed";
+  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result" | "presence" | "activity" | "user_list" | "user_created" | "user_removed" | "reverts" | "revert_result";
   workers?: WorkerState[];
   worker?: WorkerState;
   /** Connected satellite machines (for spawn dialog machine picker). */
@@ -249,4 +253,8 @@ export interface DaemonResponse {
   timestamp?: number;
   /** User management: created/returned user object. */
   user?: HiveUser | Record<string, unknown>;
+  /** Revert history entries. */
+  reverts?: RevertHistoryEntry[];
+  /** Revert result message. */
+  message?: string;
 }

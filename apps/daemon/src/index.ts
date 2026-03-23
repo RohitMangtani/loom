@@ -140,6 +140,7 @@ if (satFlagIdx !== -1) {
   notifications.setPushManager(pushMgr);
   ws.setDiscovery(discovery);
   ws.setPushManager(pushMgr);
+  ws.setRevertHistory(revertHistory);
   const autoPilot = new AutoPilot(telemetry, streamer, platform.terminal);
   const watchdog = new Watchdog(telemetry);
   const collector = new Collector();

@@ -275,6 +275,13 @@ export class WsServer {
     this.pushMgr = mgr;
   }
 
+  private revertHistory: import("./revert-history.js").RevertHistory | null = null;
+
+  /** Set the RevertHistory (for WS-based revert operations) */
+  setRevertHistory(rh: import("./revert-history.js").RevertHistory): void {
+    this.revertHistory = rh;
+  }
+
   /** Register a listener for satellite worker status changes.
    *  Fires when a satellite worker transitions between states (e.g., working→idle).
    *  Used by NotificationManager to send push notifications for remote workers. */
@@ -2509,6 +2516,49 @@ export class WsServer {
             this.broadcastActivity(activeUser, `Transferred context to ${targetId}`);
           }
         });
+        break;
+      }
+
+      case "list_reverts": {
+        if (!this.revertHistory) {
+          this.send(ws, { type: "reverts", reverts: [] });
+          return;
+        }
+        this.send(ws, { type: "reverts", reverts: this.revertHistory.list() });
+        break;
+      }
+
+      case "revert": {
+        if (!this.revertHistory) {
+          this.send(ws, { type: "error", error: "Revert history not available" });
+          return;
+        }
+        const revertId = msg.revertId;
+        const confirmation = msg.revertConfirmation;
+        if (!revertId || !confirmation) {
+          this.send(ws, { type: "error", error: "Missing revertId or confirmation" });
+          return;
+        }
+        const entry = this.revertHistory.get(revertId);
+        if (!entry) {
+          this.send(ws, { type: "error", error: "Revert entry not found" });
+          return;
+        }
+        if (!confirmation.startsWith(entry.commit)) {
+          this.send(ws, { type: "error", error: `Confirmation must start with ${entry.commit}` });
+          return;
+        }
+        // Execute git revert
+        try {
+          execFileSync("/usr/bin/git", ["-C", entry.projectPath, "revert", "--no-edit", entry.commit], {
+            timeout: 15_000,
+            encoding: "utf-8",
+          });
+          this.send(ws, { type: "revert_result", ok: true, message: `Reverted ${entry.commit} in ${entry.projectName}` });
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message.slice(0, 200) : "Revert failed";
+          this.send(ws, { type: "revert_result", ok: false, error: errMsg });
+        }
         break;
       }
 

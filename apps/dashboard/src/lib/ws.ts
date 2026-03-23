@@ -398,6 +398,17 @@ export function useHive(daemonUrl: string) {
             break;
           }
 
+          case "reverts":
+          case "revert_result": {
+            const revertTarget = typeof window !== "undefined"
+              ? (window as unknown as Record<string, EventTarget>).__hiveRevertTarget
+              : null;
+            if (revertTarget) {
+              revertTarget.dispatchEvent(new CustomEvent("msg", { detail: data }));
+            }
+            break;
+          }
+
           case "orchestrator":
           case "error":
             break;
