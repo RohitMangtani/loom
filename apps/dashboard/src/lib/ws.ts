@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, ReviewItem, WorkerState } from "@/lib/types";
+import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, ReviewItem, WorkerContextSnapshot, WorkerState } from "@/lib/types";
 
 /** Extended response type for message types beyond the base DaemonResponse union */
 type ExtendedResponse = DaemonResponse | { type: "models"; models?: AgentModel[] } | { type: "vapid_key"; vapidKey?: string } | { type: "push_status"; subscribed?: boolean };
@@ -15,6 +15,7 @@ export function useHive(daemonUrl: string) {
   const [connected, setConnected] = useState(false);
   const [workers, setWorkers] = useState<Map<string, WorkerState>>(new Map());
   const [chatEntries, setChatEntries] = useState<Map<string, ChatEntry[]>>(new Map());
+  const [workerContexts, setWorkerContexts] = useState<Map<string, WorkerContextSnapshot>>(new Map());
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [models, setModels] = useState<AgentModel[]>([
@@ -152,6 +153,12 @@ export function useHive(daemonUrl: string) {
                 next.delete(rid);
                 return next;
               });
+              setWorkerContexts((prev) => {
+                if (!prev.has(rid)) return prev;
+                const next = new Map(prev);
+                next.delete(rid);
+                return next;
+              });
             }
             break;
           }
@@ -259,6 +266,19 @@ export function useHive(daemonUrl: string) {
                   updated.splice(0, updated.length - MAX_CHAT_ENTRIES);
                 }
                 next.set(wid, updated);
+                return next;
+              });
+            }
+            break;
+          }
+
+          case "worker_context": {
+            const context = data.context;
+            const workerId = data.workerId;
+            if (workerId && context) {
+              setWorkerContexts((prev) => {
+                const next = new Map(prev);
+                next.set(workerId, context);
                 return next;
               });
             }
@@ -411,8 +431,21 @@ export function useHive(daemonUrl: string) {
     [send]
   );
 
+  const requestWorkerContext = useCallback(
+    (workerId: string, opts: { includeHistory?: boolean; historyLimit?: number } = {}) => {
+      send({
+        type: "worker_context",
+        workerId,
+        includeHistory: opts.includeHistory !== false,
+        ...(typeof opts.historyLimit === "number" ? { historyLimit: opts.historyLimit } : {}),
+      });
+    },
+    [send]
+  );
+
   return {
-    connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect,
+    connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect,
+    requestWorkerContext,
     reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines,
   };
 }

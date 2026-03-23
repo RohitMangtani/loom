@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHive } from "@/lib/ws";
 import { getAuthMode, unlockAdmin, lockAdmin } from "@/components/SitePasswordGate";
-import { AgentCard, DOT_BG } from "@/components/AgentCard";
+import { AgentCard } from "@/components/AgentCard";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { SpawnDialog } from "@/components/SpawnDialog";
 import { QuickStartDialog } from "@/components/QuickStartDialog";
+import { OutputViewerDialog } from "@/components/OutputViewerDialog";
 import type { WorkerState } from "@/lib/types";
 import { usePushSubscription } from "@/components/ServiceWorker";
 
@@ -89,6 +90,7 @@ export default function Home() {
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
   const [showQuickStartDialog, setShowQuickStartDialog] = useState(false);
+  const [viewerWorkerId, setViewerWorkerId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -135,7 +137,7 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, requestWorkerContext, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
 
@@ -195,6 +197,7 @@ export default function Home() {
   const idleCount = numbered.filter(({ worker: w }) => w.status === "idle").length;
   const emptyCount = MAX_SLOTS - numbered.length;
   const selectedEntry = selectedId ? numbered.find(({ worker: w }) => w.id === selectedId) : null;
+  const viewerEntry = viewerWorkerId ? numbered.find(({ worker: w }) => w.id === viewerWorkerId) : null;
 
   const rawEntries = selectedEntry ? chatEntries.get(selectedEntry.worker.id) : undefined;
   const memoEntries = useMemo(() => (rawEntries ?? []).slice(-200), [rawEntries]);
@@ -439,6 +442,7 @@ export default function Home() {
                     selected={!isViewer && selectedId === w.id}
                     flagged={flaggedIds.has(w.id)}
                     managing={managing}
+                    context={workerContexts.get(w.id) || null}
                     onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
                     onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
                     onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
@@ -446,6 +450,11 @@ export default function Home() {
                     onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
                     onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
                     onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
+                    onRequestContext={() => requestWorkerContext(w.id, { includeHistory: true, historyLimit: 10 })}
+                    onOpenOutput={() => {
+                      requestWorkerContext(w.id, { includeHistory: true, historyLimit: 10 });
+                      setViewerWorkerId(w.id);
+                    }}
                     onKill={!isViewer && managing ? () => {
                       send({ type: "kill", workerId: w.id });
                       if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
@@ -585,6 +594,14 @@ export default function Home() {
             setShowQuickStartDialog(false);
           }}
           onClose={() => setShowQuickStartDialog(false)}
+        />
+      )}
+
+      {viewerEntry && (
+        <OutputViewerDialog
+          worker={viewerEntry.worker}
+          context={workerContexts.get(viewerEntry.worker.id) || null}
+          onClose={() => setViewerWorkerId(null)}
         />
       )}
 

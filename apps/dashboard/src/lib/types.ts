@@ -1,6 +1,7 @@
 // Re-export all types from the shared package
 export type {
   WorkerState,
+  WorkerContextSnapshot,
   ChatEntry,
   DaemonMessage,
   DaemonResponse,

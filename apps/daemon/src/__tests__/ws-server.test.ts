@@ -14,6 +14,18 @@ function createServer(initialWorkers: unknown[] = []) {
   let workers = initialWorkers;
   let removalHandler: RemovalHandler | null = null;
   let updateHandler: UpdateHandler | null = null;
+  const getWorkerContextAsync = vi.fn(async (workerId: string) => ({
+    workerId,
+    model: "claude",
+    project: "/tmp/demo",
+    projectName: "demo",
+    status: "idle",
+    currentAction: null,
+    lastAction: "Session ended",
+    recentArtifacts: [],
+    recentMessages: [{ role: "user", text: "Read /tmp/msg.md and follow it exactly." }],
+    contextSummary: "demo context",
+  }));
 
   const telemetry = {
     onUpdate(handler: UpdateHandler) {
@@ -33,6 +45,7 @@ function createServer(initialWorkers: unknown[] = []) {
     onFullBroadcast() {},
     setScratchpad() {},
     setSatelliteSlots() {},
+    getWorkerContextAsync,
     getAll() {
       return workers;
     },
@@ -66,6 +79,7 @@ function createServer(initialWorkers: unknown[] = []) {
 
   return {
     server,
+    getWorkerContextAsync,
     setWorkers(nextWorkers: unknown[]) {
       workers = nextWorkers;
     },
@@ -151,6 +165,38 @@ describe("WsServer pushState", () => {
     expect(sent[1]).toEqual({
       type: "workers",
       workers: [{ id: "w1", status: "idle" }],
+    });
+  });
+
+  it("allows read-only clients to request worker context", async () => {
+    const harness = createServer([{ id: "w1", status: "idle" }]);
+    const server = harness.server as unknown as {
+      handleMessage: (ws: WebSocket, msg: Record<string, unknown>) => void;
+      readOnlyClients: Set<WebSocket>;
+    };
+    const viewerWs = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+
+    server.readOnlyClients.add(viewerWs);
+    server.handleMessage(viewerWs, { type: "worker_context", workerId: "w1", includeHistory: true, historyLimit: 8 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.getWorkerContextAsync).toHaveBeenCalledWith("w1", {
+      includeHistory: true,
+      historyLimit: 8,
+    });
+    const sent = (viewerWs.send as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([raw]) => JSON.parse(raw) as Record<string, unknown>);
+    expect(sent).toContainEqual({
+      type: "worker_context",
+      workerId: "w1",
+      context: expect.objectContaining({
+        workerId: "w1",
+        contextSummary: "demo context",
+      }),
     });
   });
 

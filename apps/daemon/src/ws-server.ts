@@ -1838,7 +1838,7 @@ export class WsServer {
 
   private handleMessage(ws: WebSocket, msg: DaemonMessage): void {
     // Read-only viewers can only request the worker list or manage push subscriptions
-    if (this.readOnlyClients.has(ws) && msg.type !== "list" && msg.type !== "push_subscribe" && msg.type !== "push_unsubscribe") {
+    if (this.readOnlyClients.has(ws) && msg.type !== "list" && msg.type !== "push_subscribe" && msg.type !== "push_unsubscribe" && msg.type !== "worker_context") {
       this.send(ws, { type: "error", error: "Read-only access" });
       return;
     }
@@ -2296,6 +2296,34 @@ export class WsServer {
         this.send(ws, {
           type: "workers",
           workers: this.telemetry.getAll(),
+        });
+        break;
+      }
+
+      case "worker_context": {
+        if (!msg.workerId) {
+          this.send(ws, { type: "error", error: "Missing workerId" });
+          return;
+        }
+        const historyLimit = typeof msg.historyLimit === "number"
+          ? Math.max(1, Math.min(20, Math.trunc(msg.historyLimit)))
+          : 10;
+        void this.telemetry.getWorkerContextAsync(msg.workerId, {
+          includeHistory: msg.includeHistory !== false,
+          historyLimit,
+        }).then((context) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          this.send(ws, {
+            type: "worker_context",
+            workerId: msg.workerId,
+            context: (context && typeof context === "object") ? context as DaemonResponse["context"] : null,
+          });
+        }).catch((err) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          this.send(ws, {
+            type: "error",
+            error: err instanceof Error ? err.message : "Failed to load worker context",
+          });
         });
         break;
       }
