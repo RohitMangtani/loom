@@ -213,11 +213,14 @@ end tell
       return null;
     }
 
-    // Only check the last ~500 chars of terminal history  --  if the prompt
+    // Only check the last ~2000 chars of terminal history  --  if the prompt
     // text appears near the end, the agent is currently waiting at it.
     // Matching on full history would false-positive on established agents
     // that passed through the prompt minutes/hours ago.
-    const tail = content.slice(-500);
+    // Trim trailing whitespace/blank lines: Terminal.app pads history with
+    // empty lines after the visible content, burying the prompt text.
+    const trimmed = content.trimEnd();
+    const tail = trimmed.slice(-2000);
     const tailLower = tail.toLowerCase();
 
     // Claude CLI trust prompt patterns
