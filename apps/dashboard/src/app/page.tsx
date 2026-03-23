@@ -6,7 +6,6 @@ import { getAuthMode, unlockAdmin, lockAdmin } from "@/components/SitePasswordGa
 import { AgentCard } from "@/components/AgentCard";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
-import { InsightsPanel } from "@/components/InsightsPanel";
 import { SpawnDialog } from "@/components/SpawnDialog";
 import { InviteDialog } from "@/components/InviteDialog";
 import type { WorkerState } from "@/lib/types";
@@ -91,7 +90,6 @@ export default function Home() {
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
-  const [showInsights, setShowInsights] = useState(false);
 
   useEffect(() => {
     try {
@@ -273,9 +271,7 @@ export default function Home() {
       >
         <div className="text-center relative">
           <h1
-            className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)] cursor-pointer hover:opacity-70 transition-opacity"
-            onClick={(e) => { e.stopPropagation(); setShowInsights(true); }}
-            title="Open the Hive summary"
+            className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)]"
           >
             Hive
           </h1>
@@ -606,15 +602,6 @@ export default function Home() {
             setShowSpawnDialog(false);
           }}
           onClose={() => setShowSpawnDialog(false)}
-        />
-      )}
-
-      {showInsights && (
-        <InsightsPanel
-          workers={workers}
-          reviews={reviews}
-          activity={activity}
-          onClose={() => setShowInsights(false)}
         />
       )}
 
