@@ -165,7 +165,7 @@ export class TelemetryReceiver {
   // freshly spawned agents start with blank chat history instead of inheriting
   // stale JSONL from a previous session in the same project.
   private recentSpawns = new Map<string, number>(); // tty → spawnTimestamp
-  private static readonly SPAWN_GRACE_PERIOD = 60_000; // 60s
+  private static readonly SPAWN_GRACE_PERIOD = 300_000; // 5min — must outlast the gap between agent spawn and first UserPromptSubmit (which fires identity.sh and pins the session)
 
   // Satellite workers injected by ws-server for inclusion in workers.json
   // so the primary's identity hook shows cross-machine peers.

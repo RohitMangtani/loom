@@ -431,6 +431,14 @@ end tell
         }
       }
 
+      // Reject heuristic session files that are already mapped to another live
+      // worker in the streamer. claimedFiles only tracks this scan cycle — if a
+      // pinned worker's file wasn't added to claimedFiles (e.g., getSessionFile
+      // returned null), the heuristic can still grab it. This guard catches that.
+      if (sessionFile && !pinnedSession && this.streamer.isFileMappedToOther(sessionFile, id)) {
+        sessionFile = null;
+      }
+
       if (sessionFile && !pinnedSession) {
         claimedFiles.add(sessionFile);
         this.streamer.setSessionFile(id, sessionFile);

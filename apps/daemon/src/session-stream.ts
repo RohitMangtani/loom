@@ -50,6 +50,14 @@ export class SessionStreamer {
     return this.sessionFiles.get(workerId) || null;
   }
 
+  /** Check if a file path is already mapped to a different worker */
+  isFileMappedToOther(filePath: string, excludeWorkerId: string): boolean {
+    for (const [wid, path] of this.sessionFiles) {
+      if (path === filePath && wid !== excludeWorkerId) return true;
+    }
+    return false;
+  }
+
   /** Clean up all state for a removed worker (session file, pending subs, active subs) */
   clearWorker(workerId: string): void {
     this.sessionFiles.delete(workerId);
