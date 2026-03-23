@@ -23,6 +23,9 @@ jobs:
       - name: Typecheck daemon
         run: npx tsc --noEmit -p apps/daemon/tsconfig.json
 
+      - name: Typecheck protocol
+        run: npx tsc --noEmit -p packages/protocol/tsconfig.json
+
       - name: Typecheck dashboard
         run: npx tsc --noEmit -p apps/dashboard/tsconfig.json
 
