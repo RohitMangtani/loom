@@ -8,6 +8,7 @@ type DotColor = "green" | "yellow" | "red";
 function dotColor(w: WorkerState): DotColor {
   if (w.status === "working") return "green";
   if (w.status === "stuck") return "yellow";
+  if (w.providerError) return "yellow";
   return "red";
 }
 
@@ -18,6 +19,7 @@ const DOT_BG: Record<DotColor, string> = {
 };
 
 function statusLabel(w: WorkerState): string {
+  if (w.providerError) return w.providerError;
   const primary = primarySummary(w);
   if (primary) return primary;
   if (w.status === "stuck") return "Needs input";
