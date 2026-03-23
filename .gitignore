@@ -7,6 +7,9 @@ out/
 *.tsbuildinfo
 .vercel
 .turbo/
+apps/desktop/dist/
+apps/desktop/.generated/
+apps/desktop/src-tauri/target/
 
 # Internal working artifacts
 .claude/
