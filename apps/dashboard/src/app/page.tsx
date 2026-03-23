@@ -7,6 +7,7 @@ import { AgentCard } from "@/components/AgentCard";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { SpawnDialog } from "@/components/SpawnDialog";
+import { InviteDialog } from "@/components/InviteDialog";
 import type { WorkerState } from "@/lib/types";
 import { usePushSubscription } from "@/components/ServiceWorker";
 
@@ -87,6 +88,7 @@ export default function Home() {
   const [showReviews, setShowReviews] = useState(false);
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
 
   useEffect(() => {
     try {
@@ -409,6 +411,13 @@ export default function Home() {
                   + Agent
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setShowInviteDialog(true)}
+                className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+              >
+                Invite
+              </button>
               {numbered.length > 0 && (
                 <button
                   type="button"
@@ -555,6 +564,13 @@ export default function Home() {
             setShowSpawnDialog(false);
           }}
           onClose={() => setShowSpawnDialog(false)}
+        />
+      )}
+
+      {showInviteDialog && (
+        <InviteDialog
+          daemonUrl={daemonUrl}
+          onClose={() => setShowInviteDialog(false)}
         />
       )}
 
