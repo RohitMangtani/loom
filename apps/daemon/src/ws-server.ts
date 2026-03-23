@@ -29,6 +29,7 @@ import {
   isValidQuadrant,
 } from "./control-plane-guards.js";
 import { HiveUser, UserRegistry } from "./user-registry.js";
+import { ReplayManager } from "./replay.js";
 import type { HiveUser as HiveUserInfo } from "@hive/types";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
@@ -78,6 +79,7 @@ export class WsServer {
   private terminal: TerminalIO | null;
   private windows: WindowManager | null;
   private userRegistry: UserRegistry;
+  private replayManager: ReplayManager;
   private connectedUsers = new Map<WebSocket, HiveUser>();
   private clients = new Set<WebSocket>();
   private readOnlyClients = new Set<WebSocket>();
@@ -126,6 +128,7 @@ export class WsServer {
     token: string,
     viewerToken: string,
     userRegistry: UserRegistry,
+    replayManager: ReplayManager,
     platform?: { terminal: TerminalIO; windows: WindowManager },
   ) {
     this.telemetry = telemetry;
@@ -135,6 +138,7 @@ export class WsServer {
     this.token = token;
     this.viewerToken = viewerToken;
     this.userRegistry = userRegistry;
+    this.replayManager = replayManager;
     this.terminal = platform?.terminal || null;
     this.windows = platform?.windows || null;
 
@@ -2726,5 +2730,10 @@ export class WsServer {
       action,
       timestamp: Date.now(),
     });
+    this.recordReplay("activity", { userId: user.id, action });
+  }
+
+  private recordReplay(type: string, payload: unknown): void {
+    this.replayManager?.record(type, payload);
   }
 }

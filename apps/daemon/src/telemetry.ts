@@ -28,6 +28,7 @@ import { scanLocalProjects } from "./project-discovery.js";
 import type { TerminalIO, WindowManager } from "./platform/interfaces.js";
 import type { HiveUser } from "./user-registry.js";
 import { UserRegistry } from "./user-registry.js";
+import { ReplayManager } from "./replay.js";
 
 const IDLE_THRESHOLD = 30_000;
 const HOME = process.env.HOME || `/Users/${process.env.USER}`;
@@ -193,6 +194,7 @@ export class TelemetryReceiver {
   private terminal: TerminalIO | null = null;
   private windows: WindowManager | null = null;
   private userRegistry: UserRegistry | null = null;
+  private replayManager: ReplayManager | null = null;
 
   private createLegacyAdminUser(): HiveUser {
     return {
@@ -210,6 +212,7 @@ export class TelemetryReceiver {
     options?: {
       terminal?: TerminalIO;
       windows?: WindowManager;
+      replayManager?: ReplayManager;
       userRegistry?: UserRegistry;
     },
   ) {
@@ -218,6 +221,7 @@ export class TelemetryReceiver {
     this.terminal = options?.terminal || null;
     this.windows = options?.windows || null;
     this.userRegistry = options?.userRegistry || null;
+    this.replayManager = options?.replayManager || null;
     this.taskQueue = new TaskQueue();
     this.coordination = new CoordinationLayer({
       isWorkerAlive: (id) => this.workers.has(id),
@@ -362,7 +366,7 @@ export class TelemetryReceiver {
     if (!this.app || !this.requireAuth) {
       throw new Error("registerApi() called before start()");
     }
-    registerApiRoutes(this.app, this.requireAuth, this, procMgr, discovery, this.userRegistry || new UserRegistry());
+    registerApiRoutes(this.app, this.requireAuth, this, procMgr, discovery, this.userRegistry || new UserRegistry(), this.replayManager || new ReplayManager());
   }
 
   registerCollector(collector: Collector): void {
@@ -1353,6 +1357,7 @@ export class TelemetryReceiver {
     for (const cb of this.removalListeners) {
       cb(id);
     }
+    this.recordReplay("worker_removed", { workerId: id });
   }
 
   /** Remove a worker without triggering removal listeners (no WS broadcast).
@@ -2772,9 +2777,14 @@ export class TelemetryReceiver {
     if (worker.status === "working" || worker.status === "stuck") {
       this.clearSuggestions(worker.id);
     }
+    this.recordReplay("worker_update", { worker });
     for (const listener of this.listeners) {
       listener(worker.id, worker);
     }
+  }
+
+  private recordReplay(type: string, payload: unknown): void {
+    this.replayManager?.record(type, payload);
   }
 
   // --- State persistence ---

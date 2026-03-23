@@ -18,6 +18,7 @@ import {
 } from "./control-plane-guards.js";
 import type { HiveUser } from "./user-registry.js";
 import { UserRegistry } from "./user-registry.js";
+import { ReplayManager } from "./replay.js";
 import type { ParsedQs } from "qs";
 
 function normalizeQueryString(
@@ -42,6 +43,7 @@ export function registerApiRoutes(
   procMgr: ProcessManager,
   discovery: ProcessDiscovery,
   userRegistry: UserRegistry,
+  replayManager: ReplayManager,
 ): void {
   const requireAdmin = (req: ApiRequest, res: Response, next: NextFunction) => {
     if (req.hiveUser?.role !== "admin") {
@@ -249,6 +251,37 @@ export function registerApiRoutes(
     } else {
       res.status(404).json({ error: "User not found" });
     }
+  });
+
+  app.post("/api/replays", requireAuth, requireAdmin, (req, res) => {
+    const nameInput = req.body?.name;
+    const name = typeof nameInput === "string" && nameInput.trim() ? nameInput.trim() : undefined;
+    const session = replayManager.start(name);
+    res.status(201).json(session);
+  });
+
+  app.post("/api/replays/:id/stop", requireAuth, requireAdmin, (req, res) => {
+    const session = replayManager.stop(req.params.id as string);
+    if (!session) {
+      res.status(404).json({ error: "Replay not found" });
+      return;
+    }
+    res.json(session);
+  });
+
+  app.get("/api/replays", requireAuth, (_req, res) => {
+    res.json(replayManager.list());
+  });
+
+  app.get("/api/replays/:id", requireAuth, (req, res) => {
+    const data = replayManager.read(req.params.id as string);
+    if (!data) {
+      res.status(404).json({ error: "Replay not found" });
+      return;
+    }
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Content-Disposition", `attachment; filename="replay-${req.params.id}.jsonl"`);
+    res.send(data);
   });
 
   // POST /api/learning
