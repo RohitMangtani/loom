@@ -39,6 +39,8 @@ export class NotificationManager {
   private telemetryRef: TelemetryReceiver | null = null;
   // Debounce: pending completion notifications. Only fire if agent is STILL idle after delay.
   private pendingCompletions = new Map<string, ReturnType<typeof setTimeout>>();
+  // Track when each worker first entered idle (for continuous idle duration check)
+  private idleSince = new Map<string, number>();
 
   constructor() {
     this.config = this.loadConfig();
@@ -85,13 +87,16 @@ export class NotificationManager {
 
     if (this.config.pushOnComplete && this.isCompletionTransition(workerId, state, prevStatus)) {
       if (!this.pendingCompletions.has(workerId)) {
+        if (!this.idleSince.has(workerId)) this.idleSince.set(workerId, Date.now());
         this.pendingCompletions.set(workerId, setTimeout(() => {
           this.pendingCompletions.delete(workerId);
           const current = this.telemetryRef?.get(workerId);
           if (!current || current.status !== "idle") return;
           if (this.telemetryRef && this.telemetryRef.isToolInFlight(workerId)) return;
+          const idleStart = this.idleSince.get(workerId);
+          if (!idleStart || Date.now() - idleStart < 60_000) return;
           this.pushComplete(workerId, current);
-        }, 30_000));
+        }, 60_000));
       }
     }
   }
@@ -102,9 +107,15 @@ export class NotificationManager {
     const prev = this.previousStatus.get(workerId);
     this.previousStatus.set(workerId, state.status);
 
+    // Track continuous idle duration. Reset when agent does anything non-idle.
+    if (state.status === "idle") {
+      if (!this.idleSince.has(workerId)) this.idleSince.set(workerId, Date.now());
+    } else {
+      this.idleSince.delete(workerId);
+    }
+
     // If agent went back to working, cancel any pending completion notification.
-    // This prevents false "done" notifications from brief idle flickers.
-    if (state.status === "working") {
+    if (state.status === "working" || state.status === "stuck") {
       const pending = this.pendingCompletions.get(workerId);
       if (pending) {
         clearTimeout(pending);
@@ -122,13 +133,14 @@ export class NotificationManager {
       this.notify(workerId, state);
     }
 
-    // Working → Idle (green → red) → push notification for ALL terminals.
-    // Every agent that finishes gets a "done" notification. The guards ensure
-    // it only fires when the agent is TRULY done (not mid-processing):
-    //   1. 30s debounce: absorbs API thinking gaps between tool calls
-    //   2. idleConfirmed: discovery has verified the agent is genuinely idle
-    //   3. No tool in flight: no subagent or tool call pending
-    //   4. Cancelled if agent goes back to working during the 30s window
+    // Working → Idle → push notification. Only fires when the agent's
+    // full response is complete and it's waiting for the next user message.
+    // Guards against mid-processing false positives:
+    //   1. 60s debounce: API thinking gaps can be 30-50s between tool calls
+    //   2. Continuous idle: must have been idle for 60+ uninterrupted seconds
+    //      (any working flicker resets the counter via idleSince)
+    //   3. idleConfirmed: discovery verified idle via hysteresis
+    //   4. No tool in flight: no subagent or tool call pending
     if (this.config.pushOnComplete && this.isCompletionTransition(workerId, state, prev)) {
       if (!this.pendingCompletions.has(workerId)) {
         this.pendingCompletions.set(workerId, setTimeout(() => {
@@ -137,8 +149,11 @@ export class NotificationManager {
           if (!current || current.status !== "idle") return;
           if (this.telemetryRef && this.telemetryRef.isToolInFlight(workerId)) return;
           if (this.telemetryRef && !this.telemetryRef.isIdleConfirmed(workerId)) return;
+          // Verify continuous idle: agent must have been idle for 60s+ straight
+          const idleStart = this.idleSince.get(workerId);
+          if (!idleStart || Date.now() - idleStart < 60_000) return;
           this.pushComplete(workerId, current);
-        }, 30_000));
+        }, 60_000));
       }
     }
   }
