@@ -10,69 +10,6 @@ Hive is a lightweight visual coordination layer that mirrors active agent sessio
 
 One person. Multiple models. Multiple machines. The output of a team.
 
-## Motivation
-
-Running one AI agent is manageable. Running several at once on different tasks is where things break down. You lose track of which one finished, which one is stuck, and which one drifted. You end up alt-tabbing between terminals, re-reading output, and spending more energy tracking status than directing work.
-
-As multi-agent workflows become more common, development starts to look less like writing code and more like coordinating processes. Better orchestration, visibility, and control layers become as important as model capability.
-
-Hive was built to reduce that overhead. Once the workflow became visible, development became significantly easier to manage.
-
-## What It Does
-
-The system solves four problems at once:
-
-**1. Visual layer.** A stoplight dashboard that mirrors your terminal layout. Tiles stacked vertically, top to bottom, matching where your terminals sit on screen. Color tells you the state at a glance. Spatial memory replaces terminal names. You catch problems by looking, not reading.
-
-**2. Intuitive handoffs.** One agent finishes, you tap the next tile and describe what to do with its output. Hive delivers the message. For planned sequences, a task queue carries context forward automatically, passing a summary of what the previous agent did and which files it changed.
-
-**3. Multi-model coordination.** Run Claude, Codex, and OpenClaw in the same grid. Each model does what it is best at. Claude reasons about architecture. Codex moves fast through surgical edits. Different models audit each other's blind spots. You conduct them like instruments in the same symphony.
-
-**4. Multi-machine network.** Connect multiple computers to one dashboard. A second Mac appears in the same tile stack within seconds. Each machine reports its capabilities. Route work to the right hardware. Every computer you own feeds into one control plane.
-
-## Features
-
-- **Stoplight dashboard** -green/red/yellow at a glance. Open on your phone, tablet, or second monitor. Supports 1-8 agents per machine.
-- **Multi-model** -Claude, Codex, OpenClaw side by side. Spawn any from the dashboard. Add custom agents via `~/.hive/agents.json`.
-- **Multi-machine** -connect additional Macs as satellites. Agents from all machines appear in one dashboard. Messages, tasks, and coordination route transparently across the network.
-- **Auto-discovery** -start any supported agent in a terminal and it appears on the dashboard within 3 seconds. No registration, no config.
-- **Auto-pilot** -permission prompts auto-approve after a 3-second grace window. Stuck loops get caught and surfaced. Agents never sit idle.
-- **Messaging** -tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy.
-- **Coordination** -file locks, conflict detection, task queue, scratchpad. Multiple agents on the same codebase without collisions.
-- **Workflow handoff** -tag related tasks with a workflow ID. When step 1 finishes, step 2 receives the git diff, verbatim agent output, and a structured JSON context block. Git state is verified before each handoff to prevent stale-code drift. Warnings flag uncommitted files or merge conflicts before the next step starts.
-- **Model-aware routing** -tasks can target a specific model (`"model":"codex"`), require machine capabilities (`"requires":["gpu"]`), or prefer a specific machine.
-- **Capability detection** -each machine auto-reports CPU, RAM, GPU, installed software. Custom tags via `~/.hive/capabilities.json`.
-- **Compound learning** -every solved problem gets written to a per-project knowledge file. Agents search learnings by keyword (`/api/learnings?q=keyword`) instead of reading everything, scaling to hundreds of entries without wasting context.
-- **State persistence** -daemon snapshots every 30 seconds. Survives restarts. Satellites run as launchd services and survive sleep and reboot.
-- **Push notifications** -macOS native alerts when agents get stuck. Web Push to your phone when agents finish. PWA installable on iOS and Android.
-- **Review queue** -auto-detects git pushes, deploys, and PRs across all agents. Slide-out drawer on the dashboard.
-
-## Background
-
-Built by Rohit Mangtani. MBA in Business Analytics and BS in Computer Information Systems from Bentley University. Currently working in fixed income operations at RBC. Background in finance, data analysis, and quantitative systems.
-
-This project came out of running multiple AI agents daily across several projects and needing a way to manage the coordination overhead. The system was built using the agents it manages: multiple Claude and Codex instances iterating on the daemon, dashboard, and each other's output simultaneously.
-
-## Prerequisites
-
-- **macOS** (uses AppleScript + CGEvent for terminal interaction)
-- **Node.js 20+** - [nodejs.org](https://nodejs.org)
-- **Homebrew** - [brew.sh](https://brew.sh) (for installing Cloudflare tunnel and other optional dependencies)
-
-That's it. Everything else is optional and the setup script handles it gracefully:
-
-| Optional | What it enables | How to get it |
-|----------|----------------|---------------|
-| At least one AI CLI | Agents to manage | `npm install -g @anthropic-ai/claude-code` or `@openai/codex` or `openclaw` |
-| Xcode Command Line Tools | Auto-pilot (auto-approve prompts) | `xcode-select --install` |
-| ngrok (recommended) | Phone/remote access, stable URLs | `brew install ngrok` then `ngrok config add-authtoken YOUR_TOKEN` ([ngrok.com](https://ngrok.com)) |
-| Cloudflare tunnel (fallback) | Phone/remote access, random URLs | `brew install cloudflared` |
-| Vercel account | Hosted dashboard | `npx vercel login` |
-
-Without an AI CLI, setup still completes. Install one later and agents auto-appear. Without `swiftc`, everything works except auto-pilot. Without Vercel/cloudflared, use `npm run launch:local` for localhost-only.
-
-Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection. Any other terminal agent can be added via a config file (see [Custom Agents](#custom-agents)).
-
 ## Install
 
 Before you paste, you'll need to approve a few things as the agent works. These are all one-time prompts from your CLI and macOS. Say yes to each and the agent continues on its own:
@@ -117,7 +54,7 @@ bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
 
 The tunnel URL and token are printed at the end of the primary install. You can also find them at `~/.hive/tunnel-url.txt` and `~/.hive/token` on the primary machine. The connect command also appears in the install output.
 
-Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the Cloudflare tunnel, so the machines don't need to be on the same network. The satellite runs as a background service (launchd) and survives sleep, reboot, and terminal close. If macOS asks you to approve Node.js in System Settings → Privacy & Security, click Allow once.
+Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the active public tunnel, so the machines don't need to be on the same network. The satellite runs as a background service (launchd) and survives sleep, reboot, and terminal close. If macOS asks you to approve Node.js in System Settings → Privacy & Security, click Allow once.
 
 The connect install is idempotent. Re-running it on the same Mac updates the stored primary URL/token, cleans out stale satellite processes and duplicate launch agents, and re-installs the background service cleanly.
 
@@ -132,6 +69,26 @@ git clone https://github.com/RohitMangtani/hive.git
 cd hive
 npm run launch:local
 ```
+
+## Prerequisites
+
+- **macOS** (uses AppleScript + CGEvent for terminal interaction)
+- **Node.js 20+** - [nodejs.org](https://nodejs.org)
+- **Homebrew** - [brew.sh](https://brew.sh) (for installing Cloudflare tunnel and other optional dependencies)
+
+That's it. Everything else is optional and the setup script handles it gracefully:
+
+| Optional | What it enables | How to get it |
+|----------|----------------|---------------|
+| At least one AI CLI | Agents to manage | `npm install -g @anthropic-ai/claude-code` or `@openai/codex` or `openclaw` |
+| Xcode Command Line Tools | Auto-pilot (auto-approve prompts) | `xcode-select --install` |
+| ngrok (preferred when configured) | Phone/remote access, stable URLs | `brew install ngrok` then `ngrok config add-authtoken YOUR_TOKEN` ([ngrok.com](https://ngrok.com)) |
+| Cloudflare tunnel (auto-fallback) | Phone/remote access, random URLs | `brew install cloudflared` |
+| Vercel account | Hosted dashboard | `npx vercel login` |
+
+Without an AI CLI, setup still completes. Install one later and agents auto-appear. Without `swiftc`, everything works except auto-pilot. Without Vercel or a public tunnel tool, use `npm run launch:local` for localhost-only.
+
+Claude, Codex, and OpenClaw can be mixed freely. Claude gets the richest hook-based telemetry. Codex and OpenClaw work out of the box through JSONL, CPU, and PTY detection. Any other terminal agent can be added via a config file (see [Custom Agents](#custom-agents)).
 
 ## Setup
 
@@ -169,7 +126,7 @@ You have three supported ways to run Hive:
 npm run launch
 ```
 
-This starts the local daemon on `3001/3002`, opens the current public tunnel for the WebSocket server, deploys or updates the dashboard to your own Vercel account, opens the hosted dashboard URL, and keeps the daemon and tunnel running in one terminal. On a new machine, run `npx vercel login` once first.
+This starts the local daemon on `3001/3002`, opens the current public tunnel for the WebSocket server, deploys or updates the dashboard to your own Vercel account, opens the hosted dashboard URL, and keeps the daemon and tunnel running in one terminal. If ngrok is installed and healthy, Hive prefers it. Otherwise it falls back to cloudflared. On a new machine, run `npx vercel login` once first.
 
 **Local-only fallback**
 ```bash
@@ -228,6 +185,35 @@ Stack your terminal windows vertically on screen. The daemon detects their posit
 **4. Install the app on your phone** (optional, recommended)
 
 Open the dashboard URL on your phone and add it to your home screen. It runs full-screen like a native app. See the [Install as App](#install-as-app) section below.
+
+## What It Does
+
+The system solves four problems at once:
+
+**1. Visual layer.** A stoplight dashboard that mirrors your terminal layout. Tiles stacked vertically, top to bottom, matching where your terminals sit on screen. Color tells you the state at a glance. Spatial memory replaces terminal names. You catch problems by looking, not reading.
+
+**2. Intuitive handoffs.** One agent finishes, you tap the next tile and describe what to do with its output. Hive delivers the message. For planned sequences, a task queue carries context forward automatically, passing a summary of what the previous agent did and which files it changed.
+
+**3. Multi-model coordination.** Run Claude, Codex, and OpenClaw in the same grid. Each model does what it is best at. Claude reasons about architecture. Codex moves fast through surgical edits. Different models audit each other's blind spots. You conduct them like instruments in the same symphony.
+
+**4. Multi-machine network.** Connect multiple computers to one dashboard. A second Mac appears in the same tile stack within seconds. Each machine reports its capabilities. Route work to the right hardware. Every computer you own feeds into one control plane.
+
+## Features
+
+- **Stoplight dashboard** -green/red/yellow at a glance. Open on your phone, tablet, or second monitor. Supports 1-8 agents per machine.
+- **Multi-model** -Claude, Codex, OpenClaw side by side. Spawn any from the dashboard. Add custom agents via `~/.hive/agents.json`.
+- **Multi-machine** -connect additional Macs as satellites. Agents from all machines appear in one dashboard. Messages, tasks, and coordination route transparently across the network.
+- **Auto-discovery** -start any supported agent in a terminal and it appears on the dashboard within 3 seconds. No registration, no config.
+- **Auto-pilot** -permission prompts auto-approve after a 3-second grace window. Stuck loops get caught and surfaced. Agents never sit idle.
+- **Messaging** -tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy.
+- **Coordination** -file locks, conflict detection, task queue, scratchpad. Multiple agents on the same codebase without collisions.
+- **Workflow handoff** -tag related tasks with a workflow ID. When step 1 finishes, step 2 receives the git diff, verbatim agent output, and a structured JSON context block. Git state is verified before each handoff to prevent stale-code drift. Warnings flag uncommitted files or merge conflicts before the next step starts.
+- **Model-aware routing** -tasks can target a specific model (`"model":"codex"`), require machine capabilities (`"requires":["gpu"]`), or prefer a specific machine.
+- **Capability detection** -each machine auto-reports CPU, RAM, GPU, installed software. Custom tags via `~/.hive/capabilities.json`.
+- **Compound learning** -every solved problem gets written to a per-project knowledge file. Agents search learnings by keyword (`/api/learnings?q=keyword`) instead of reading everything, scaling to hundreds of entries without wasting context.
+- **State persistence** -daemon snapshots every 30 seconds. Survives restarts. Satellites run as launchd services and survive sleep and reboot.
+- **Push notifications** -macOS native alerts when agents get stuck. Web Push to your phone when agents finish. PWA installable on iOS and Android.
+- **Review queue** -auto-detects git pushes, deploys, and PRs across all agents. Slide-out drawer on the dashboard.
 
 ## Using the Tiles
 
@@ -633,6 +619,12 @@ npm -w apps/daemon test
 ```
 
 The project uses npm workspaces with Turbo for build orchestration. The daemon and dashboard are separate apps that share types via `packages/types/`.
+
+## Background
+
+Built by Rohit Mangtani. MBA in Business Analytics and BS in Computer Information Systems from Bentley University. Currently working in fixed income operations at RBC. Background in finance, data analysis, and quantitative systems.
+
+This project came out of running multiple AI agents daily across several projects and needing a way to manage the coordination overhead. The system was built using the agents it manages: multiple Claude and Codex instances iterating on the daemon, dashboard, and each other's output simultaneously.
 
 ## Status
 
