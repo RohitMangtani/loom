@@ -10,7 +10,9 @@ import { SpawnDialog } from "@/components/SpawnDialog";
 import { QuickStartDialog } from "@/components/QuickStartDialog";
 import { OutputViewerDialog } from "@/components/OutputViewerDialog";
 import { TimelineDrawer } from "@/components/TimelineDrawer";
+import { CompletionBriefsDrawer } from "@/components/CompletionBriefsDrawer";
 import type { WorkerState } from "@/lib/types";
+import { attachBriefToRun, buildTeamCompletionBrief, buildWorkerCompletionBrief, createQuickStartRun, type CompletionBrief, type QuickStartRun } from "@/lib/completion-briefs";
 import { usePushSubscription } from "@/components/ServiceWorker";
 
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
@@ -77,6 +79,9 @@ function useStableNumbering(workers: Map<string, WorkerState>) {
 }
 
 export default function Home() {
+  const [completionBriefs, setCompletionBriefs] = useState<CompletionBrief[]>([]);
+  const [quickStartRuns, setQuickStartRuns] = useState<QuickStartRun[]>([]);
+  const [resultsSeenAt, setResultsSeenAt] = useState(0);
   const [daemonUrl, setDaemonUrl] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<"admin" | "viewer">("viewer");
@@ -89,10 +94,14 @@ export default function Home() {
   const previewUrlsRef = useRef<Map<string, string>>(new Map());
   const [showReviews, setShowReviews] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showBriefs, setShowBriefs] = useState(false);
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
   const [showQuickStartDialog, setShowQuickStartDialog] = useState(false);
   const [viewerWorkerId, setViewerWorkerId] = useState<string | null>(null);
+  const [pendingBriefKeys, setPendingBriefKeys] = useState<Array<{ workerId: string; key: string }>>([]);
+  const processedBriefKeysRef = useRef<Set<string>>(new Set());
+  const previousStatusesRef = useRef<Map<string, WorkerState["status"]>>(new Map());
 
   useEffect(() => {
     try {
@@ -117,6 +126,24 @@ export default function Home() {
           if (v) previewUrlsRef.current.set(k, v);
         }
       }
+    } catch { /* start fresh */ }
+    try {
+      const savedBriefs = localStorage.getItem("hive_completion_briefs");
+      if (savedBriefs) {
+        const parsed = JSON.parse(savedBriefs) as CompletionBrief[];
+        setCompletionBriefs(parsed);
+        processedBriefKeysRef.current = new Set(parsed.filter((brief) => brief.kind === "worker").map((brief) => brief.id));
+      }
+    } catch { /* start fresh */ }
+    try {
+      const savedRuns = localStorage.getItem("hive_quick_start_runs");
+      if (savedRuns) {
+        setQuickStartRuns(JSON.parse(savedRuns) as QuickStartRun[]);
+      }
+    } catch { /* start fresh */ }
+    try {
+      const savedSeenAt = localStorage.getItem("hive_completion_seen_at");
+      if (savedSeenAt) setResultsSeenAt(Number(savedSeenAt) || 0);
     } catch { /* start fresh */ }
   }, []);
   const isViewer = mode === "viewer";
@@ -167,8 +194,36 @@ export default function Home() {
   }, [connected, selectedId, subscribeTo]);
 
   useEffect(() => {
+    if (connected) requestControlPlaneTimeline(120);
+  }, [connected, requestControlPlaneTimeline]);
+
+  useEffect(() => {
     if (showTimeline) requestControlPlaneTimeline(120);
   }, [showTimeline, requestControlPlaneTimeline]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("hive_completion_briefs", JSON.stringify(completionBriefs));
+    } catch { /* non-critical */ }
+  }, [completionBriefs]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("hive_quick_start_runs", JSON.stringify(quickStartRuns));
+    } catch { /* non-critical */ }
+  }, [quickStartRuns]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("hive_completion_seen_at", String(resultsSeenAt));
+    } catch { /* non-critical */ }
+  }, [resultsSeenAt]);
+
+  useEffect(() => {
+    if (!showBriefs) return;
+    const now = Date.now();
+    setResultsSeenAt(now);
+  }, [showBriefs]);
 
   useEffect(() => {
     if (selectedId) sessionStorage.setItem("hive_selected_agent", selectedId);
@@ -204,6 +259,7 @@ export default function Home() {
   const emptyCount = MAX_SLOTS - numbered.length;
   const selectedEntry = selectedId ? numbered.find(({ worker: w }) => w.id === selectedId) : null;
   const viewerEntry = viewerWorkerId ? numbered.find(({ worker: w }) => w.id === viewerWorkerId) : null;
+  const unseenBriefCount = completionBriefs.filter((brief) => brief.createdAt > resultsSeenAt).length;
 
   const rawEntries = selectedEntry ? chatEntries.get(selectedEntry.worker.id) : undefined;
   const memoEntries = useMemo(() => (rawEntries ?? []).slice(-200), [rawEntries]);
@@ -239,6 +295,108 @@ export default function Home() {
       prevSelectedRef.current = selectedEntry.worker;
     }
   }, [selectedEntry]);
+
+  useEffect(() => {
+    const next = new Map<string, WorkerState["status"]>();
+    const triggered: Array<{ workerId: string; key: string }> = [];
+
+    for (const { worker } of numbered) {
+      const prevStatus = previousStatusesRef.current.get(worker.id);
+      const completionKey = `${worker.id}:${worker.lastActionAt}`;
+      if (prevStatus === "working" && worker.status === "idle" && !processedBriefKeysRef.current.has(completionKey)) {
+        triggered.push({ workerId: worker.id, key: completionKey });
+        requestWorkerContext(worker.id, { includeHistory: true, historyLimit: 12 });
+        requestControlPlaneTimeline(120);
+      }
+      next.set(worker.id, worker.status);
+    }
+
+    previousStatusesRef.current = next;
+
+    if (triggered.length > 0) {
+      setPendingBriefKeys((prev) => {
+        const seen = new Set(prev.map((item) => item.key));
+        const merged = [...prev];
+        for (const item of triggered) {
+          if (!seen.has(item.key)) merged.push(item);
+        }
+        return merged;
+      });
+    }
+  }, [numbered, requestControlPlaneTimeline, requestWorkerContext]);
+
+  useEffect(() => {
+    if (pendingBriefKeys.length === 0) return;
+
+    const completedKeys = new Set<string>();
+    const newWorkerBriefs: CompletionBrief[] = [];
+
+    for (const pending of pendingBriefKeys) {
+      const worker = workers.get(pending.workerId);
+      const context = workerContexts.get(pending.workerId);
+      if (!worker || !context) continue;
+      if (processedBriefKeysRef.current.has(pending.key)) {
+        completedKeys.add(pending.key);
+        continue;
+      }
+      const brief = buildWorkerCompletionBrief(worker, context, timelineEntries);
+      if (!brief) {
+        completedKeys.add(pending.key);
+        continue;
+      }
+      newWorkerBriefs.push({ ...brief, id: pending.key });
+      processedBriefKeysRef.current.add(pending.key);
+      completedKeys.add(pending.key);
+    }
+
+    if (completedKeys.size > 0) {
+      setPendingBriefKeys((prev) => prev.filter((item) => !completedKeys.has(item.key)));
+    }
+
+    if (newWorkerBriefs.length === 0) return;
+
+    setCompletionBriefs((prev) => {
+      const merged = [...newWorkerBriefs, ...prev.filter((brief) => !newWorkerBriefs.some((next) => next.id === brief.id))];
+      return merged.sort((a, b) => b.completedAt - a.completedAt).slice(0, 40);
+    });
+
+    setQuickStartRuns((prevRuns) => {
+      let changed = false;
+      let nextRuns = prevRuns.map((run) => {
+        let updated = run;
+        for (const brief of newWorkerBriefs) {
+          const attached = attachBriefToRun(updated, brief);
+          if (attached !== updated) {
+            changed = true;
+            updated = attached;
+          }
+        }
+        return updated;
+      });
+
+      const teamBriefs: CompletionBrief[] = [];
+      nextRuns = nextRuns.map((run) => {
+        if (run.teamBriefId || run.matchedTasks.length < run.tasks.length) return run;
+        const memberBriefs = [...newWorkerBriefs, ...completionBriefs]
+          .filter((brief) => brief.kind === "worker" && run.briefIds.includes(brief.id));
+        if (memberBriefs.length < run.tasks.length) return run;
+        const teamBrief = buildTeamCompletionBrief(run, memberBriefs);
+        teamBriefs.push(teamBrief);
+        changed = true;
+        return { ...run, teamBriefId: teamBrief.id };
+      });
+
+      if (teamBriefs.length > 0) {
+        setCompletionBriefs((prev) => {
+          const merged = [...teamBriefs, ...prev.filter((brief) => !teamBriefs.some((team) => team.id === brief.id))];
+          return merged.sort((a, b) => b.completedAt - a.completedAt).slice(0, 40);
+        });
+        setShowBriefs(true);
+      }
+
+      return changed ? nextRuns : prevRuns;
+    });
+  }, [completionBriefs, pendingBriefKeys, timelineEntries, workerContexts, workers]);
 
   // Auto-exit manage mode when no agents remain
   useEffect(() => {
@@ -382,6 +540,18 @@ export default function Home() {
           {activeCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-active)]" />{activeCount} active</span>}
           {stuckCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-needs)]" />{stuckCount} waiting</span>}
           {idleCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-offline)]" />{idleCount} idle</span>}
+          <button
+            type="button"
+            onClick={() => setShowBriefs(true)}
+            className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer relative"
+          >
+            Results
+            {unseenBriefCount > 0 && (
+              <span className="ml-1 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[var(--accent)] px-1.5 text-[9px] font-semibold text-white">
+                {unseenBriefCount}
+              </span>
+            )}
+          </button>
           <button
             type="button"
             onClick={() => setShowTimeline(true)}
@@ -604,10 +774,12 @@ export default function Home() {
           availableSlots={emptyCount}
           pushState={pushState}
           onEnablePush={requestPush}
-          onLaunch={(tasks, model, machine) => {
-            tasks.forEach((task, index) => {
+          onLaunch={(launch) => {
+            setQuickStartRuns((prev) => [createQuickStartRun(launch), ...prev].slice(0, 12));
+            const machine = launch.machine;
+            launch.tasks.forEach((task, index) => {
               window.setTimeout(() => {
-                send({ type: "spawn", project: "~", model, task, machine });
+                send({ type: "spawn", project: "~", model: launch.model, task, machine });
               }, index * 150);
             });
             setShowQuickStartDialog(false);
@@ -623,6 +795,12 @@ export default function Home() {
           onClose={() => setViewerWorkerId(null)}
         />
       )}
+
+      <CompletionBriefsDrawer
+        open={showBriefs}
+        briefs={completionBriefs}
+        onClose={() => setShowBriefs(false)}
+      />
 
     </div>
   );

@@ -10,7 +10,14 @@ interface QuickStartDialogProps {
   availableSlots: number;
   pushState: PushState;
   onEnablePush: () => void;
-  onLaunch: (tasks: string[], model: string, machine?: string) => void;
+  onLaunch: (launch: {
+    templateId: string;
+    title: string;
+    tasks: string[];
+    model: string;
+    machine?: string;
+    machineLabel: string;
+  }) => void;
   onClose: () => void;
 }
 
@@ -260,7 +267,14 @@ export function QuickStartDialog({
                 <button
                   type="button"
                   disabled={disabled}
-                  onClick={() => onLaunch(template.buildTasks(focus.trim()), selectedModel, machine)}
+                  onClick={() => onLaunch({
+                    templateId: template.id,
+                    title: template.title,
+                    tasks: template.buildTasks(focus.trim()),
+                    model: selectedModel,
+                    machine,
+                    machineLabel: selectedMachineName,
+                  })}
                   className={`mt-5 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition-all ${
                     disabled
                       ? "cursor-not-allowed border border-[var(--border)] bg-[rgba(255,255,255,0.03)] text-[var(--text-light)]"
