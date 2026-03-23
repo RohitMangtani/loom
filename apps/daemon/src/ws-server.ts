@@ -665,12 +665,12 @@ export class WsServer {
   private handleSatelliteMessage(ws: WebSocket, machineId: string, msg: Record<string, unknown>): void {
     const activeSat = this.satellites.get(machineId);
     if (msg.type !== "satellite_hello" && activeSat?.ws && activeSat.ws !== ws) {
-      if (msg.type !== "satellite_workers") {
+      if (msg.type !== "satellite_workers" && msg.type !== "satellite_heartbeat") {
         console.log(`[satellite] Ignoring ${msg.type} from inactive socket for "${machineId}"`);
       }
       return;
     }
-    if (msg.type !== "satellite_workers") {
+    if (msg.type !== "satellite_workers" && msg.type !== "satellite_heartbeat") {
       console.log(`[satellite] Message from "${machineId}": ${msg.type}`);
     }
     switch (msg.type) {
@@ -740,6 +740,17 @@ export class WsServer {
           return;
         }
         this.applySatelliteWorkers(machineId, sat, incoming);
+        break;
+      }
+
+      case "satellite_heartbeat": {
+        const sat = this.satellites.get(machineId);
+        if (!sat) break;
+        sat.lastSeen = Date.now();
+        this.sendToSatellite(sat, {
+          type: "satellite_heartbeat_ack",
+          ts: typeof msg.ts === "number" ? msg.ts : Date.now(),
+        });
         break;
       }
 

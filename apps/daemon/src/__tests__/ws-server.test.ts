@@ -209,6 +209,34 @@ describe("WsServer pushState", () => {
     });
   });
 
+  it("acks satellite heartbeats without polluting dashboard state", () => {
+    const harness = createServer([]);
+    const server = harness.server as unknown as {
+      handleSatelliteMessage: (ws: WebSocket, machineId: string, msg: Record<string, unknown>) => void;
+    };
+    const satelliteWs = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+
+    server.handleSatelliteMessage(satelliteWs, "remote-mac", {
+      type: "satellite_hello",
+      hostname: "Remote-Mac.local",
+      version: "test",
+    });
+    server.handleSatelliteMessage(satelliteWs, "remote-mac", {
+      type: "satellite_heartbeat",
+      ts: 12345,
+    });
+
+    const sent = (satelliteWs.send as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([raw]) => JSON.parse(raw) as Record<string, unknown>);
+    expect(sent).toContainEqual({
+      type: "satellite_heartbeat_ack",
+      ts: 12345,
+    });
+  });
+
   it("ignores close from a superseded satellite connection", () => {
     const harness = createServer([]);
     const client = harness.addClient();

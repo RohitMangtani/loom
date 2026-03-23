@@ -8,7 +8,6 @@
  * Usage: npx tsx apps/daemon/src/index.ts --satellite wss://xxx.trycloudflare.com TOKEN
  */
 
-import { WebSocket } from "ws";
 import { hostname } from "os";
 import { homedir, platform, arch, cpus, totalmem } from "os";
 import { join, basename } from "path";
@@ -31,6 +30,10 @@ import {
   SATELLITE_STABLE_CONNECTION_MS,
 } from "./satellite-recovery.js";
 import { appendControlPlaneAudit } from "./control-plane-audit.js";
+import {
+  FederationSocketClient,
+  type FederationDisconnectMeta,
+} from "./federation-socket.js";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
 function getGitVersion(): string {
@@ -45,7 +48,15 @@ function getGitVersion(): string {
 
 /** Message from satellite → primary */
 interface SatelliteUpMessage {
-  type: "satellite_hello" | "satellite_workers" | "satellite_chat" | "satellite_result" | "satellite_projects" | "satellite_api_request";
+  type:
+    | "satellite_hello"
+    | "satellite_workers"
+    | "satellite_chat"
+    | "satellite_result"
+    | "satellite_projects"
+    | "satellite_api_request"
+    | "satellite_context_response"
+    | "satellite_heartbeat";
   machineId?: string;
   hostname?: string;
   platform?: string;
@@ -64,6 +75,10 @@ interface SatelliteUpMessage {
   method?: string;
   path?: string;
   body?: unknown;
+  context?: unknown;
+  chatHistory?: unknown[];
+  data?: unknown;
+  ts?: number;
 }
 
 /** Message from primary → satellite */
@@ -88,6 +103,7 @@ interface SatelliteDownMessage {
   workers?: unknown[];    // satellite_all_workers: full worker list from primary
   includeHistory?: boolean; // satellite_context: include conversation history
   historyLimit?: number;    // satellite_context: max history entries
+  ts?: number;
 }
 
 /** Probe this machine for hardware and software capabilities. */
@@ -184,21 +200,15 @@ function detectCapabilities(): MachineCapabilities {
 }
 
 export class SatelliteClient {
-  private primaryUrl: string;
-  private primaryUrlCandidates: string[] = [];
-  private primaryUrlIndex = 0;
-  private token: string;
-  private machineId: string;
-  private capabilities: MachineCapabilities;
-  private ws: WebSocket | null = null;
-  private telemetry: TelemetryReceiver;
-  private discovery: ProcessDiscovery;
-  private streamer: SessionStreamer;
-  private procMgr: ProcessManager;
+  private readonly machineId: string;
+  private readonly capabilities: MachineCapabilities;
+  private readonly telemetry: TelemetryReceiver;
+  private readonly discovery: ProcessDiscovery;
+  private readonly streamer: SessionStreamer;
+  private readonly procMgr: ProcessManager;
+  private readonly federation: FederationSocketClient<SatelliteDownMessage, SatelliteUpMessage>;
   private autoPilot: AutoPilot | null = null;
   private watchdog: Watchdog | null = null;
-  private reconnectDelay = 1000;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private chatSubs = new Map<string, string>(); // prefixed workerId → subKey
   private tickInterval: ReturnType<typeof setInterval> | null = null;
   // API relay: pending requests awaiting response from primary
@@ -213,8 +223,6 @@ export class SatelliteClient {
   private selfHealInFlight = false;
 
   constructor(primaryUrl: string, token: string, localToken: string) {
-    this.primaryUrl = primaryUrl;
-    this.token = token;
     this.machineId = hostname().toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 24) || "satellite";
     this.capabilities = detectCapabilities();
 
@@ -228,81 +236,104 @@ export class SatelliteClient {
 
     // Patch hook URLs so local Claude instances report to local telemetry
     patchHookUrls(localToken);
-    this.rememberPrimaryUrl(primaryUrl, true);
+
+    /**
+     * Architectural note:
+     * - SatelliteClient still owns the command protocol and recovery policy.
+     * - FederationSocketClient owns the authenticated socket lifecycle.
+     * This keeps the existing behavior intact while making transport concerns
+     * testable in isolation.
+     */
+    this.federation = new FederationSocketClient<SatelliteDownMessage, SatelliteUpMessage>({
+      primaryUrl,
+      token,
+      satelliteId: this.machineId,
+      stableConnectionMs: SATELLITE_STABLE_CONNECTION_MS,
+      heartbeatIntervalMs: 15_000,
+      heartbeatTimeoutMs: 40_000,
+      urls: {
+        load: () => this.readPersistedPrimaryUrls(),
+        save: (urls, activeUrl) => this.persistPrimaryUrls(urls, activeUrl),
+      },
+      hooks: {
+        onOpen: () => {
+          console.log(`[satellite] Connected to primary as "${this.machineId}"`);
+          this.connectedAt = Date.now();
+          this.offlineSince = 0;
+          this.selfHealInFlight = false;
+          this.send({
+            type: "satellite_hello",
+            machineId: this.machineId,
+            hostname: hostname(),
+            platform: platform(),
+            capabilities: this.capabilities,
+            version: getGitVersion(),
+          });
+          this.reportWorkers();
+        },
+        onMessage: (msg) => {
+          this.handleMessage(msg).catch((err) => {
+            console.log(`[satellite] Error handling ${msg.type}: ${err instanceof Error ? err.message : err}`);
+          });
+        },
+        onDisconnect: async (meta) => this.handleFederationDisconnect(meta),
+        onReconnectScheduled: ({ delayMs, nextUrl, rotatedUrl }) => {
+          const rotated = rotatedUrl ? " (rotated primary URL)" : "";
+          console.log(`[satellite] Disconnected. Reconnecting in ${delayMs / 1000}s via ${nextUrl}${rotated}...`);
+        },
+        onHeartbeatTimeout: ({ silenceMs }) => {
+          console.log(`[satellite] Heartbeat timed out after ${Math.round(silenceMs / 1000)}s without a primary response`);
+        },
+        onMalformedMessage: (raw) => {
+          console.log(`[satellite] Ignoring malformed primary frame: ${raw.slice(0, 120)}`);
+        },
+        isHeartbeatAck: (msg) => msg.type === "satellite_heartbeat_ack",
+        makeHeartbeat: () => ({
+          type: "satellite_heartbeat",
+          machineId: this.machineId,
+          version: getGitVersion(),
+          ts: Date.now(),
+        }),
+      },
+    });
   }
 
-  private normalizePrimaryUrl(url: string): string {
-    const trimmed = url.trim();
-    if (trimmed.startsWith("https://")) return trimmed.replace("https://", "wss://");
-    return trimmed;
-  }
-
-  private rememberPrimaryUrl(url: string, prioritize = false): void {
-    const normalized = this.normalizePrimaryUrl(url);
-    if (!normalized) return;
-    const hiveDir = join(homedir(), ".hive");
-    const urlsFile = join(hiveDir, "primary-urls.txt");
-    const merged = [
-      ...(prioritize ? [normalized] : []),
-      ...this.primaryUrlCandidates,
-      ...(() => {
-        try {
-          if (!existsSync(urlsFile)) return [];
-          return readFileSync(urlsFile, "utf-8").split("\n").map((line) => this.normalizePrimaryUrl(line)).filter(Boolean);
-        } catch {
-          return [];
-        }
-      })(),
-      ...(!prioritize ? [normalized] : []),
-    ].filter(Boolean);
-    this.primaryUrlCandidates = Array.from(new Set(merged)).slice(0, 5);
-    this.primaryUrlIndex = this.primaryUrlCandidates.indexOf(normalized);
-    if (this.primaryUrlIndex < 0) this.primaryUrlIndex = 0;
-    this.primaryUrl = normalized;
-    try {
-      mkdirSync(hiveDir, { recursive: true });
-      writeFileSync(join(hiveDir, "primary-url"), `${normalized}\n`);
-      writeFileSync(urlsFile, `${this.primaryUrlCandidates.join("\n")}\n`);
-    } catch {
-      // Best-effort persistence.
-    }
-  }
-
-  private loadPrimaryUrlCandidates(): void {
+  /**
+   * Read the persisted primary URL candidates from disk.
+   *
+   * The transport asks for these on reconnect so tunnel rotation stays
+   * transparent to the user. We keep the filesystem access here because the
+   * storage location is a Hive policy choice, not a transport concern.
+   */
+  private readPersistedPrimaryUrls(): string[] {
     const hiveDir = join(homedir(), ".hive");
     const primaryUrlFile = join(hiveDir, "primary-url");
     const urlsFile = join(hiveDir, "primary-urls.txt");
-    const candidates = [
-      this.primaryUrl,
-      ...(() => {
-        try {
-          return existsSync(primaryUrlFile) ? [readFileSync(primaryUrlFile, "utf-8")] : [];
-        } catch {
-          return [];
-        }
-      })(),
-      ...(() => {
-        try {
-          return existsSync(urlsFile) ? readFileSync(urlsFile, "utf-8").split("\n") : [];
-        } catch {
-          return [];
-        }
-      })(),
-    ].map((value) => this.normalizePrimaryUrl(value)).filter(Boolean);
-
-    if (candidates.length === 0) return;
-    this.primaryUrlCandidates = Array.from(new Set(candidates)).slice(0, 5);
-    const currentIndex = this.primaryUrlCandidates.indexOf(this.primaryUrl);
-    this.primaryUrlIndex = currentIndex >= 0 ? currentIndex : 0;
-    this.primaryUrl = this.primaryUrlCandidates[this.primaryUrlIndex]!;
+    try {
+      return [
+        ...(existsSync(primaryUrlFile) ? [readFileSync(primaryUrlFile, "utf-8")] : []),
+        ...(existsSync(urlsFile) ? readFileSync(urlsFile, "utf-8").split("\n") : []),
+      ].map((value) => value.trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
-  private rotatePrimaryUrlCandidate(): void {
-    this.loadPrimaryUrlCandidates();
-    if (this.primaryUrlCandidates.length <= 1) return;
-    this.primaryUrlIndex = (this.primaryUrlIndex + 1) % this.primaryUrlCandidates.length;
-    this.primaryUrl = this.primaryUrlCandidates[this.primaryUrlIndex]!;
-    console.log(`[satellite] Trying alternate primary URL: ${this.primaryUrl}`);
+  /**
+   * Persist the active primary URL and the fallback list.
+   *
+   * The active URL gets its own file because existing install and recovery
+   * flows already read `~/.hive/primary-url` directly.
+   */
+  private persistPrimaryUrls(urls: string[], activeUrl: string): void {
+    const hiveDir = join(homedir(), ".hive");
+    try {
+      mkdirSync(hiveDir, { recursive: true });
+      writeFileSync(join(hiveDir, "primary-url"), `${activeUrl}\n`);
+      writeFileSync(join(hiveDir, "primary-urls.txt"), `${urls.join("\n")}\n`);
+    } catch {
+      // Best-effort persistence keeps the live control path non-blocking.
+    }
   }
 
   start(): void {
@@ -329,8 +360,8 @@ export class SatelliteClient {
     console.log(`[satellite] Machine ID: ${this.machineId}`);
     console.log(`[satellite] Found ${this.telemetry.getAll().length} local agent(s)`);
 
-    // Connect to primary
-    this.connect();
+    // Connect to primary through the dedicated federation transport.
+    this.federation.start();
 
     // Periodic: full tick loop matching primary (discovery, status, auto-pilot, watchdog)
     this.tickInterval = setInterval(() => {
@@ -344,89 +375,14 @@ export class SatelliteClient {
     }, 3_000);
   }
 
-  private connect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-
-    this.loadPrimaryUrlCandidates();
-
-    const sep = this.primaryUrl.includes("?") ? "&" : "?";
-    const url = `${this.primaryUrl}${sep}token=${encodeURIComponent(this.token)}&satellite=${encodeURIComponent(this.machineId)}`;
-
-    console.log(`[satellite] Connecting to primary at ${this.primaryUrl}...`);
-    const ws = new WebSocket(url);
-    this.ws = ws;
-
-    ws.on("open", () => {
-      if (this.ws !== ws) {
-        ws.close();
-        return;
-      }
-      console.log(`[satellite] Connected to primary as "${this.machineId}"`);
-      this.reconnectDelay = 1000;
-      this.connectedAt = Date.now();
-      this.offlineSince = 0;
-      this.selfHealInFlight = false;
-
-      // Send hello with capabilities + version
-      this.send({
-        type: "satellite_hello",
-        machineId: this.machineId,
-        hostname: hostname(),
-        platform: platform(),
-        capabilities: this.capabilities,
-        version: getGitVersion(),
-      } as SatelliteUpMessage);
-
-      // Send initial worker list
-      this.reportWorkers();
-    });
-
-    ws.on("message", (raw) => {
-      if (this.ws !== ws) return;
-      try {
-        const msg: SatelliteDownMessage = JSON.parse(raw.toString());
-        this.handleMessage(msg).catch((err) => {
-          console.log(`[satellite] Error handling ${msg.type}: ${err instanceof Error ? err.message : err}`);
-        });
-      } catch { /* malformed JSON */ }
-    });
-
-    ws.on("close", () => {
-      if (this.ws !== ws) return;
-      this.ws = null;
-      this.handleDisconnect();
-    });
-
-    ws.on("error", () => {
-      if (this.ws !== ws) return;
-      // onclose will fire next — reconnect happens there
-    });
-  }
-
-  private scheduleReconnect(): void {
-    console.log(`[satellite] Disconnected. Reconnecting in ${this.reconnectDelay / 1000}s...`);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, this.reconnectDelay);
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30_000);
-  }
-
-  private handleDisconnect(): void {
+  /**
+   * Keep the recovery policy exactly where it used to live while letting the
+   * federation transport own raw socket reconnection mechanics.
+   */
+  private async handleFederationDisconnect(meta: FederationDisconnectMeta): Promise<"reconnect" | "handled"> {
     const now = Date.now();
-    const wasConnectedAt = this.connectedAt;
-    const connectionAge = wasConnectedAt ? now - wasConnectedAt : 0;
-    const wasStable = connectionAge >= SATELLITE_STABLE_CONNECTION_MS;
-
     if (!this.offlineSince) this.offlineSince = now;
-    if (wasStable) {
+    if (meta.stable) {
       this.consecutiveFailures = 1;
       this.shortLivedConnections = 0;
       this.selfHealAttempts = 0;
@@ -446,11 +402,9 @@ export class SatelliteClient {
 
     if (action !== "none") {
       void this.triggerSelfHeal(action);
-      return;
+      return "handled";
     }
-
-    this.rotatePrimaryUrlCandidate();
-    this.scheduleReconnect();
+    return "reconnect";
   }
 
   private async triggerSelfHeal(action: "repair" | "reinstall"): Promise<void> {
@@ -493,14 +447,12 @@ export class SatelliteClient {
         error,
       });
       this.selfHealInFlight = false;
-      this.scheduleReconnect();
+      this.federation.scheduleReconnect();
     }
   }
 
   private send(msg: SatelliteUpMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
-    }
+    this.federation.send(msg);
   }
 
   /** Relay an API request to the primary and wait for the response. */
@@ -1035,7 +987,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
 
       case "satellite_primary_url": {
         if (msg.primaryUrl) {
-          this.rememberPrimaryUrl(msg.primaryUrl, true);
+          this.federation.rememberPrimaryUrl(msg.primaryUrl, true);
         }
         break;
       }
@@ -1188,10 +1140,6 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
 
   stop(): void {
     if (this.tickInterval) clearInterval(this.tickInterval);
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    if (this.ws) {
-      this.ws.removeAllListeners();
-      this.ws.close();
-    }
+    this.federation.stop();
   }
 }
