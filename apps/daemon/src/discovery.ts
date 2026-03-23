@@ -853,24 +853,6 @@ end tell
         this.telemetry.removeWorker(w.id);
       }
     }
-
-    // Provider error detection pass: check idle workers for quota/billing errors
-    // in terminal output. Only check idle workers to avoid AppleScript overhead
-    // on active agents (readTerminalContent is expensive).
-    for (const worker of this.telemetry.getAll()) {
-      if (worker.status !== "idle" || !worker.tty) {
-        if (worker.providerError) worker.providerError = null;
-        continue;
-      }
-      const err = this.detectProviderError(worker.tty);
-      if (err && !worker.providerError) {
-        worker.providerError = err;
-        worker.currentAction = err;
-        console.log(`[provider-error] ${worker.id} (${worker.model || "unknown"}): ${err}`);
-      } else if (!err && worker.providerError) {
-        worker.providerError = null;
-      }
-    }
   }
 
   /**
