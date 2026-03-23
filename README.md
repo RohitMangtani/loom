@@ -1,6 +1,6 @@
 # Hive
 
-Multi-agent orchestration layer for LLM-based development workflows. One dashboard across multiple models, multiple machines, and every handoff in plain English. macOS.
+Multi-agent orchestration layer for LLM-based development workflows. One dashboard across multiple models, multiple machines, and every handoff in plain English. macOS native, Linux via tmux in progress.
 
 ![Hive stacked dashboard diagram](docs/hive-stack.svg)
 

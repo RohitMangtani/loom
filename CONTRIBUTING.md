@@ -12,7 +12,7 @@ npm install
 
 ### Requirements
 
-- **macOS** (current platform — Linux support via tmux is planned)
+- **macOS** (native). Linux platform layer exists (`src/platform/linux/`) but is not yet wired into the daemon.
 - **Node.js 20+**
 - At least one AI CLI: `claude`, `codex`, or `openclaw`
 
@@ -62,8 +62,12 @@ hive/
 │   │   │   ├── review-manager.ts  # Auto-detect git push/PR/deploy
 │   │   │   ├── coordination.ts    # Scratchpad, locks, artifacts
 │   │   │   ├── swarm-controller.ts # Cross-machine spawn/kill/exec
+│   │   │   ├── platform/          # Cross-platform abstraction
+│   │   │   │   ├── interfaces.ts  # TerminalIO, ProcessDiscoverer, WindowManager
+│   │   │   │   ├── linux/         # tmux-based implementation
+│   │   │   │   └── macos/         # Wrapper over existing macOS code
 │   │   │   └── ...
-│   │   └── src/__tests__/         # Test files
+│   │   └── src/__tests__/         # Test files (150+ tests)
 │   ├── dashboard/       # Next.js dashboard (static export)
 │   └── desktop/         # Tauri desktop wrapper
 ├── packages/
@@ -86,7 +90,7 @@ See [docs/architecture.md](docs/architecture.md) for a detailed data flow explan
 
 ### Bigger contributions
 
-- **Linux/tmux support** — Implement `TerminalIO` and `ProcessDiscoverer` interfaces using tmux instead of AppleScript
+- **Wire Linux/tmux platform into the daemon** — Platform interfaces and a tmux-based implementation exist at `src/platform/`. The remaining work is wiring `loadPlatform()` into the daemon entry point and replacing direct macOS imports. See [GitHub issue #4](https://github.com/RohitMangtani/hive/issues/4).
 - **Agent plugin system** — Let users add new agent types via config files
 - **VS Code extension** — Show fleet status in the status bar using the protocol spec
 

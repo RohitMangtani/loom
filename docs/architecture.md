@@ -129,6 +129,15 @@ The dashboard is a Next.js static export deployed to Vercel. It connects via Web
 | `coordination.ts` | Scratchpad, file locks, artifact tracking, conflicts | telemetry.ts |
 | `swarm-controller.ts` | Cross-machine spawn/kill/exec/repair routing | telemetry.ts |
 
+### Platform Layer
+
+| Module | Purpose |
+|--------|---------|
+| `platform/interfaces.ts` | Cross-platform interfaces (TerminalIO, ProcessDiscoverer, WindowManager) |
+| `platform/macos/index.ts` | Thin adapter wrapping existing macOS-specific daemon modules |
+| `platform/linux/` | tmux + /proc implementation (written, not yet wired into daemon) |
+| `platform/index.ts` | Auto-detect OS and load the correct platform at startup |
+
 ### Packages
 
 | Package | Purpose |
@@ -149,15 +158,38 @@ Satellite machines connect to the primary daemon via WebSocket tunnel:
 
 Satellite self-healing: disconnected satellites escalate from reconnect → local repair → local reinstall using stored credentials at `~/.hive/primary-url` and `~/.hive/primary-token`.
 
-## Platform-Specific Code
+## Platform Abstraction
 
-Currently macOS-only. The following modules contain platform-specific code:
+The daemon currently runs on macOS natively. A cross-platform abstraction layer exists at `apps/daemon/src/platform/` with interfaces and a Linux/tmux implementation, but is not yet wired into the daemon entry point.
 
-| Module | macOS dependency | Linux equivalent (planned) |
-|--------|-----------------|---------------------------|
-| `tty-input.ts` | AppleScript `do script` + CGEvent | `tmux send-keys` |
-| `discovery.ts` | `ps -eo lstart`, `lsof -p PID` | `/proc/PID/stat`, `/proc/PID/fd` |
-| `arrange-windows.ts` | AppleScript window positioning | `tmux` pane layout |
-| `process-mgr.ts` | Terminal.app tab spawning | `tmux new-window` |
+### Interfaces (`platform/interfaces.ts`)
 
-See [platform abstraction interfaces](../packages/protocol/src/rest-api.ts) for the planned cross-platform API.
+- `TerminalIO` — send text, keystrokes, and selections to agent terminals; read terminal content
+- `ProcessDiscoverer` — find running agent processes, get CPU usage, track PTY output
+- `WindowManager` — spawn/close terminals, arrange window layout
+
+### Implementations
+
+| Platform | Location | Status |
+|----------|----------|--------|
+| macOS | `platform/macos/index.ts` | Thin wrapper over existing `tty-input.ts`, `discovery.ts`, `arrange-windows.ts` |
+| Linux | `platform/linux/` | tmux-based: `send-keys`, `capture-pane`, `/proc` reads. Written, not yet integration-tested. |
+
+### macOS-specific code (current direct imports)
+
+| Module | macOS dependency |
+|--------|-----------------|
+| `tty-input.ts` | AppleScript `do script` + CGEvent `send-return` binary |
+| `discovery.ts` | `ps -eo lstart`, `lsof -p PID` |
+| `arrange-windows.ts` | AppleScript window positioning |
+| `process-mgr.ts` | Terminal.app tab spawning |
+
+### What remains for Linux support
+
+The platform interfaces and Linux implementation exist. The remaining work is:
+1. Wire `loadPlatform()` from `platform/index.ts` into the daemon entry point
+2. Replace direct imports of `tty-input.ts` and `arrange-windows.ts` with platform calls
+3. Integration test on a Linux machine with tmux installed
+4. Handle differences in `ps` output format between macOS and Linux
+
+See [GitHub issue #4](https://github.com/RohitMangtani/hive/issues/4).
