@@ -449,7 +449,7 @@ export default function Home() {
       {/* Body  --  vertical tile stack grouped by machine, compresses when chat is open */}
       {numbered.length > 0 ? (
         <div
-          className={`min-h-0 flex flex-col ${!isViewer && selectedEntry ? "gap-1.5 p-2 sm:p-3" : "gap-3 p-4 sm:p-6"} transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0" : "flex-1"}`}
+          className={`min-h-0 flex flex-col ${!isViewer && selectedEntry ? "gap-1.5 p-2 sm:p-3" : "gap-3 p-4 sm:p-6"} transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0" : "flex-1 overflow-y-auto"}`}
           style={!isViewer && selectedEntry ? { maxHeight: chatExpanded ? "0px" : "40vh", overflow: chatExpanded ? "hidden" : "auto", padding: chatExpanded ? "0px" : undefined, gap: chatExpanded ? "0px" : undefined } : undefined}
         >
           {machineGroups.map(({ machine, agents }) => (
