@@ -90,6 +90,7 @@ export default function Home() {
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [contextAttachments, setContextAttachments] = useState<string[]>([]);
 
   useEffect(() => {
     try {
@@ -495,7 +496,11 @@ export default function Home() {
                     onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
                     onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
                     onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
-                    onContextDrop={isViewer ? undefined : (sourceId) => send({ type: "context_transfer", sourceWorkerIds: [sourceId], targetWorkerId: w.id })}
+                    onContextDrop={isViewer ? undefined : (sourceId) => {
+                      setSelectedId(w.id);
+                      subscribeTo(w.id);
+                      setContextAttachments((prev) => prev.includes(sourceId) ? prev : [...prev, sourceId]);
+                    }}
                     onKill={!isViewer && managing ? () => {
                       send({ type: "kill", workerId: w.id });
                       if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
@@ -552,11 +557,20 @@ export default function Home() {
               localStorage.setItem("hive_drafts", JSON.stringify(obj));
             } catch { /* quota exceeded, non-critical */ }
           }}
+          contextAttachments={contextAttachments}
+          workers={workers}
+          onRemoveContextAttachment={(id) => setContextAttachments((prev) => prev.filter((x) => x !== id))}
           onSend={(msg) => {
-            const ok = send({ type: "message", workerId: selectedEntry.worker.id, content: msg });
+            const ok = send({
+              type: "message",
+              workerId: selectedEntry.worker.id,
+              content: msg,
+              ...(contextAttachments.length > 0 ? { contextWorkerIds: contextAttachments, includeSenderContext: true } : {}),
+            } as import("@/lib/types").DaemonMessage);
             if (ok) {
               const normalized = msg.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
               addOptimisticEntry(selectedEntry.worker.id, normalized);
+              setContextAttachments([]);
             }
             return ok;
           }}

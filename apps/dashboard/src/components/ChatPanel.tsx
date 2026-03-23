@@ -32,6 +32,7 @@ async function fileToBase64(file: File): Promise<string> {
 export function ChatPanel({
   worker, num, entries, draft, onDraftChange, onSend, onClose, onDismiss, expanded, onExpand,
   previewUrl, onPreviewUrlChange, onUploadFile,
+  contextAttachments, workers: allWorkers, onRemoveContextAttachment,
 }: {
   worker: WorkerState; num: number; entries: ChatEntry[];
   draft: string; onDraftChange: (v: string) => void;
@@ -39,6 +40,9 @@ export function ChatPanel({
   expanded: boolean; onExpand: (v: boolean) => void;
   previewUrl: string; onPreviewUrlChange: (url: string) => void;
   onUploadFile: (payload: { fileName: string; mimeType?: string; size: number; dataBase64: string }) => Promise<UploadedFileRef>;
+  contextAttachments?: string[];
+  workers?: Map<string, WorkerState>;
+  onRemoveContextAttachment?: (id: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -359,6 +363,35 @@ export function ChatPanel({
                 </button>
               </div>
             )}
+            {contextAttachments && contextAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {contextAttachments.map((cid) => {
+                  const cw = allWorkers?.get(cid);
+                  const label = cw ? `Q${cw.quadrant || "?"} ${cw.projectName || "agent"}` : cid.slice(0, 12);
+                  return (
+                    <span
+                      key={cid}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(168,85,247,0.3)] bg-[rgba(168,85,247,0.1)] px-2.5 py-1 text-[10px] text-[#c084fc]"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v7a1 1 0 01-1 1H6l-3 3V11H3a1 1 0 01-1-1V3z" fill="currentColor" fillOpacity="0.5" />
+                      </svg>
+                      {label}
+                      {onRemoveContextAttachment && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveContextAttachment(cid)}
+                          className="text-[#c084fc] hover:text-white cursor-pointer"
+                          aria-label={`Remove ${label} context`}
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             {(attachments.length > 0 || uploading || uploadError) && (
               <div className="mb-2 space-y-1.5">
                 {attachments.length > 0 && (
@@ -430,7 +463,7 @@ export function ChatPanel({
               />
               <button
                 type="button"
-                disabled={uploading || (!draft.trim() && attachments.length === 0)}
+                disabled={uploading || (!draft.trim() && attachments.length === 0 && (!contextAttachments || contextAttachments.length === 0))}
                 onClick={() => { if (draft.trim() || attachments.length > 0) { const sent = guardedSend(draft.trim()); if (sent) onDraftChange(""); } }}
                 className="send-btn"
               >
