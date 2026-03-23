@@ -60,7 +60,7 @@ export function usePushSubscription(
     }).catch(() => {});
   }, [vapidKey, send]);
 
-  // Must be called from a user gesture (click/tap) — iOS requirement
+  // Must be called from a user gesture (click/tap)  --  iOS requirement
   const requestPush = useCallback(async () => {
     if (!vapidKey || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
 

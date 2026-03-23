@@ -1,5 +1,5 @@
 /**
- * Tests for ReviewManager — the extracted review lifecycle and
+ * Tests for ReviewManager  --  the extracted review lifecycle and
  * auto-detection module. Validates git push/PR/deploy detection,
  * dedup, and listener notification.
  */

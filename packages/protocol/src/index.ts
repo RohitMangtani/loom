@@ -1,5 +1,5 @@
 /**
- * @hive/protocol — Typed definitions for the Hive daemon protocol.
+ * @hive/protocol  --  Typed definitions for the Hive daemon protocol.
  *
  * This package defines every REST endpoint, WebSocket message, satellite
  * command, and hook event in the Hive system. Third-party clients,

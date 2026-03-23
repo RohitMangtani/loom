@@ -91,7 +91,7 @@ describe("Integration: daemon worker lifecycle", () => {
   let telemetry: TelemetryReceiver;
 
   afterEach(() => {
-    // TelemetryReceiver starts an Express server — we need to stop it
+    // TelemetryReceiver starts an Express server  --  we need to stop it
     // But in these tests we don't call start(), so just clean up
   });
 
@@ -175,7 +175,7 @@ describe("Integration: daemon worker lifecycle", () => {
     const result1 = telemetry.acquireLock("/src/app.ts", "w_lock1");
     expect(result1.acquired).toBe(true);
 
-    // w2 tries to acquire same lock — blocked
+    // w2 tries to acquire same lock  --  blocked
     const result2 = telemetry.acquireLock("/src/app.ts", "w_lock2");
     expect(result2.acquired).toBe(false);
     expect(result2.holder?.workerId).toBe("w_lock1");

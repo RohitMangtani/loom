@@ -112,7 +112,7 @@ export class TelemetryReceiver {
   // Session file streamer reference (set via setStreamer, used for register-tty correction)
   private streamer: TelemetryStreamer | null = null;
 
-  // Sessions corrected by register-tty are "pinned" — discovery's registerSession
+  // Sessions corrected by register-tty are "pinned"  --  discovery's registerSession
   // must not overwrite them with wrong birthtime-based guesses.
   private pinnedSessions = new Map<string, string>(); // session_id → correct workerId
 
@@ -123,7 +123,7 @@ export class TelemetryReceiver {
 
   // Durable TTY→session_id file path. Written on every register-tty call,
   // read on daemon startup. Survives daemon AND computer restarts because
-  // it has no expiry — identity.sh overwrites it on the first prompt of each
+  // it has no expiry  --  identity.sh overwrites it on the first prompt of each
   // new session, so stale entries are harmless (the JSONL file just won't exist).
   private static readonly TTY_SESSION_PATH = join(
     process.env.HOME || `/Users/${process.env.USER}`, ".hive", "tty-sessions.json"
@@ -133,7 +133,7 @@ export class TelemetryReceiver {
   // freshly spawned agents start with blank chat history instead of inheriting
   // stale JSONL from a previous session in the same project.
   private recentSpawns = new Map<string, number>(); // tty → spawnTimestamp
-  private static readonly SPAWN_GRACE_PERIOD = 300_000; // 5min — must outlast the gap between agent spawn and first UserPromptSubmit (which fires identity.sh and pins the session)
+  private static readonly SPAWN_GRACE_PERIOD = 300_000; // 5min  --  must outlast the gap between agent spawn and first UserPromptSubmit (which fires identity.sh and pins the session)
 
   // Satellite workers injected by ws-server for inclusion in workers.json
   // so the primary's identity hook shows cross-machine peers.
@@ -291,7 +291,7 @@ export class TelemetryReceiver {
       this.pinnedSessions.set(session_id, targetWorker.id);
       this.sessionToWorker.set(session_id, targetWorker.id);
 
-      // Clear fresh-spawn suppression — identity hook confirms the new session is live
+      // Clear fresh-spawn suppression  --  identity hook confirms the new session is live
       this.clearSpawn(tty);
 
       // Update the session file to match this session_id
@@ -399,7 +399,7 @@ export class TelemetryReceiver {
     // from identity.sh). Discovery's birthtime heuristic must not overwrite it.
     const pinned = this.pinnedSessions.get(sessionId);
     if (pinned && pinned !== workerId) {
-      return; // Don't overwrite — register-tty already corrected this
+      return; // Don't overwrite  --  register-tty already corrected this
     }
     this.sessionToWorker.set(sessionId, workerId);
     this.replayPendingHooks(sessionId, workerId);
@@ -456,7 +456,7 @@ export class TelemetryReceiver {
     return true;
   }
 
-  /** Clear spawn mark (called when identity hook pins a session — authoritative source) */
+  /** Clear spawn mark (called when identity hook pins a session  --  authoritative source) */
   clearSpawn(tty: string): void {
     const normalized = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
     this.recentSpawns.delete(normalized);
@@ -707,11 +707,11 @@ export class TelemetryReceiver {
           const ttyLabel = worker.tty || workerId;
 
           if (madeChanges && attempts < maxVerify) {
-            // Agent fixed something during verification — re-verify
+            // Agent fixed something during verification  --  re-verify
             dispatch.verifyAttempts = attempts + 1;
             dispatch.sentAt = Date.now();
             dispatch.artifactsAtVerifyStart = currentArtifactCount;
-            const verifyMsg = `[Hive Verify] You made changes during verification. Check again — run build, confirm no new errors. (Attempt ${attempts + 1}/${maxVerify})`;
+            const verifyMsg = `[Hive Verify] You made changes during verification. Check again  --  run build, confirm no new errors. (Attempt ${attempts + 1}/${maxVerify})`;
             this.sendToWorker(workerId, verifyMsg, {
               source: "verification",
               queueIfBusy: true,
@@ -721,7 +721,7 @@ export class TelemetryReceiver {
             continue;
           }
 
-          // Verification complete — either no changes (clean pass) or retry cap hit
+          // Verification complete  --  either no changes (clean pass) or retry cap hit
           if (madeChanges) {
             console.log(`[verify] ${ttyLabel}: verification cap reached after ${attempts} attempts (still making changes)`);
           } else {
@@ -743,7 +743,7 @@ export class TelemetryReceiver {
         // Auto-commit: commit artifact files if explicitly enabled for this dispatch
         if (dispatch.autoCommit && recentArtifacts.length > 0 && dispatch.project) {
           if (worker.machine) {
-            // Satellite worker — notify listeners so ws-server can forward to satellite
+            // Satellite worker  --  notify listeners so ws-server can forward to satellite
             const files = recentArtifacts
               .filter(a => a.action === "created" || a.action === "edited" || a.action === "wrote")
               .map(a => a.path);
@@ -754,7 +754,7 @@ export class TelemetryReceiver {
               console.log(`[auto-commit] ${workerId}: satellite commit requested for ${files.length} file(s)`);
             }
           } else {
-            // Local worker — commit directly
+            // Local worker  --  commit directly
             const commitHash = this.autoCommitArtifacts(workerId, dispatch.project, dispatch.task);
             if (commitHash) {
               const commitLesson = `Auto-committed ${recentArtifacts.length} file(s) → ${commitHash}`;
@@ -1175,12 +1175,12 @@ export class TelemetryReceiver {
         });
         console.log(`[auto-commit] ${workerId}: pushed to remote`);
       } catch (pushErr) {
-        console.log(`[auto-commit] ${workerId}: push failed (commit preserved) — ${pushErr instanceof Error ? pushErr.message : pushErr}`);
+        console.log(`[auto-commit] ${workerId}: push failed (commit preserved)  --  ${pushErr instanceof Error ? pushErr.message : pushErr}`);
       }
 
       return hash;
     } catch (err) {
-      console.log(`[auto-commit] ${workerId}: git commit failed — ${err instanceof Error ? err.message : err}`);
+      console.log(`[auto-commit] ${workerId}: git commit failed  --  ${err instanceof Error ? err.message : err}`);
       return null;
     }
   }
@@ -1265,7 +1265,7 @@ export class TelemetryReceiver {
   }
 
   /** Register a discovered worker WITHOUT broadcasting a worker_update.
-   *  Used when atomically replacing a placeholder — the caller handles the broadcast. */
+   *  Used when atomically replacing a placeholder  --  the caller handles the broadcast. */
   registerDiscoveredSilent(id: string, worker: WorkerState): void {
     this.workers.set(id, worker);
     if (!this.lastHookTime.has(id)) {
@@ -1295,7 +1295,7 @@ export class TelemetryReceiver {
         this.replayPendingHooks(pendingSession, id);
       }
     }
-    // No notify() — caller will broadcast
+    // No notify()  --  caller will broadcast
   }
 
   private fullBroadcastListeners: Array<() => void> = [];
@@ -1358,7 +1358,7 @@ export class TelemetryReceiver {
   private lastPositionDetect = 0;
   // Cache: context summaries per worker, invalidated when worker state changes
   private contextCache = new Map<string, { fingerprint: string; context: WorkerContextSnapshot }>();
-  private static POSITION_DETECT_INTERVAL = 1_500; // 1.5s — fast snap-back detection
+  private static POSITION_DETECT_INTERVAL = 1_500; // 1.5s  --  fast snap-back detection
 
   writeWorkersFile(): void {
     const workers = this.getAll().sort((a, b) => a.startedAt - b.startedAt);
@@ -1414,7 +1414,7 @@ export class TelemetryReceiver {
 
           // Snap-back: use rawSlots (natural position without collision resolution)
           // to detect drift. The collision-resolved positionMap can mask drift when
-          // a dragged window overlaps another — the free-slot fallback happens to
+          // a dragged window overlaps another  --  the free-slot fallback happens to
           // match the original assignment, hiding the actual position mismatch.
           const driftMap = rawSlots || positionMap;
           let drifted = false;
@@ -1454,13 +1454,13 @@ export class TelemetryReceiver {
     }
 
     // Stamp each WorkerState with its quadrant so WebSocket broadcasts include it.
-    // This is the single source of truth — dashboard uses this instead of computing its own.
+    // This is the single source of truth  --  dashboard uses this instead of computing its own.
     for (const w of workers) {
       const q = this.quadrantAssignments.get(w.id);
       w.quadrant = q; // undefined if >8 workers
     }
 
-    // Use cached contexts — only rebuild when worker state changes.
+    // Use cached contexts  --  only rebuild when worker state changes.
     // This avoids reading full JSONL files (can be hundreds of MB) every 3s.
     const contexts: WorkerContextSnapshot[] = [];
     for (const worker of workers) {
@@ -1677,10 +1677,10 @@ export class TelemetryReceiver {
     if (!worker) {
       return { ok: false, error: `Worker ${workerId} not found` };
     }
-    // Block messages to workers waiting at a trust/sandbox prompt — typing
+    // Block messages to workers waiting at a trust/sandbox prompt  --  typing
     // text into the terminal would corrupt the prompt selection.
     if (worker.promptType) {
-      return { ok: false, error: `Worker ${workerId} is waiting for ${worker.promptType} approval — approve the prompt first` };
+      return { ok: false, error: `Worker ${workerId} is waiting for ${worker.promptType} approval  --  approve the prompt first` };
     }
     const remoteWorker = this.isRemoteWorker(workerId, worker) && !this.workers.has(workerId);
 
@@ -1814,7 +1814,7 @@ export class TelemetryReceiver {
   }
 
   /**
-   * Async version of sendToWorker — does NOT block the event loop for TTY sends.
+   * Async version of sendToWorker  --  does NOT block the event loop for TTY sends.
    * Use from WebSocket/API handlers where blocking kills responsiveness.
    * State is updated optimistically before the async send completes.
    */
@@ -1845,13 +1845,13 @@ export class TelemetryReceiver {
     }
     // Block messages to workers waiting at a trust/sandbox prompt
     if (worker.promptType) {
-      return { ok: false, error: `Worker ${workerId} is waiting for ${worker.promptType} approval — approve the prompt first` };
+      return { ok: false, error: `Worker ${workerId} is waiting for ${worker.promptType} approval  --  approve the prompt first` };
     }
     const remoteWorker = this.isRemoteWorker(workerId, worker) && !this.workers.has(workerId);
 
     // Auto-pull before delivering messages from API/dashboard so the agent
     // works on the latest code. Same pattern as task queue dispatch.
-    // Skips internal sources (auto-pilot, task-queue — queue already pulls).
+    // Skips internal sources (auto-pilot, task-queue  --  queue already pulls).
     if (!remoteWorker && worker.project && !options.source.startsWith("auto-pilot") && options.source !== "task-queue") {
       try {
         const { execFile: gitPull } = require("child_process");
@@ -1860,7 +1860,7 @@ export class TelemetryReceiver {
           encoding: "utf-8",
           timeout: 15_000,
         });
-      } catch { /* not a git repo or no remote — skip */ }
+      } catch { /* not a git repo or no remote  --  skip */ }
     }
 
     const contentWithContext = this.composeMessageWithContext(workerId, content, {
@@ -1903,7 +1903,7 @@ export class TelemetryReceiver {
       };
     }
 
-    // Optimistically update state BEFORE async send — dashboard sees
+    // Optimistically update state BEFORE async send  --  dashboard sees
     // the worker go green immediately, no waiting for AppleScript.
     if (!remoteWorker) {
       worker.status = "working";
@@ -1964,7 +1964,7 @@ export class TelemetryReceiver {
 
     if (error) {
       console.log(`[send-async] Error sending to ${workerId}: ${error}`);
-      // State was already updated optimistically — status detection will
+      // State was already updated optimistically  --  status detection will
       // self-correct if the message truly didn't arrive.
       return { ok: false, error };
     }
@@ -2051,7 +2051,7 @@ export class TelemetryReceiver {
       } else {
         queue.unshift(msg);
         if (!result.ok) {
-          console.log(`[queue] ${worker.tty || worker.id}: failed to drain ${msg.id} — ${result.error}`);
+          console.log(`[queue] ${worker.tty || worker.id}: failed to drain ${msg.id}  --  ${result.error}`);
         }
       }
       break;
@@ -2105,7 +2105,7 @@ export class TelemetryReceiver {
       lines.push("Other agents currently working:");
       for (const w of active) {
         const action = w.currentAction || w.lastAction;
-        lines.push(`- ${w.tty || w.id}: ${w.projectName} — ${action}`);
+        lines.push(`- ${w.tty || w.id}: ${w.projectName}  --  ${action}`);
       }
     }
 
@@ -2186,7 +2186,7 @@ export class TelemetryReceiver {
     );
     if (allIdleWorkers.length === 0) return;
 
-    // Snapshot the queue — iterate all eligible tasks, remove dispatched ones by ID.
+    // Snapshot the queue  --  iterate all eligible tasks, remove dispatched ones by ID.
     const tasks = this.taskQueue.getAll();
     for (const task of tasks) {
       if (task.blockedBy && !this.taskQueue.isCompleted(task.blockedBy)) continue;
@@ -2201,14 +2201,14 @@ export class TelemetryReceiver {
           if (!w.machine) return localCapable; // local worker
           return this.capabilityChecker!(w.machine, task.requires!);
         });
-        if (capableWorkers.length === 0) continue; // no capable machine idle — skip, try next tick
+        if (capableWorkers.length === 0) continue; // no capable machine idle  --  skip, try next tick
         eligibleWorkers = capableWorkers;
       }
 
       // Model routing: if task specifies a model, only dispatch to agents running that model
       if (task.model) {
         const modelMatch = eligibleWorkers.filter(w => w.model === task.model);
-        if (modelMatch.length === 0) continue; // no idle agent with that model — skip, try next tick
+        if (modelMatch.length === 0) continue; // no idle agent with that model  --  skip, try next tick
         eligibleWorkers = modelMatch;
       }
 
@@ -2239,7 +2239,7 @@ export class TelemetryReceiver {
             encoding: "utf-8",
             timeout: 15_000,
           });
-        } catch { /* not a git repo or no remote — skip */ }
+        } catch { /* not a git repo or no remote  --  skip */ }
       }
 
       // Conflict guard: warn about files locked or recently edited by other agents
@@ -2252,7 +2252,7 @@ export class TelemetryReceiver {
           .map(l => `  - ${l.path} (locked by ${l.tty || l.workerId})`)
           .slice(0, 5);
         if (lockLines.length > 0) {
-          conflictWarning = `\n\n[Hive Conflict Guard] These files are currently locked by other agents — do NOT edit them:\n${lockLines.join("\n")}`;
+          conflictWarning = `\n\n[Hive Conflict Guard] These files are currently locked by other agents  --  do NOT edit them:\n${lockLines.join("\n")}`;
         }
       }
 
@@ -2446,7 +2446,7 @@ export class TelemetryReceiver {
     if (!worker) return;
 
     // Only Claude fires these hooks. If a hook routes to a non-Claude worker
-    // (via CWD fallback or session ID collision), ignore it — applying Claude
+    // (via CWD fallback or session ID collision), ignore it  --  applying Claude
     // hook state (PreToolUse/PostToolUse) to Gemini/Codex/OpenClaw workers
     // causes phantom green (status set to "working" by cross-contaminated hooks).
     if (worker.model && worker.model !== "claude") return;
@@ -2833,10 +2833,10 @@ export class TelemetryReceiver {
       console.log(`[state-store] Restored ${Object.keys(snapshot.ttySessionMap).length} TTY→session mapping(s)`);
     }
 
-    // Don't restore quadrant assignments — let position detection re-assign
+    // Don't restore quadrant assignments  --  let position detection re-assign
     // based on actual window positions. This ensures swapped/moved windows
     // get correct quadrants after a daemon restart.
-    console.log(`[state-store] Skipping quadrant restore — will re-detect from window positions`);
+    console.log(`[state-store] Skipping quadrant restore  --  will re-detect from window positions`);
 
     console.log(`[state-store] Restored ${workerCount} worker(s), ${Object.keys(snapshot.messageQueue).length} queue(s), ${snapshot.locks.length} lock(s)`);
   }

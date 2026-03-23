@@ -109,7 +109,7 @@ describe("WsServer pushState", () => {
     const client = harness.addClient();
 
     harness.server.pushState();  // sends workers + models (first call)
-    harness.server.pushState();  // no change — skips both
+    harness.server.pushState();  // no change  --  skips both
     harness.setWorkers([{ id: "w1", status: "working" }]);
     harness.server.pushState();  // sends workers (changed), skips models (same)
 

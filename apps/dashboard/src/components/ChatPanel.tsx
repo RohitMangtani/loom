@@ -82,7 +82,7 @@ export function ChatPanel({
     const ok = onSend(augmented);
     if (ok) {
       lastSendRef.current = { text: augmented, at: now };
-      // Clear pins after sending — they've been consumed
+      // Clear pins after sending  --  they've been consumed
       if (pins.length > 0) handleClearPins();
       if (attachments.length > 0) setAttachments([]);
       setUploadError(null);

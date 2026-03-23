@@ -50,7 +50,7 @@ export class AutoPilot {
       const lastSend = this.lastAutoSend.get(worker.id) || 0;
       if (now - lastSend < COOLDOWN_MS) continue;
 
-      // Skip while another TTY send is in progress — sync auto-pilot sends
+      // Skip while another TTY send is in progress  --  sync auto-pilot sends
       // would race with async message/approval sends for Terminal focus.
       if (this.terminal ? this.terminal.isSendInFlight() : isSendInFlight()) continue;
 
@@ -73,7 +73,7 @@ export class AutoPilot {
 
       // AskUserQuestion/EnterPlanMode use ink's selection UI which ignores
       // `do script` text injection. Send arrow keys + Enter via System Events.
-      // Check both currentAction AND stuckMessage — discovery may clear currentAction
+      // Check both currentAction AND stuckMessage  --  discovery may clear currentAction
       // before auto-pilot fires, but stuckMessage persists while status is "stuck".
       const action = (worker.currentAction || "").toLowerCase();
       const hasNumberedOptions = !!(worker.stuckMessage && /\n\d\.\s/.test(worker.stuckMessage));
@@ -105,11 +105,11 @@ export class AutoPilot {
         this.telemetry.markInputSent(worker.id, "auto-pilot:stuck");
         this.telemetry.notifyExternal(worker);
 
-        console.log(`[auto-pilot] ${worker.tty}: sent "${response.text}" — ${response.reason} (waited ${Math.round(waitedMs / 1000)}s)`);
+        console.log(`[auto-pilot] ${worker.tty}: sent "${response.text}"  --  ${response.reason} (waited ${Math.round(waitedMs / 1000)}s)`);
       } else {
-        // Failed to send — don't mark as responded, let it retry next tick
+        // Failed to send  --  don't mark as responded, let it retry next tick
         this.lastAutoSend.set(worker.id, now); // cooldown before retry
-        console.log(`[auto-pilot] ${worker.tty}: FAILED to send "${response.text}" — ${result.error} (will retry)`);
+        console.log(`[auto-pilot] ${worker.tty}: FAILED to send "${response.text}"  --  ${result.error} (will retry)`);
       }
     }
 
@@ -194,7 +194,7 @@ export class AutoPilot {
       return { text: "y", reason: "answered yes" };
     }
 
-    // Fallback — "1" works for most prompts
+    // Fallback  --  "1" works for most prompts
     return { text: "1", reason: "default response" };
   }
 
@@ -205,7 +205,7 @@ export class AutoPilot {
   private checkJsonlPrompts(now: number): void {
     for (const worker of this.telemetry.getAll()) {
       if (!worker.tty) continue;
-      // Never wake idle agents — only scan stuck workers for unanswered prompts
+      // Never wake idle agents  --  only scan stuck workers for unanswered prompts
       if (worker.status === "idle") continue;
 
       const lastSend = this.lastAutoSend.get(worker.id) || 0;
@@ -249,11 +249,11 @@ export class AutoPilot {
         this.telemetry.markInputSent(worker.id, "auto-pilot:jsonl");
         this.telemetry.notifyExternal(worker);
 
-        console.log(`[auto-pilot] ${worker.tty}: sent "${prompt.response}" via ${prompt.isSelection ? "selection" : "text"} — ${prompt.reason} (JSONL, waited ${Math.round(waitedMs / 1000)}s)`);
+        console.log(`[auto-pilot] ${worker.tty}: sent "${prompt.response}" via ${prompt.isSelection ? "selection" : "text"}  --  ${prompt.reason} (JSONL, waited ${Math.round(waitedMs / 1000)}s)`);
       } else {
-        // Failed — don't mark as responded, retry next tick after cooldown
+        // Failed  --  don't mark as responded, retry next tick after cooldown
         this.lastAutoSend.set(worker.id, now);
-        console.log(`[auto-pilot] ${worker.tty}: FAILED JSONL send "${prompt.response}" — ${result.error} (will retry)`);
+        console.log(`[auto-pilot] ${worker.tty}: FAILED JSONL send "${prompt.response}"  --  ${result.error} (will retry)`);
       }
     }
   }

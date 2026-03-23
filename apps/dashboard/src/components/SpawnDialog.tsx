@@ -30,7 +30,7 @@ export function SpawnDialog({ models, machines, onSpawn, onClose }: SpawnDialogP
       <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-lg w-full max-w-sm mx-4 p-6">
         <h2 className="text-lg font-semibold mb-4">Spawn Agent</h2>
 
-        {/* Machine selector — only shown when satellites are connected */}
+        {/* Machine selector  --  only shown when satellites are connected */}
         {hasSatellites && (
           <div className="mb-4">
             <label className="block text-xs text-[var(--text-muted)] mb-1.5">

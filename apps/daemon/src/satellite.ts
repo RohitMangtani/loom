@@ -143,7 +143,7 @@ function detectCapabilities(): MachineCapabilities {
     if (parts?.[3]) caps.diskFreeGb = parseInt(parts[3], 10);
   } catch { /* skip */ }
 
-  // Software detection — check if commands exist
+  // Software detection  --  check if commands exist
   const check = (cmd: string, args: string[] = ["--version"]): boolean => {
     try { execFileSync(cmd, args, { timeout: 3000, encoding: "utf-8", stdio: "pipe" }); return true; }
     catch { return false; }
@@ -363,7 +363,7 @@ export class SatelliteClient {
     // Install CLAUDE.md so local agents know about the Hive API
     this.installClaudeMd();
 
-    // Auto-pilot + watchdog — same as primary, runs locally on satellite
+    // Auto-pilot + watchdog  --  same as primary, runs locally on satellite
     this.autoPilot = new AutoPilot(this.telemetry, this.streamer, this.runtimePlatform.terminal);
     this.watchdog = new Watchdog(this.telemetry);
 
@@ -488,7 +488,7 @@ export class SatelliteClient {
   }
 
   /** Register API proxy routes on the satellite's local HTTP server.
-   *  Local agents call these like normal Hive API — the satellite
+   *  Local agents call these like normal Hive API  --  the satellite
    *  relays them to the primary via WebSocket.
    *
    *  Uses a catch-all `/api/*` relay so every current and future
@@ -499,8 +499,8 @@ export class SatelliteClient {
     const auth = this.telemetry.getAuthMiddleware();
     if (!app || !auth) return;
 
-    // GET /api/workers — read from workers.json (updated by satellite_all_workers)
-    // This is the only route handled locally — reading the cached full worker list
+    // GET /api/workers  --  read from workers.json (updated by satellite_all_workers)
+    // This is the only route handled locally  --  reading the cached full worker list
     // is faster and works even if the primary WebSocket is momentarily down.
     app.get("/api/workers", auth, (_req: import("express").Request, res: import("express").Response) => {
       try {
@@ -543,7 +543,7 @@ export class SatelliteClient {
     const claudeDir = join(homedir(), ".claude");
     const claudeMdPath = join(claudeDir, "CLAUDE.md");
 
-    const content = `## Hive — Production Agent
+    const content = `## Hive  --  Production Agent
 
 You are 1 of several Claude Code agents running simultaneously across multiple computers. Daemon at 127.0.0.1:3001 coordinates status, messaging, and learnings.
 
@@ -553,7 +553,7 @@ You are 1 of several Claude Code agents running simultaneously across multiple c
 - NEVER spawn new Claude instances, terminals, or agents.
 - NEVER use the Task tool to launch subagents as a workaround for dispatching.
 - Execute directly. Only dispatch to another agent when the task requires their active conversation context.
-- **Dispatch rule:** Before sending work to another agent, read your peer summary (shown every prompt) to know which Q is which model, project, and status. Send work to the right agent by checking peers first. Always \`GET /api/workers\` for fresh IDs before dispatching — worker IDs change when agents restart.
+- **Dispatch rule:** Before sending work to another agent, read your peer summary (shown every prompt) to know which Q is which model, project, and status. Send work to the right agent by checking peers first. Always \`GET /api/workers\` for fresh IDs before dispatching  --  worker IDs change when agents restart.
 - Before any task: \`cat {project}/.claude/hive-learnings.md 2>/dev/null\`
 - After solving anything non-obvious: write a learning back via the API. This is mandatory.
 - Sandbox blocks \`curl\` to localhost. Use \`dangerouslyDisableSandbox: true\` for daemon API calls.
@@ -593,14 +593,14 @@ Daemon: http://127.0.0.1:3001 | Token: \`$(cat ~/.hive/token)\` | Auth header: \
 
 ### Cross-Machine Communication
 
-All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays them to the primary automatically. You can send messages to agents on ANY machine using their workerId from \`/api/workers\`.
+All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays them to the primary automatically. You can send messages to agents on ANY machine using their workerId from \`/api/workers\`.
 
 ### Self-Unstick
 
 1. Read learnings
 2. Check artifacts
 3. Try different approach (never retry same thing 3x)
-4. If truly stuck, say so — human or auto-pilot intervenes
+4. If truly stuck, say so  --  human or auto-pilot intervenes
 5. After solving: write the learning back
 `;
 
@@ -608,7 +608,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
       if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
       // Only write if missing or outdated (check for our marker)
       const existing = existsSync(claudeMdPath) ? readFileSync(claudeMdPath, "utf-8") : "";
-      if (!existing.includes("Hive — Production Agent")) {
+      if (!existing.includes("Hive  --  Production Agent")) {
         // Prepend Hive instructions to existing CLAUDE.md
         const merged = existing ? content + "\n---\n\n" + existing : content;
         writeFileSync(claudeMdPath, merged);
@@ -657,7 +657,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           this.telemetry.markSpawn(result.tty);
           // Create spawn placeholder so the dashboard sees the tile immediately
           // (before the 3s discovery scan) and so discovery's placeholder-resolution
-          // path forces idle on the real worker — matching primary behavior.
+          // path forces idle on the real worker  --  matching primary behavior.
           const projectName = project.split("/").pop() || project;
           const normalizedTty = result.tty.replace("/dev/", "");
           const placeholderId = `spawning_${normalizedTty.replace(/\//g, "_")}`;
@@ -892,7 +892,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
 
       case "satellite_context": {
         // Primary is requesting worker context (conversation history, status).
-        // Read it locally and send back — this is what makes cross-machine
+        // Read it locally and send back  --  this is what makes cross-machine
         // context queries work transparently.
         const localId = msg.localWorkerId || "";
         const worker = this.telemetry.get(localId);
@@ -1012,7 +1012,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
         for (const remoteW of allWorkers) {
           if (!remoteW.machine || remoteW.machine !== this.machineId) continue;
           if (!remoteW.quadrant || !remoteW.id) continue;
-          // remoteW.id is "machineId:localId" — extract localId
+          // remoteW.id is "machineId:localId"  --  extract localId
           const colonIdx = remoteW.id.indexOf(":");
           const localId = colonIdx >= 0 ? remoteW.id.slice(colonIdx + 1) : remoteW.id;
           const local = localWorkers.find(w => w.id === localId);
@@ -1092,7 +1092,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
             });
             console.log(`[satellite-autocommit] Pushed to remote`);
           } catch (pushErr) {
-            console.log(`[satellite-autocommit] Push failed (commit preserved) — ${pushErr instanceof Error ? pushErr.message : pushErr}`);
+            console.log(`[satellite-autocommit] Push failed (commit preserved)  --  ${pushErr instanceof Error ? pushErr.message : pushErr}`);
           }
 
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
@@ -1117,7 +1117,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
       case "satellite_update": {
         // Primary tells us to pull latest code and restart.
         // Find our own repo directory, git pull, then respawn the process.
-        console.log("[satellite] Received update command — pulling latest code...");
+        console.log("[satellite] Received update command  --  pulling latest code...");
         // Derive repo root from this file's location: apps/daemon/src/satellite.ts → ../../..
         const repoDir = msg.project || join(import.meta.dirname, "..", "..", "..");
         try {
@@ -1162,7 +1162,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           ? `cd '${repoDir}' && PRIMARY_URL=$(cat '${primaryUrlPath}' 2>/dev/null) && PRIMARY_TOKEN=$(cat '${primaryTokenPath}' 2>/dev/null) && [ -n "$PRIMARY_URL" ] && [ -n "$PRIMARY_TOKEN" ] && /usr/bin/git pull --ff-only && nohup bash scripts/install.sh --connect "$PRIMARY_URL" "$PRIMARY_TOKEN" > '${logPath}' 2>&1 &`
           : `cd '${repoDir}' && nohup bash scripts/doctor.sh --repair-satellite > '${logPath}' 2>&1 &`;
 
-        console.log(`[satellite] Received maintenance command — action=${action}`);
+        console.log(`[satellite] Received maintenance command  --  action=${action}`);
 
         try {
           await new Promise<void>((resolve, reject) => {

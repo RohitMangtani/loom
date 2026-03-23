@@ -1,6 +1,6 @@
 # Contributing to Hive
 
-Thanks for your interest in contributing. Hive is a process-level orchestration layer for AI agent fleets — it discovers running AI CLI agents, shows their status on a real-time dashboard, and coordinates them across machines.
+Thanks for your interest in contributing. Hive is a process-level orchestration layer for AI agent fleets  --  it discovers running AI CLI agents, shows their status on a real-time dashboard, and coordinates them across machines.
 
 ## Getting Started
 
@@ -26,7 +26,7 @@ npm run dev:daemon
 npm run dev:dashboard
 ```
 
-Open Terminal.app windows and run `claude` or `codex` — they appear on the dashboard within 3 seconds.
+Open Terminal.app windows and run `claude` or `codex`  --  they appear on the dashboard within 3 seconds.
 
 ### Running tests
 
@@ -91,24 +91,24 @@ See [docs/architecture.md](docs/architecture.md) for a detailed data flow explan
 
 ### Bigger contributions
 
-- **Live-smoke and harden the Linux/tmux runtime** — The platform layer is now wired through the daemon, but it still needs more verification on real Linux hosts, better layout polish, and failure-mode hardening.
-- **Publish the CLI/init flow** — `packages/cli` now owns the local `hive init` and `hive doctor` entry points. The next step is turning that into a polished npm install surface with a final package name.
-- **Agent plugin system** — Let users add new agent types via config files
-- **VS Code extension** — Show fleet status in the status bar using the protocol spec
+- **Live-smoke and harden the Linux/tmux runtime**  --  The platform layer is now wired through the daemon, but it still needs more verification on real Linux hosts, better layout polish, and failure-mode hardening.
+- **Publish the CLI/init flow**  --  `packages/cli` now owns the local `hive init` and `hive doctor` entry points. The next step is turning that into a polished npm install surface with a final package name.
+- **Agent plugin system**  --  Let users add new agent types via config files
+- **VS Code extension**  --  Show fleet status in the status bar using the protocol spec
 
 ### Pull request guidelines
 
 1. Fork the repo and create a branch from `main`
-2. Run `npx tsc --noEmit` in `apps/daemon` — must compile clean
-3. Run `npx vitest run` in `apps/daemon` — all tests must pass
-4. Keep commits focused — one logical change per commit
+2. Run `npx tsc --noEmit` in `apps/daemon`  --  must compile clean
+3. Run `npx vitest run` in `apps/daemon`  --  all tests must pass
+4. Keep commits focused  --  one logical change per commit
 5. Write a clear PR description explaining what and why
 
 ### Code style
 
 - TypeScript strict mode
 - ESM imports (`.js` extensions in import paths)
-- No external linter enforced — match the existing style
+- No external linter enforced  --  match the existing style
 - Tests use vitest
 - Prefer small, focused modules over large files
 
@@ -118,7 +118,7 @@ Some patterns in the codebase are intentional and should not be changed without 
 
 - **TTY input two-step approach** (`do script` + `send-return`): This is the only method that reliably sends text + Enter to Terminal.app from a background process. See `tty-input.ts` header comments.
 - **7-layer status detection**: The phantom-green prevention pipeline in `discovery.ts` has 7 cooperating layers. Removing any one creates a distinct failure mode. See `docs/architecture.md`.
-- **3-second tick loop**: The daemon polls every 3 seconds. This is a deliberate choice — event-driven alternatives were considered but the tick approach is simpler and reliable for process-level detection.
+- **3-second tick loop**: The daemon polls every 3 seconds. This is a deliberate choice  --  event-driven alternatives were considered but the tick approach is simpler and reliable for process-level detection.
 
 ## Questions?
 

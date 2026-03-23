@@ -83,11 +83,11 @@ Additionally, **Layer 8 (CPU/PTY signal)** checks process CPU usage and terminal
 
 Claude Code sends hook events via HTTP POST to the daemon:
 
-- **PreToolUse** — Agent is about to call a tool (fastest signal, ~350ms)
-- **PostToolUse** — Tool call completed
-- **Notification** — Permission prompt or idle state
-- **UserPromptSubmit** — New prompt received (triggers identity injection)
-- **Stop** — Session ended
+- **PreToolUse**  --  Agent is about to call a tool (fastest signal, ~350ms)
+- **PostToolUse**  --  Tool call completed
+- **Notification**  --  Permission prompt or idle state
+- **UserPromptSubmit**  --  New prompt received (triggers identity injection)
+- **Stop**  --  Session ended
 
 Hooks are routed to workers via session ID → worker ID mapping. A pending hook queue handles the race condition where hooks arrive before discovery registers the session.
 
@@ -165,9 +165,9 @@ The daemon now loads its platform at startup through `apps/daemon/src/platform/`
 
 ### Interfaces (`platform/interfaces.ts`)
 
-- `TerminalIO` — send text, keystrokes, and selections to agent terminals; read terminal content
-- `ProcessDiscoverer` — find running agent processes, get CPU usage, track PTY output
-- `WindowManager` — spawn/close terminals, arrange window layout
+- `TerminalIO`  --  send text, keystrokes, and selections to agent terminals; read terminal content
+- `ProcessDiscoverer`  --  find running agent processes, get CPU usage, track PTY output
+- `WindowManager`  --  spawn/close terminals, arrange window layout
 
 ### Implementations
 

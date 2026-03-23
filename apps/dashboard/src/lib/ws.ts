@@ -8,7 +8,7 @@ type ExtendedResponse = DaemonResponse | { type: "models"; models?: AgentModel[]
 
 const MAX_CHAT_ENTRIES = 150;
 
-/** Normalize text for comparison — matches tty-input.ts cleaning */
+/** Normalize text for comparison  --  matches tty-input.ts cleaning */
 const norm = (s: string) => s.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
 
 export function useHive(daemonUrl: string) {
@@ -92,7 +92,7 @@ export function useHive(daemonUrl: string) {
     [send]
   );
 
-  // Reviews are sent over WS on connect (no REST needed — tunnel only exposes WS port)
+  // Reviews are sent over WS on connect (no REST needed  --  tunnel only exposes WS port)
 
   useEffect(() => {
     if (!daemonUrl) return;
@@ -179,9 +179,9 @@ export function useHive(daemonUrl: string) {
               const newEntries = data.messages;
 
               if (data.full) {
-                // Mark that we received history — cancels the auto-retry timer.
+                // Mark that we received history  --  cancels the auto-retry timer.
                 chatReceivedRef.current = true;
-                // Full history — authoritative replace from server.
+                // Full history  --  authoritative replace from server.
                 // Merge: server state is ground truth, but append any optimistic
                 // user messages that aren't yet reflected in the server history.
                 setChatEntries((prev) => {
@@ -215,7 +215,7 @@ export function useHive(daemonUrl: string) {
                   return next;
                 });
               } else {
-                // Incremental update — append with optimistic dedup.
+                // Incremental update  --  append with optimistic dedup.
                 setChatEntries((prev) => {
                   const next = new Map(prev);
                   const existing = next.get(wid) ?? [];
@@ -230,13 +230,13 @@ export function useHive(daemonUrl: string) {
                         );
                         if (match) {
                           optimisticIdsRef.current.delete(oid);
-                          return false; // Skip server echo — optimistic already shown
+                          return false; // Skip server echo  --  optimistic already shown
                         }
                       }
                       // Also deduplicate against the very last entry to catch edge cases
                       const last = existing[existing.length - 1];
                       if (last?.role === "user" && norm(last.text) === eNorm && !last._optimisticId) {
-                        // Same text from server arrived twice — skip
+                        // Same text from server arrived twice  --  skip
                         return false;
                       }
                     }
@@ -244,7 +244,7 @@ export function useHive(daemonUrl: string) {
                   });
 
                   if (deduped.length === 0) {
-                    return prev; // No change — skip re-render
+                    return prev; // No change  --  skip re-render
                   }
                   const updated = [...existing, ...deduped];
                   if (updated.length > MAX_CHAT_ENTRIES) {

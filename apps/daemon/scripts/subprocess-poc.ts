@@ -1,5 +1,5 @@
 /**
- * Hive Subprocess POC — Proof that Claude Code can be managed via stdin/stdout
+ * Hive Subprocess POC  --  Proof that Claude Code can be managed via stdin/stdout
  *
  * Run this from a PLAIN terminal (not inside Claude Code):
  *   npx tsx scripts/subprocess-poc.ts

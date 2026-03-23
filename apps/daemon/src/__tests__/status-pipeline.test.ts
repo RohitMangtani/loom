@@ -1,7 +1,7 @@
 /**
  * Status Detection Pipeline Tests
  *
- * Tests the core JSONL tail analysis — the foundation of Hive's status detection.
+ * Tests the core JSONL tail analysis  --  the foundation of Hive's status detection.
  * Creates temporary JSONL files with known conversation patterns and verifies
  * that analyzeJsonlTail returns the correct status and confidence level.
  *
@@ -70,17 +70,17 @@ function claudeUserMessage(text = "Fix the login bug"): string {
   });
 }
 
-/** Noise entry — progress (should be filtered) */
+/** Noise entry  --  progress (should be filtered) */
 function noiseProgress(): string {
   return jsonlLine({ type: "progress", data: { bytes: 1234 } });
 }
 
-/** Noise entry — system (should be filtered) */
+/** Noise entry  --  system (should be filtered) */
 function noiseSystem(): string {
   return jsonlLine({ type: "system", message: "context window compacted" });
 }
 
-/** Noise entry — file-history-snapshot (should be filtered) */
+/** Noise entry  --  file-history-snapshot (should be filtered) */
 function noiseFileHistory(): string {
   return jsonlLine({ type: "file-history-snapshot", files: ["/src/app.ts"] });
 }
@@ -119,7 +119,7 @@ function writeTestJsonl(name: string, lines: string[], ageMs = 0): string {
 
 // We need to access analyzeJsonlTail which is private. We'll test through
 // readSessionContextFromFile by making the method accessible via prototype.
-// This is a test-only technique — the production API is unchanged.
+// This is a test-only technique  --  the production API is unchanged.
 
 type SessionContext = {
   projectName: string | null;
@@ -132,7 +132,7 @@ type SessionContext = {
 };
 
 function createTestDiscovery(): ProcessDiscovery {
-  // Minimal mocks — we only need the JSONL analysis, not process scanning
+  // Minimal mocks  --  we only need the JSONL analysis, not process scanning
   const mockTelemetry = {
     registerSession: vi.fn(),
     isSessionOwnedByOther: vi.fn(() => false),
@@ -182,7 +182,7 @@ describe("JSONL tail analysis (analyzeJsonlTail)", () => {
     const file = writeTestJsonl("tool-in-flight", [
       claudeUserMessage("Fix the bug"),
       claudeToolUse("Read", "/src/main.ts"),
-      // No tool_result after — tool is in flight
+      // No tool_result after  --  tool is in flight
     ]);
 
     const ctx = analyzeFile(discovery, file);
@@ -210,7 +210,7 @@ describe("JSONL tail analysis (analyzeJsonlTail)", () => {
     const file = writeTestJsonl("finished-response", [
       claudeUserMessage("What is 2+2?"),
       claudeAssistant("The answer is 4."),
-    ], 10_000); // 10s old — past the 4s grace period
+    ], 10_000); // 10s old  --  past the 4s grace period
 
     const ctx = analyzeFile(discovery, file);
     expect(ctx.status).toBe("idle");
@@ -218,7 +218,7 @@ describe("JSONL tail analysis (analyzeJsonlTail)", () => {
 
   it("keeps working during mid-stream grace (assistant at tail, file < 4s old)", () => {
     const discovery = createTestDiscovery();
-    // File is fresh (0ms age) — Claude is still writing its response
+    // File is fresh (0ms age)  --  Claude is still writing its response
     const file = writeTestJsonl("mid-stream", [
       claudeUserMessage("Explain quantum computing"),
       claudeAssistant("Quantum computing uses..."),
@@ -236,7 +236,7 @@ describe("JSONL tail analysis (analyzeJsonlTail)", () => {
     const file = writeTestJsonl("noise-after-idle", [
       claudeUserMessage("What time is it?"),
       claudeAssistant("It is 3pm."),
-      // Many noise entries written after — should NOT cause phantom green
+      // Many noise entries written after  --  should NOT cause phantom green
       noiseProgress(),
       noiseProgress(),
       noiseSystem(),
@@ -250,7 +250,7 @@ describe("JSONL tail analysis (analyzeJsonlTail)", () => {
 
   it("noise entries at tail make mid-stream check fail (no phantom green)", () => {
     const discovery = createTestDiscovery();
-    // File is fresh (0ms) but ONLY because noise was written — not real content
+    // File is fresh (0ms) but ONLY because noise was written  --  not real content
     const file = writeTestJsonl("noise-fresh", [
       claudeUserMessage("Hello"),
       claudeAssistant("Hi there!"),
@@ -271,7 +271,7 @@ describe("JSONL tail analysis (analyzeJsonlTail)", () => {
     const file = writeTestJsonl("user-sent", [
       claudeAssistant("Previous response."),
       claudeUserMessage("Now fix the login page"),
-      // No assistant response yet — Claude is thinking
+      // No assistant response yet  --  Claude is thinking
     ]);
 
     const ctx = analyzeFile(discovery, file);
@@ -283,7 +283,7 @@ describe("JSONL tail analysis (analyzeJsonlTail)", () => {
     const file = writeTestJsonl("user-stale", [
       claudeAssistant("Previous response."),
       claudeUserMessage("Fix the bug"),
-    ], 180_000); // 3 minutes old — Claude already responded in a new file
+    ], 180_000); // 3 minutes old  --  Claude already responded in a new file
 
     const ctx = analyzeFile(discovery, file);
     expect(ctx.status).toBe("idle");
@@ -300,7 +300,7 @@ describe("JSONL tail analysis (analyzeJsonlTail)", () => {
       claudeToolUse("Edit", "/src/auth.ts"),
       claudeToolResult("toolu_2"),
       claudeToolUse("Read", "/src/test.ts"),
-      // Still in flight — last tool_use has no result
+      // Still in flight  --  last tool_use has no result
     ]);
 
     const ctx = analyzeFile(discovery, file);

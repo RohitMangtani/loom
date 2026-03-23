@@ -70,7 +70,7 @@ export class ReviewStore {
     };
     this.items.set(item.id, item);
 
-    // Cap at MAX_REVIEWS — drop oldest
+    // Cap at MAX_REVIEWS  --  drop oldest
     if (this.items.size > MAX_REVIEWS) {
       const sorted = [...this.items.values()].sort((a, b) => a.createdAt - b.createdAt);
       while (this.items.size > MAX_REVIEWS) {

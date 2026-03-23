@@ -42,7 +42,7 @@ export class OutboxScanner {
           unlinkSync(fullPath);
         }
       } catch {
-        // Bad JSON or processing error — remove to prevent infinite retry
+        // Bad JSON or processing error  --  remove to prevent infinite retry
         try { unlinkSync(fullPath); } catch { /* ignore */ }
       }
     }

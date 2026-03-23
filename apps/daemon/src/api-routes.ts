@@ -25,12 +25,12 @@ export function registerApiRoutes(
   discovery: ProcessDiscovery,
 ): void {
 
-  // GET /api/workers — includes satellite workers when available
+  // GET /api/workers  --  includes satellite workers when available
   app.get("/api/workers", requireAuth, (_req, res) => {
     res.json(receiver.getAllWorkersIncludingSatellites());
   });
 
-  // POST /api/message — routes to satellite workers transparently
+  // POST /api/message  --  routes to satellite workers transparently
   app.post("/api/message", requireAuth, async (req, res) => {
     const {
       workerId,
@@ -91,7 +91,7 @@ export function registerApiRoutes(
     res.json(result);
   });
 
-  // GET /api/context — transparently queries satellite workers
+  // GET /api/context  --  transparently queries satellite workers
   app.get("/api/context", requireAuth, async (req, res) => {
     const workerId = req.query.workerId as string | undefined;
     const workerIds = typeof req.query.workerIds === "string"
@@ -376,7 +376,7 @@ export function registerApiRoutes(
     res.json(receiver.getDebugState(discovery));
   });
 
-  // POST /api/update-satellites — tell all satellites to pull and restart
+  // POST /api/update-satellites  --  tell all satellites to pull and restart
   app.post("/api/update-satellites", requireAuth, (_req, res) => {
     receiver.updateSatellites();
     res.json({ ok: true });
@@ -519,7 +519,7 @@ export function registerApiRoutes(
     });
   });
 
-  // GET /api/models — returns built-in + custom agent types for spawn dialog
+  // GET /api/models  --  returns built-in + custom agent types for spawn dialog
   app.get("/api/models", requireAuth, (_req, res) => {
     const builtIn = [
       { id: "claude", label: "Claude" },
@@ -533,7 +533,7 @@ export function registerApiRoutes(
     res.json([...builtIn, ...custom]);
   });
 
-  // GET /api/projects — auto-detect git repos in common directories
+  // GET /api/projects  --  auto-detect git repos in common directories
   app.get("/api/projects", requireAuth, (_req, res) => {
     res.json(receiver.getSwarmProjects());
   });
@@ -544,7 +544,7 @@ export function registerApiRoutes(
     res.json(unseen ? receiver.getUnseenReviews() : receiver.getReviews());
   });
 
-  // POST /api/reviews — agent self-reporting
+  // POST /api/reviews  --  agent self-reporting
   app.post("/api/reviews", requireAuth, (req, res) => {
     const { summary, url, type, workerId } = req.body as {
       summary?: string; url?: string; type?: string; workerId?: string;
@@ -562,7 +562,7 @@ export function registerApiRoutes(
     res.json({ ok: true, review });
   });
 
-  // PATCH /api/reviews/:id — mark as seen
+  // PATCH /api/reviews/:id  --  mark as seen
   app.patch("/api/reviews/:id", requireAuth, (req, res) => {
     const action = req.body?.action as string | undefined;
     if (action === "seen") {
@@ -573,7 +573,7 @@ export function registerApiRoutes(
     }
   });
 
-  // PATCH /api/reviews — mark all seen
+  // PATCH /api/reviews  --  mark all seen
   app.patch("/api/reviews", requireAuth, (_req, res) => {
     const count = receiver.markAllReviewsSeen();
     res.json({ ok: true, marked: count });
@@ -589,7 +589,7 @@ export function registerApiRoutes(
     }
   });
 
-  // DELETE /api/reviews — clear all reviews
+  // DELETE /api/reviews  --  clear all reviews
   app.delete("/api/reviews", requireAuth, (_req, res) => {
     const count = receiver.clearAllReviews();
     res.json({ ok: true, cleared: count });
@@ -611,13 +611,13 @@ export function registerApiRoutes(
     }
   });
 
-  // POST /api/rearrange — force rearrange terminal windows
+  // POST /api/rearrange  --  force rearrange terminal windows
   app.post("/api/rearrange", requireAuth, (_req, res) => {
     receiver.forceRearrange();
     res.json({ ok: true });
   });
 
-  // GET /api/capabilities — list all machine capabilities across the swarm
+  // GET /api/capabilities  --  list all machine capabilities across the swarm
   app.get("/api/capabilities", requireAuth, (_req, res) => {
     res.json(receiver.getSwarmCapabilities());
   });

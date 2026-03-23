@@ -64,7 +64,7 @@ let detectInFlight = false;
  * Detect the physical screen position of each Terminal window by TTY
  * and invoke the callback with the quadrant assignments.
  *
- * Async — does NOT block the event loop. Results arrive via callback.
+ * Async  --  does NOT block the event loop. Results arrive via callback.
  * If a detection is already in flight, the call is skipped (callback not invoked).
  */
 export function detectQuadrantsFromWindowPositions(
@@ -191,7 +191,7 @@ return "SCREEN:" & midX & "," & midY & linefeed & output
  */
 export function arrangeTerminalWindows(slots: QuadrantSlot[], totalAgentCount?: number): void {
   if (slots.length === 0) return;
-  // Skip arrangement while a TTY send is in progress — running another
+  // Skip arrangement while a TTY send is in progress  --  running another
   // osascript that touches Terminal windows can steal focus mid-keystroke.
   if (isSendInFlight()) return;
 
@@ -278,7 +278,7 @@ let titleInFlight = false;
 /**
  * Set Terminal.app tab titles to match quadrant assignments WITHOUT moving windows.
  * Called on every writeWorkersFile() tick so labels stay in sync when windows are dragged.
- * Async (fire-and-forget) — does NOT block the event loop.
+ * Async (fire-and-forget)  --  does NOT block the event loop.
  */
 export function updateTerminalTitles(slots: QuadrantSlot[]): void {
   if (slots.length === 0) return;
@@ -290,7 +290,7 @@ export function updateTerminalTitles(slots: QuadrantSlot[]): void {
     .sort()
     .join("|");
   if (fingerprint === lastTitleFingerprint) return;
-  // Don't set fingerprint yet — only on success, so failures retry next tick
+  // Don't set fingerprint yet  --  only on success, so failures retry next tick
 
   const tabBlocks = slots.map(slot => {
     const device = slot.tty.startsWith("/dev/") ? slot.tty : `/dev/${slot.tty}`;
@@ -324,7 +324,7 @@ end tell
     if (err) {
       const msg = err.message || String(err);
       console.log(`[arrange] Failed to update titles: ${msg.slice(0, 150)}`);
-      // Don't cache fingerprint — retry next tick
+      // Don't cache fingerprint  --  retry next tick
     } else {
       lastTitleFingerprint = fingerprint;
     }
@@ -500,11 +500,11 @@ end tell
     });
     const out = (result as string).trim();
     if (out === "not_found") {
-      return { ok: true }; // Already gone — not an error
+      return { ok: true }; // Already gone  --  not an error
     }
     return { ok: true };
   } catch (err: unknown) {
-    // osascript failed — likely missing Automation permission.
+    // osascript failed  --  likely missing Automation permission.
     // Fallback: SIGKILL all remaining processes on the TTY (the agent
     // is already dead from the kill handler). This kills the shell too,
     // and Terminal.app auto-closes the tab when no processes remain.

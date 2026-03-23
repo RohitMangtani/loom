@@ -17,7 +17,7 @@ export function loadOrCreateToken(): string {
     const existing = readFileSync(TOKEN_PATH, "utf-8").trim();
     if (existing.length === TOKEN_BYTES * 2) return existing;
   } catch {
-    // File doesn't exist or isn't readable — generate below
+    // File doesn't exist or isn't readable  --  generate below
   }
 
   mkdirSync(TOKEN_DIR, { recursive: true, mode: 0o700 });
@@ -124,6 +124,6 @@ export function patchHookUrls(token: string): void {
       chmodSync(settingsPath, 0o600);
     }
   } catch {
-    // Best effort — don't crash if settings.json is malformed
+    // Best effort  --  don't crash if settings.json is malformed
   }
 }

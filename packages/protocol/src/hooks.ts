@@ -42,7 +42,7 @@ export interface HookEventBody {
 }
 
 /**
- * Hook response — can influence tool execution.
+ * Hook response  --  can influence tool execution.
  *
  * PreToolUse hooks can return a decision to allow/block the tool call.
  * Most hooks return undefined (no influence on execution).

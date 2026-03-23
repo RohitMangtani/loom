@@ -15,13 +15,13 @@ export interface QueuedTask {
   verify?: boolean;
   maxVerifyAttempts?: number;
   autoCommit?: boolean;
-  /** Required capabilities — task only dispatches to machines that have ALL of these.
+  /** Required capabilities  --  task only dispatches to machines that have ALL of these.
    *  Strings match MachineCapabilities keys (gpu, ffmpeg, docker, pytorch, etc.)
    *  or custom tags. Example: ["gpu", "ffmpeg"] means the machine needs both. */
   requires?: string[];
-  /** Preferred machine — soft preference (dispatch here if idle, else anywhere capable). */
+  /** Preferred machine  --  soft preference (dispatch here if idle, else anywhere capable). */
   preferMachine?: string;
-  /** Preferred model — only dispatch to agents running this model (claude, codex, openclaw). */
+  /** Preferred model  --  only dispatch to agents running this model (claude, codex, openclaw). */
   model?: string;
 }
 

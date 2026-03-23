@@ -7,7 +7,7 @@ const KEY_FILE = join(HOME, ".hive", "anthropic-key");
 const FEEDBACK_FILE = join(HOME, ".hive", "suggestion-feedback.jsonl");
 const MODEL = "claude-haiku-4-5-20251001";
 const API_URL = "https://api.anthropic.com/v1/messages";
-const CACHE_TTL = 5 * 60 * 1000; // 5 min — don't re-generate if agent stays idle
+const CACHE_TTL = 5 * 60 * 1000; // 5 min  --  don't re-generate if agent stays idle
 const PATTERN_SUMMARY_INTERVAL = 60 * 1000; // re-summarize patterns every 60s
 
 interface CachedSuggestions {
@@ -51,7 +51,7 @@ export class SuggestionEngine {
         return;
       }
     } catch { /* ignore */ }
-    console.log("[suggestions] No API key found — using template suggestions only");
+    console.log("[suggestions] No API key found  --  using template suggestions only");
   }
 
   private loadFeedback(): void {
@@ -179,7 +179,7 @@ export class SuggestionEngine {
       if (applyRate >= 0.7) {
         patterns.push(`User frequently approves "${keyword}" suggestions (${Math.round(applyRate * 100)}% apply rate)`);
       } else if (applyRate <= 0.3) {
-        patterns.push(`User rarely uses "${keyword}" suggestions (${Math.round(applyRate * 100)}% apply rate) — deprioritize`);
+        patterns.push(`User rarely uses "${keyword}" suggestions (${Math.round(applyRate * 100)}% apply rate)  --  deprioritize`);
       }
     }
 

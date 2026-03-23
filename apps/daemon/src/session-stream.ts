@@ -129,7 +129,7 @@ export class SessionStreamer {
     try {
       markerSessionId = readFileSync(markerPath, "utf-8").trim();
     } catch {
-      return false; // No marker file — can't verify
+      return false; // No marker file  --  can't verify
     }
     if (!markerSessionId || markerSessionId.length < 30) return false;
 
@@ -202,7 +202,7 @@ export class SessionStreamer {
 
     const filePath = this.sessionFiles.get(workerId);
     if (!filePath) {
-      // Session file not mapped yet (agent just spawned) — queue for later
+      // Session file not mapped yet (agent just spawned)  --  queue for later
       this.pendingSubs = this.pendingSubs.filter(p => p.subKey !== subKey);
       this.pendingSubs.push({ subKey, workerId, callback });
       return;
@@ -281,7 +281,7 @@ export class SessionStreamer {
     if (!sub) return;
 
     // Detect session file change (context compaction creates a new JSONL).
-    // Discovery updates sessionFiles on every scan — if the file changed,
+    // Discovery updates sessionFiles on every scan  --  if the file changed,
     // switch to the new one and send its full history as a full replace.
     let isFileChange = false;
     const currentFile = this.sessionFiles.get(sub.workerId);
@@ -318,7 +318,7 @@ export class SessionStreamer {
 
       const buf = readFileSync(sub.filePath);
       const newContent = buf.subarray(sub.byteOffset).toString("utf-8");
-      // Use buf.length (actual bytes read) not stat.size — file may have grown between stat and read
+      // Use buf.length (actual bytes read) not stat.size  --  file may have grown between stat and read
       sub.byteOffset = buf.length;
 
       const entries: ChatEntry[] = [];
@@ -393,7 +393,7 @@ function cleanUserMessage(text: string): string | null {
  * limited to the last MAX_USER_MESSAGES user messages.
  */
 function filterCoherent(entries: ChatEntry[]): ChatEntry[] {
-  // Remove tool entries — show only user messages and agent text responses
+  // Remove tool entries  --  show only user messages and agent text responses
   const coherent = entries.filter(e => e.role !== "tool");
 
   // Find the start index: walk backwards counting user messages
@@ -475,7 +475,7 @@ function parseLine(line: string): ChatEntry[] | null {
             if (block.type === "text" && block.text?.trim()) {
               entries.push({ role: "agent", text: block.text.trim() });
             } else if (block.type === "toolCall") {
-              // OpenClaw uses lowercase tool names — capitalize for describeAction
+              // OpenClaw uses lowercase tool names  --  capitalize for describeAction
               const name = block.name ? (block.name.charAt(0).toUpperCase() + block.name.slice(1)) : undefined;
               const desc = describeAction(name, block.arguments);
               entries.push({ role: "tool", text: desc });
@@ -523,7 +523,7 @@ function parseLine(line: string): ChatEntry[] | null {
 
       // Tool result: {type:"response_item", payload:{type:"function_call_output", output:"..."}}
       if (p.type === "function_call_output") {
-        return null; // Skip tool outputs (same as Claude — only show call descriptions)
+        return null; // Skip tool outputs (same as Claude  --  only show call descriptions)
       }
     }
 

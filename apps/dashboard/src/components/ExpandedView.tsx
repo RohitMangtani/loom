@@ -138,7 +138,7 @@ export function ExpandedView({
             </div>
           )}
 
-          {/* Chat input — always visible as fallback */}
+          {/* Chat input  --  always visible as fallback */}
           {canSend && (
             <div className="border-t border-[var(--border)] px-3 py-2 shrink-0">
               {stuck && buttons.length > 0 && (

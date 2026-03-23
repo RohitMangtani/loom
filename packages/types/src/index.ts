@@ -92,7 +92,7 @@ export interface MachineCapabilities {
   ramGb?: number;
   cpuCores?: number;
   diskFreeGb?: number;
-  /** Software — true means the tool is installed and accessible */
+  /** Software  --  true means the tool is installed and accessible */
   ffmpeg?: boolean;
   docker?: boolean;
   python?: boolean;
@@ -100,7 +100,7 @@ export interface MachineCapabilities {
   /** Python ML/AI libraries */
   pytorch?: boolean;
   tensorflow?: boolean;
-  /** Custom tags — user-defined capabilities (e.g., "vpn", "prod-access", "gpu-render") */
+  /** Custom tags  --  user-defined capabilities (e.g., "vpn", "prod-access", "gpu-render") */
   tags?: string[];
   /** OS platform */
   platform?: string;

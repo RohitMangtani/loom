@@ -49,7 +49,7 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-/** Swipeable review item — swipe right to dismiss */
+/** Swipeable review item  --  swipe right to dismiss */
 function SwipeableItem({
   review,
   onDismiss,
@@ -329,7 +329,7 @@ export function ReviewDrawer({
           </div>
         </div>
 
-        {/* Items — scrollable */}
+        {/* Items  --  scrollable */}
         <div
           className="flex-1 overflow-y-auto overscroll-contain"
           style={{ WebkitOverflowScrolling: "touch" }}

@@ -726,10 +726,10 @@ export class WsServer {
 
         // Auto-update: if satellite is running stale code, tell it to pull + restart.
         // The satellite handles satellite_update by running git pull --ff-only then
-        // process.exit(0) — its process supervisor restarts it with fresh code.
+        // process.exit(0)  --  its process supervisor restarts it with fresh code.
         const primaryVersion = getLocalVersion();
         if (satVersion !== "unknown" && primaryVersion !== "unknown" && satVersion !== primaryVersion) {
-          console.log(`[satellite] "${machineId}" version mismatch: satellite=${satVersion} primary=${primaryVersion} — sending auto-update`);
+          console.log(`[satellite] "${machineId}" version mismatch: satellite=${satVersion} primary=${primaryVersion}  --  sending auto-update`);
           this.sendToSatellite(sat, {
             type: "satellite_update",
             requestId: `autoupdate_${Date.now()}`,
@@ -805,7 +805,7 @@ export class WsServer {
             break;
           }
         }
-        // Command results — currently fire-and-forget, logged for debugging
+        // Command results  --  currently fire-and-forget, logged for debugging
         if (!(msg as Record<string, unknown>).ok) {
           console.log(`[satellite] Command failed on "${machineId}": ${msg.error || "unknown"}`);
         }
@@ -865,7 +865,7 @@ export class WsServer {
     // Apply overrides: after dashboard approves/selects a satellite worker,
     // suppress stale promptType from the satellite for a cooldown period.
     // But if the satellite reports the worker is actually working (no prompt),
-    // respect that — the agent has moved past the prompt.
+    // respect that  --  the agent has moved past the prompt.
     const now = Date.now();
     for (const w of incoming) {
       const key = `${machineId}:${w.id}`;
@@ -875,10 +875,10 @@ export class WsServer {
           // Expired
           this.satelliteOverrides.delete(key);
         } else if (w.status === "working" && !w.promptType) {
-          // Agent moved past the prompt and is working — clear override
+          // Agent moved past the prompt and is working  --  clear override
           this.satelliteOverrides.delete(key);
         } else if (w.status === "idle") {
-          // Agent finished its work — clear override, let idle through
+          // Agent finished its work  --  clear override, let idle through
           this.satelliteOverrides.delete(key);
         } else {
           w.promptType = null;
@@ -920,7 +920,7 @@ export class WsServer {
         const prefixedId = `${machineId}:${prevId}`;
         const requeued = this.telemetry.requeueSatelliteTask(prefixedId);
         if (requeued) {
-          console.log(`[satellite] Worker "${prefixedId}" died with task "${requeued.id}" — re-queued`);
+          console.log(`[satellite] Worker "${prefixedId}" died with task "${requeued.id}"  --  re-queued`);
         }
         const key = `${machineId}:${prevId}`;
         this.satelliteIdleCounts.delete(key);
@@ -993,7 +993,7 @@ export class WsServer {
 
   /** Handle a relayed API request from a satellite.
    *  Executes the same logic as the primary's REST API.
-   *  Full parity — every route the primary serves is available to satellites. */
+   *  Full parity  --  every route the primary serves is available to satellites. */
   private handleApiRelay(method: string, path: string, body: Record<string, unknown> | undefined, fromMachine: string): unknown {
     // Parse path and query, also extract path params (e.g. /api/reviews/:id)
     const [basePath, queryStr] = path.split("?");
@@ -1276,7 +1276,7 @@ export class WsServer {
   /** List available projects across all machines.
    *  Scans common directories for git repos on the primary, then merges
    *  satellite-reported projects. Projects identified by name, resolved
-   *  per-machine — "hive" maps to ~/factory/projects/hive on primary
+   *  per-machine  --  "hive" maps to ~/factory/projects/hive on primary
    *  and ~/hive on the MacBook Air. Dashboard and task queue use names. */
   private getProjects(): unknown {
     // name → { machines: { machineId: path } }
@@ -1594,7 +1594,7 @@ export class WsServer {
     const now = Date.now();
     for (const [id, sat] of this.satellites) {
       if (now - sat.lastSeen > 30_000) {
-        console.log(`[satellite] "${id}" stale (no report in ${Math.round((now - sat.lastSeen) / 1000)}s) — removing`);
+        console.log(`[satellite] "${id}" stale (no report in ${Math.round((now - sat.lastSeen) / 1000)}s)  --  removing`);
         // Clean up hysteresis state for this satellite's workers
         for (const w of sat.workers) {
           const key = `${id}:${w.id}`;
@@ -1612,7 +1612,7 @@ export class WsServer {
 
     // Satellite auto-pilot: auto-approve stuck satellite workers.
     // The primary's AutoPilot only handles local workers (telemetry.getAll()).
-    // Satellite workers report stuck status via satellite_workers — the primary
+    // Satellite workers report stuck status via satellite_workers  --  the primary
     // must forward the approval back via satellite_selection.
     for (const [machineId, sat] of this.satellites) {
       for (const w of sat.workers) {
@@ -1628,7 +1628,7 @@ export class WsServer {
         const waited = now - this.satelliteStuckFirstSeen.get(key)!;
         if (waited < 3_000) continue; // 3s grace for human intervention
 
-        // Grace expired — auto-approve via satellite_selection (option 0 = first option)
+        // Grace expired  --  auto-approve via satellite_selection (option 0 = first option)
         const parsed = this.parseSatelliteWorker(`${machineId}:${w.id}`);
         if (parsed) {
           this.sendToSatellite(sat, {
@@ -2000,7 +2000,7 @@ export class WsServer {
             if (satPath) {
               satProject = satPath;
             }
-            // If no mapping found, send as-is — satellite handles its own resolution
+            // If no mapping found, send as-is  --  satellite handles its own resolution
           }
           this.sendToSatellite(targetSat, {
             type: "satellite_spawn",
@@ -2061,7 +2061,7 @@ export class WsServer {
         }
 
         // Mark TTY as freshly spawned so discovery skips heuristic session
-        // file resolution — new agents start with blank chat history.
+        // file resolution  --  new agents start with blank chat history.
         if (termResult.tty) {
           this.telemetry.markSpawn(termResult.tty);
         }
@@ -2099,7 +2099,7 @@ export class WsServer {
           this.telemetry.registerDiscovered(placeholderId, placeholder);
 
           // Poll terminal content every 1.5s until discovery replaces the
-          // placeholder or 20s elapse — whichever comes first.
+          // placeholder or 20s elapse  --  whichever comes first.
           let polls = 0;
           const maxPolls = 13; // ~20 seconds
           const pollTimer = setInterval(() => {
@@ -2114,7 +2114,7 @@ export class WsServer {
 
             // Check terminal output for prompts or "not found" errors
             if (this.discovery) {
-              // Detect "command not found" — CLI isn't installed
+              // Detect "command not found"  --  CLI isn't installed
               const content = this.discovery.readTerminalContent(spawnTty);
               if (content) {
                 const tail = content.slice(-500);
@@ -2148,7 +2148,7 @@ export class WsServer {
                 this.telemetry.notifyExternal(current);
               } else if (current.promptType && polls >= 2) {
                 // Pre-set promptType (e.g. trust for Claude) but no prompt detected
-                // after 2+ polls (~3s) — folder was already trusted. Clear the prompt
+                // after 2+ polls (~3s)  --  folder was already trusted. Clear the prompt
                 // so the dashboard doesn't show a stale "Trust folder" button.
                 current.promptType = null;
                 current.promptMessage = undefined;
@@ -2208,7 +2208,7 @@ export class WsServer {
         // Try ProcessManager first (for managed/spawned workers)
         this.procMgr.kill(msg.workerId);
 
-        // SIGKILL immediately — process must be dead before we close the
+        // SIGKILL immediately  --  process must be dead before we close the
         // Terminal window, otherwise Terminal shows a confirmation dialog
         // that can only be dismissed on the physical machine.
         if (killPid) {
@@ -2280,7 +2280,7 @@ export class WsServer {
           contextWorkerIds?: string[];
           includeSenderContext?: boolean;
         };
-        // Async send — does NOT block the event loop. Dashboard stays responsive.
+        // Async send  --  does NOT block the event loop. Dashboard stays responsive.
         this.telemetry.sendToWorkerAsync(msg.workerId, msg.content, {
           source: "dashboard",
           queueIfBusy: false,
@@ -2571,7 +2571,7 @@ export class WsServer {
         this.telemetry.notifyExternal(promptWorker);
 
         // Send Enter keystroke through the async mutex so it serializes
-        // with message sends and other approvals — prevents focus races
+        // with message sends and other approvals  --  prevents focus races
         // when approving multiple trust prompts rapidly.
         const approveTty = promptWorker.tty;
         const approvePromise = this.terminal

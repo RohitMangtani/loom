@@ -96,7 +96,7 @@ export class Watchdog {
       let tracked = this.tracked.get(anomaly.type);
 
       if (!tracked) {
-        // New anomaly — start tracking
+        // New anomaly  --  start tracking
         tracked = { anomaly, attempts: 0, lastDispatched: 0, escalated: false };
         this.tracked.set(anomaly.type, tracked);
       } else {
@@ -192,8 +192,8 @@ export class Watchdog {
       this.saveAdaptive();
     }
 
-    console.log(`[watchdog] ESCALATED: ${tracked.anomaly.type} after ${tracked.attempts} attempts — shown on dashboard`);
-    this.notify("Hive Watchdog Escalation", `${tracked.anomaly.type} — ${tracked.attempts} failed auto-fix attempts`);
+    console.log(`[watchdog] ESCALATED: ${tracked.anomaly.type} after ${tracked.attempts} attempts  --  shown on dashboard`);
+    this.notify("Hive Watchdog Escalation", `${tracked.anomaly.type}  --  ${tracked.attempts} failed auto-fix attempts`);
   }
 
   /** Fire a macOS system notification. */
@@ -249,7 +249,7 @@ export class Watchdog {
         for (const entry of raw) this.adaptive.set(entry.baseType, entry);
       }
     } catch {
-      // Corrupt file — start fresh
+      // Corrupt file  --  start fresh
       this.adaptive.clear();
     }
   }
@@ -279,7 +279,7 @@ export class Watchdog {
     return true;
   }
 
-  /** Record how an anomaly resolved — self-resolved (FP) or agent-dispatched (TP). */
+  /** Record how an anomaly resolved  --  self-resolved (FP) or agent-dispatched (TP). */
   private recordResolution(type: string, tracked: TrackedAnomaly): void {
     const base = this.baseType(type);
     let entry = this.adaptive.get(base);
@@ -290,7 +290,7 @@ export class Watchdog {
     entry.lastSeen = Date.now();
 
     if (tracked.attempts === 0) {
-      // Self-resolved — no agent was dispatched → likely false positive
+      // Self-resolved  --  no agent was dispatched → likely false positive
       entry.consecutiveFP++;
       if (entry.consecutiveFP >= SUPPRESS_AFTER && !entry.suppressed) {
         entry.suppressed = true;
@@ -350,7 +350,7 @@ export class Watchdog {
     // Threshold: 30 (not 10). An active agent doing rapid-fire tasks (search,
     // check, think, respond) legitimately produces 10-20 transitions in 15min.
     // Real flapping (status oscillation with no real work) is 30+.
-    // Exclude "unknown → *" transitions — daemon startup/restart artifacts.
+    // Exclude "unknown → *" transitions  --  daemon startup/restart artifacts.
     const transitionsPerTty = new Map<string, number>();
     for (const e of recent) {
       if (e.from === "unknown") continue;

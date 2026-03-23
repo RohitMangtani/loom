@@ -55,7 +55,7 @@ export class WebPushManager {
     this.subs.push({ sub, addedAt: Date.now(), label });
     this.saveSubs();
     console.log(
-      `[web-push] Subscription added (${label || "unknown"}) — total: ${this.subs.length}`,
+      `[web-push] Subscription added (${label || "unknown"})  --  total: ${this.subs.length}`,
     );
   }
 
@@ -99,7 +99,7 @@ export class WebPushManager {
         } catch (err: unknown) {
           const status = (err as { statusCode?: number }).statusCode;
           if (status === 404 || status === 410) {
-            // Subscription expired or unsubscribed — remove it
+            // Subscription expired or unsubscribed  --  remove it
             expired.push(sub.endpoint);
           }
           failed++;
@@ -123,7 +123,7 @@ export class WebPushManager {
       try {
         return JSON.parse(readFileSync(VAPID_PATH, "utf-8"));
       } catch {
-        // Corrupted — regenerate
+        // Corrupted  --  regenerate
       }
     }
 
@@ -143,7 +143,7 @@ export class WebPushManager {
         return JSON.parse(readFileSync(SUBS_PATH, "utf-8"));
       }
     } catch {
-      /* corrupted — start fresh */
+      /* corrupted  --  start fresh */
     }
     return [];
   }

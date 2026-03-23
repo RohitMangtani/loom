@@ -9,7 +9,7 @@ const HOME = process.env.HOME || `/Users/${process.env.USER}`;
 const CONFIG_PATH = join(HOME, ".hive", "notifications.json");
 const DEFAULT_COOLDOWN = 60_000;
 const DEFAULT_ERROR_THRESHOLD = 3;
-// Shorter cooldown for push — user wants to know each time an agent finishes
+// Shorter cooldown for push  --  user wants to know each time an agent finishes
 const PUSH_COOLDOWN = 15_000;
 
 interface NotificationConfig {
@@ -126,7 +126,7 @@ export class NotificationManager {
     const project = state.projectName || "unknown";
     const action = state.stuckMessage?.split("\n")[0]?.slice(0, 80) || state.currentAction || "Needs attention";
     const title = `${slot} stuck${shortMachine ? ` (${shortMachine})` : ""}`;
-    const body = `${project} — ${action}`;
+    const body = `${project}  --  ${action}`;
 
     try {
       const soundClause = this.config.sound ? ' sound name "Funk"' : "";
@@ -155,7 +155,7 @@ export class NotificationManager {
     const project = state.projectName || "unknown";
     const action = state.lastAction?.slice(0, 100) || "Task complete";
     const title = `${slot} done${shortMachine ? ` (${shortMachine})` : ""}`;
-    const body = `${project} — ${action}`;
+    const body = `${project}  --  ${action}`;
 
     this.pushMgr
       .sendToAll(title, body, {

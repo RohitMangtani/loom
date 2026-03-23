@@ -3,7 +3,7 @@
  *
  * Logs every tool call, detects conflicts between agents, and computes
  * hourly coordination scores. Append-only JSONL output to ~/.hive/collector/.
- * Read-only — never blocks or modifies agent behavior.
+ * Read-only  --  never blocks or modifies agent behavior.
  */
 
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from "fs";
@@ -15,13 +15,13 @@ const HOME = process.env.HOME || `/Users/${process.env.USER}`;
 const COLLECTOR_DIR = join(HOME, ".hive", "collector");
 
 // Time windows
-const WRITE_WRITE_WINDOW = 5 * 60 * 1000;   // 5 min — write-write conflict
-const WRITE_WRITE_CRITICAL = 60 * 1000;      // 60s — escalate to critical
-const READ_WRITE_WINDOW = 5 * 60 * 1000;     // 5 min — read-write staleness
-const GIT_CONCURRENT_WINDOW = 2 * 60 * 1000; // 2 min — concurrent push
-const STALE_EDIT_WINDOW = 10 * 60 * 1000;    // 10 min — edit failure correlation
-const ANALYSIS_WINDOW = 30 * 60 * 1000;      // 30 min — in-memory retention
-const HOURLY_INTERVAL = 60 * 60 * 1000;      // 1 hr — scoring interval
+const WRITE_WRITE_WINDOW = 5 * 60 * 1000;   // 5 min  --  write-write conflict
+const WRITE_WRITE_CRITICAL = 60 * 1000;      // 60s  --  escalate to critical
+const READ_WRITE_WINDOW = 5 * 60 * 1000;     // 5 min  --  read-write staleness
+const GIT_CONCURRENT_WINDOW = 2 * 60 * 1000; // 2 min  --  concurrent push
+const STALE_EDIT_WINDOW = 10 * 60 * 1000;    // 10 min  --  edit failure correlation
+const ANALYSIS_WINDOW = 30 * 60 * 1000;      // 30 min  --  in-memory retention
+const HOURLY_INTERVAL = 60 * 60 * 1000;      // 1 hr  --  scoring interval
 
 // ── Event types ──────────────────────────────────────────────────────────
 
@@ -410,7 +410,7 @@ export class Collector {
               { workerId, action: "edit_failed", ts: Date.now() },
               { workerId: otherWrite.workerId, action: "write", ts: otherWrite.ts },
             ],
-            description: `${workerId}'s edit to ${tail(filePath)} failed — ${otherWrite.workerId} modified it ${Math.round((Date.now() - otherWrite.ts) / 1000)}s ago`,
+            description: `${workerId}'s edit to ${tail(filePath)} failed  --  ${otherWrite.workerId} modified it ${Math.round((Date.now() - otherWrite.ts) / 1000)}s ago`,
             wouldHaveBlocked: true,
           });
           relatedConflict = id;
@@ -451,7 +451,7 @@ export class Collector {
 
     const hourly: HourlyScore = {
       ts: now,
-      window: `${windowStart} — ${windowEnd}`,
+      window: `${windowStart}  --  ${windowEnd}`,
       totalToolCalls: this.hourlyToolCalls,
       totalFileOps: this.hourlyFileOps,
       conflictsDetected: this.hourlyConflicts,

@@ -167,7 +167,7 @@ export default function Home() {
 
   const numbered = useStableNumbering(workers);
 
-  /** Group agents by machine — local first, then each satellite hostname */
+  /** Group agents by machine  --  local first, then each satellite hostname */
   const machineGroups = useMemo(() => {
     const groups: { machine: string | undefined; agents: typeof numbered }[] = [];
     const byMachine = new Map<string | undefined, typeof numbered>();
@@ -274,7 +274,7 @@ export default function Home() {
               &#128275;
             </button>
           )}
-          {/* Push notification bell — right side, next to review button */}
+          {/* Push notification bell  --  right side, next to review button */}
           {pushState !== "unsupported" && pushState !== "subscribed" && (
             <button
               type="button"
@@ -299,7 +299,7 @@ export default function Home() {
               </svg>
             </span>
           )}
-          {/* Review queue button — right side */}
+          {/* Review queue button  --  right side */}
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setShowReviews(true); }}
@@ -403,7 +403,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Body — vertical tile stack grouped by machine, compresses when chat is open */}
+      {/* Body  --  vertical tile stack grouped by machine, compresses when chat is open */}
       {numbered.length > 0 ? (
         <div
           className={`min-h-0 flex flex-col ${!isViewer && selectedEntry ? "gap-1.5 p-2 sm:p-3" : "gap-3 p-4 sm:p-6"} transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] ${!isViewer && selectedEntry ? "shrink-0" : "flex-1"}`}
@@ -459,7 +459,7 @@ export default function Home() {
       )}
 
 
-      {/* Inline chat panel — admin only */}
+      {/* Inline chat panel  --  admin only */}
       {!isViewer && selectedEntry && (
         <ChatPanel
           key={selectedEntry.worker.id}

@@ -69,7 +69,7 @@ if (satFlagIdx !== -1) {
   console.log(`  Primary: ${primaryUrl}`);
   console.log("  Local hooks: http://127.0.0.1:3001");
 
-  // Prevent crashes from unhandled errors — log and continue
+  // Prevent crashes from unhandled errors  --  log and continue
   process.on("uncaughtException", (err) => {
     console.log(`[satellite] Uncaught exception: ${err.message}`);
   });
@@ -93,11 +93,11 @@ if (satFlagIdx !== -1) {
   // ── Primary mode (default) ──────────────────────────────────────────
 
   if (osPlatform() === "darwin") {
-    // Probe Automation permission early — macOS shows the approval dialog on first
+    // Probe Automation permission early  --  macOS shows the approval dialog on first
     // use, so we trigger it at startup rather than waiting for the user to click X.
     execFile("/usr/bin/osascript", ["-e",
       'tell application "Terminal" to get name of first window'
-    ], { timeout: 5000 }, () => { /* result doesn't matter — the dialog is the point */ });
+    ], { timeout: 5000 }, () => { /* result doesn't matter  --  the dialog is the point */ });
   }
 
   const token = loadOrCreateToken();

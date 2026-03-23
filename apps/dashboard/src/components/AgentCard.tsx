@@ -140,7 +140,7 @@ export function quickButtons(w: WorkerState): { label: string; value: string; in
     });
   }
 
-  // EnterPlanMode / ExitPlanMode — just approve
+  // EnterPlanMode / ExitPlanMode  --  just approve
   if (isSelection) {
     return [{ label: "Approve", value: "0", index: 0 }];
   }
@@ -155,7 +155,7 @@ export function quickButtons(w: WorkerState): { label: string; value: string; in
 /**
  * Suggest next-step actions for idle agents based on their last action.
  * Pattern-matches on lastAction (set by daemon describeAction).
- * No AI call — pure string matching.
+ * No AI call  --  pure string matching.
  */
 function idleSuggestions(w: WorkerState): { label: string; message: string }[] {
   const last = (w.lastAction || "").toLowerCase();
@@ -200,7 +200,7 @@ function idleSuggestions(w: WorkerState): { label: string; message: string }[] {
     ];
   }
 
-  // Default — no specific context
+  // Default  --  no specific context
   return [
     { label: "Status", message: "What's the current state of this project? What needs to be done?" },
     { label: "Continue", message: "Continue where you left off" },
@@ -312,7 +312,7 @@ export function AgentCard({
         )}
       </div>
 
-      {/* Project name omitted — tiles show only agent + description */}
+      {/* Project name omitted  --  tiles show only agent + description */}
 
       {hasPrompt ? (
         <>

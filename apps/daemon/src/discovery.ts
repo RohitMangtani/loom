@@ -7,7 +7,7 @@ import type { WorkerState } from "./types.js";
 import { readTail, describeBashCommand } from "./utils.js";
 import type { ProcessDiscoverer, TerminalIO } from "./platform/interfaces.js";
 
-/** Quadrant Audit — logs every status transition with full decision context */
+/** Quadrant Audit  --  logs every status transition with full decision context */
 interface AuditEntry {
   ts: string;
   tty: string;
@@ -79,18 +79,18 @@ export class ProcessDiscovery {
   // Stores the last known FD 1 offset per PID. If the offset increases
   // between scans, the process is writing to the terminal = working.
   private prevPtyOffset = new Map<number, number>();
-  // Per-tick caches — cleared at start of each scan() call.
+  // Per-tick caches  --  cleared at start of each scan() call.
   // Prevents redundant execFileSync calls (ps, lsof) when the same PID
   // is checked multiple times in one tick (idleConfirmed, idle→working, cooldown).
   private tickCpuCache = new Map<number, number>();
   private tickPtyCache = new Map<number, number>();
-  // Codex session file cache — persists across ticks. Only re-scanned if
+  // Codex session file cache  --  persists across ticks. Only re-scanned if
   // not found yet (null) or every 30s for staleness.
   private codexSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
-  // OpenClaw session file cache — same semantics as Codex cache.
+  // OpenClaw session file cache  --  same semantics as Codex cache.
   private openclawSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
   private geminiSessionCache = new Map<number, { file: string | null; checkedAt: number }>();
-  // Generic session file cache for custom agents — keyed by "model:pid".
+  // Generic session file cache for custom agents  --  keyed by "model:pid".
   private customSessionCache = new Map<string, { file: string | null; checkedAt: number }>();
 
   /** Custom agent definitions loaded from ~/.hive/agents.json */
@@ -113,7 +113,7 @@ export class ProcessDiscovery {
         console.log(`[discovery] Loaded ${ProcessDiscovery.customAgents.length} custom agent(s) from agents.json`);
       }
     } catch {
-      // File doesn't exist or invalid JSON — fine, use built-ins only
+      // File doesn't exist or invalid JSON  --  fine, use built-ins only
     }
   }
 
@@ -131,7 +131,7 @@ export class ProcessDiscovery {
   // Track TTYs we've already detected prompts for (avoid repeated AppleScript calls)
   private promptCheckedTtys = new Map<string, { checkedAt: number; result: "trust" | "sandbox" | null }>();
   // Suppress prompt detection after dashboard approval (prevents re-detecting stale prompt text).
-  // Permanent per TTY — once approved, the terminal buffer retains stale prompt text
+  // Permanent per TTY  --  once approved, the terminal buffer retains stale prompt text
   // indefinitely, so time-based expiry doesn't work. TTYs are unique per terminal tab,
   // so a new agent in a new tab gets a fresh TTY and won't be affected.
   private promptSuppressed = new Set<string>(); // tty
@@ -160,7 +160,7 @@ export class ProcessDiscovery {
       return this.terminal.readContent(tty);
     }
     const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
-    // Use "history" instead of "contents" — the contents property returns
+    // Use "history" instead of "contents"  --  the contents property returns
     // a tab reference string on modern macOS instead of the visible text.
     // "history" returns the full scrollback; we trim to the tail later.
     const script = `
@@ -192,7 +192,7 @@ end tell
    * Returns the prompt type and a human-readable message, or null if no prompt detected.
    */
   detectPrompt(tty: string): { type: "trust" | "sandbox"; message: string; content: string } | null {
-    // Suppressed: dashboard approved this prompt — permanent per TTY
+    // Suppressed: dashboard approved this prompt  --  permanent per TTY
     if (this.promptSuppressed.has(tty)) return null;
 
     // Rate-limit: don't re-check the same TTY within 3 seconds (aligned
@@ -209,7 +209,7 @@ end tell
       return null;
     }
 
-    // Only check the last ~500 chars of terminal history — if the prompt
+    // Only check the last ~500 chars of terminal history  --  if the prompt
     // text appears near the end, the agent is currently waiting at it.
     // Matching on full history would false-positive on established agents
     // that passed through the prompt minutes/hours ago.
@@ -291,7 +291,7 @@ end tell
     try {
       appendFileSync(AUDIT_LOG_PATH, JSON.stringify(entry) + "\n");
     } catch { /* non-critical */ }
-    console.log(`[audit] ${tty}: ${from} → ${to} — ${reason}`);
+    console.log(`[audit] ${tty}: ${from} → ${to}  --  ${reason}`);
   }
 
   /** Check if status changed and log the transition */
@@ -358,7 +358,7 @@ end tell
       }
 
       // If register-tty has pinned this worker's session (ground truth from identity.sh),
-      // skip heuristic session file resolution — the pin is authoritative.
+      // skip heuristic session file resolution  --  the pin is authoritative.
       const pinnedSession = this.telemetry.getPinnedSessionForWorker(id);
       let sessionFile: string | null = null;
 
@@ -380,7 +380,7 @@ end tell
         // Overrides all heuristics because it matches TTY↔file using actual content.
         // Skip for non-Claude workers: markers in ~/.hive/sessions/ are written by Claude's
         // identity.sh hook, which never fires for Codex or OpenClaw. Any marker found for
-        // a non-Claude worker's TTY is stale from a previous Claude session — using it
+        // a non-Claude worker's TTY is stale from a previous Claude session  --  using it
         // would map the wrong chat history (the old Claude session instead of the current one).
         // Also skip for fresh spawns: marker may be stale from the previous session on this TTY.
         if (proc.tty && proc.model === "claude" && !isFreshSpawn) {
@@ -393,14 +393,14 @@ end tell
         if (!sessionFile) {
           // Register session file with streamer for chat history.
           // Priority: lsof JSONL path > session ID match > birthtime match.
-          // Never use "most recently modified in cwd dir" — when multiple workers
+          // Never use "most recently modified in cwd dir"  --  when multiple workers
           // share the same cwd (e.g. home dir), it picks the wrong worker's file.
-          sessionFile = proc.jsonlFile; // Direct from lsof — most reliable
+          sessionFile = proc.jsonlFile; // Direct from lsof  --  most reliable
 
           // For non-Claude workers, search their native session dirs BEFORE Claude
           // heuristics. These agents use appendFileSync (open+close instantly) so lsof
           // rarely catches the JSONL handle. Without this, Claude heuristics search
-          // .claude/projects/ and can grab a stale JSONL — causing cross-contamination.
+          // .claude/projects/ and can grab a stale JSONL  --  causing cross-contamination.
           if (!sessionFile && proc.model === "codex") {
             sessionFile = this.findCodexSessionFile(proc.pid, proc.startedAt);
           }
@@ -416,9 +416,9 @@ end tell
           }
 
           // Claude-specific heuristics: session ID match and birthtime fallback.
-          // Skip for non-Claude models — these search .claude/projects/ and can
+          // Skip for non-Claude models  --  these search .claude/projects/ and can
           // grab stale Claude JSONL files, cross-contaminating the session mapping.
-          // Skip birthtime fallback for fresh spawns — it picks up old JSONL files.
+          // Skip birthtime fallback for fresh spawns  --  it picks up old JSONL files.
           if (!sessionFile && (!proc.model || proc.model === "claude")) {
             if (proc.sessionIds.length > 0) {
               sessionFile = this.streamer.findSessionFile(proc.sessionIds);
@@ -428,7 +428,7 @@ end tell
               }
             }
             // Fallback: match JSONL by creation time closest to process start.
-            // Skip for fresh spawns — birthtime heuristic grabs stale files.
+            // Skip for fresh spawns  --  birthtime heuristic grabs stale files.
             if (!sessionFile && !isFreshSpawn) {
               sessionFile = this.findSessionFileByStartTime(proc.cwd, proc.startedAt, claimedFiles);
             }
@@ -438,8 +438,8 @@ end tell
         // Stale-file recovery: when context compaction creates a new session,
         // the old JSONL stops being written to. If the cached file is stale
         // (>2min), search for a successor JSONL in the same directory.
-        // Only for Claude — non-Claude models have their own session file finders.
-        // Skip for fresh spawns — no stale file to recover from.
+        // Only for Claude  --  non-Claude models have their own session file finders.
+        // Skip for fresh spawns  --  no stale file to recover from.
         const effectiveFile = sessionFile || this.streamer.getSessionFile(id);
         if (effectiveFile && (!proc.model || proc.model === "claude") && !isFreshSpawn) {
           try {
@@ -453,7 +453,7 @@ end tell
       }
 
       // Reject heuristic session files that are already mapped to another live
-      // worker in the streamer. claimedFiles only tracks this scan cycle — if a
+      // worker in the streamer. claimedFiles only tracks this scan cycle  --  if a
       // pinned worker's file wasn't added to claimedFiles (e.g., getSessionFile
       // returned null), the heuristic can still grab it. This guard catches that.
       if (sessionFile && !pinnedSession && this.streamer.isFileMappedToOther(sessionFile, id)) {
@@ -469,7 +469,7 @@ end tell
         // the moment of the scan (appendFileSync opens+closes instantly).
         // Many workers have 0 lsof-derived session IDs. But the JSONL filename
         // IS the session UUID that Claude Code sends in hook payloads.
-        // Registering it here ensures hooks route by session ID — not the
+        // Registering it here ensures hooks route by session ID  --  not the
         // ambiguous CWD fallback that causes cross-contamination.
         const fileUuid = basename(sessionFile, ".jsonl");
         if (/^[0-9a-f-]{36}$/.test(fileUuid)) {
@@ -487,7 +487,7 @@ end tell
           }
 
           // Check for pre-session prompts on workers with no session file yet.
-          // Once a session file appears, clear the prompt state — the CLI has
+          // Once a session file appears, clear the prompt state  --  the CLI has
           // passed the trust/sandbox prompts and started a real session.
           const cachedSessionFile = this.streamer.getSessionFile(id);
           if (existing.promptType && cachedSessionFile) {
@@ -498,18 +498,18 @@ end tell
             // never shows the approval button.
             const holdExpiry = this.promptHoldUntil.get(id);
             if (holdExpiry && Date.now() < holdExpiry) {
-              // Still in hold period — keep promptType, skip clear logic.
+              // Still in hold period  --  keep promptType, skip clear logic.
               // But if hooks arrived (agent is past the prompt), clear anyway.
               const lastHook = this.telemetry.getLastHookTime(id);
               if (!lastHook) {
                 this.telemetry.notifyExternal(existing);
                 continue;
               }
-              // Hooks arrived — agent is past the prompt, fall through to clear
+              // Hooks arrived  --  agent is past the prompt, fall through to clear
               this.promptHoldUntil.delete(id);
             }
             // If the agent is young (<10min), verify the prompt is actually
-            // gone before clearing. Older agents always clear — their
+            // gone before clearing. Older agents always clear  --  their
             // terminal history contains stale prompt text.
             if (proc.tty && Date.now() - proc.startedAt < 600_000) {
               const stillPrompt = this.detectPrompt(proc.tty);
@@ -524,7 +524,7 @@ end tell
             this.promptHoldUntil.delete(id);
             this.clearPromptCache(proc.tty);
           } else if (!cachedSessionFile && proc.tty && Date.now() - proc.startedAt < 120_000) {
-            // Still no session — re-check for prompts and capture terminal preview
+            // Still no session  --  re-check for prompts and capture terminal preview
             const prompt = this.detectPrompt(proc.tty);
             if (prompt) {
               existing.status = "waiting";
@@ -535,9 +535,9 @@ end tell
               this.telemetry.notifyExternal(existing);
               continue;
             }
-            // No known prompt — leave tile clean (no raw terminal noise)
+            // No known prompt  --  leave tile clean (no raw terminal noise)
           } else if (proc.tty && existing.status === "idle" && !existing.promptType && Date.now() - proc.startedAt < 600_000) {
-            // Young idle agent — check for trust/sandbox prompts.
+            // Young idle agent  --  check for trust/sandbox prompts.
             // Skip if hooks have been received: the agent is established and
             // any prompt text in the terminal is stale from initialization.
             const lastHook = this.telemetry.getLastHookTime(id);
@@ -555,7 +555,7 @@ end tell
             }
           }
 
-          // Use streamer's cached session file — guaranteed to be THIS worker's
+          // Use streamer's cached session file  --  guaranteed to be THIS worker's
           // file. Never use findBestJsonlFile for status detection; its cwd
           // fallback can pick another worker's file (cross-contamination).
           const cachedPath = cachedSessionFile;
@@ -564,7 +564,7 @@ end tell
             try { cachedMtime = statSync(cachedPath).mtimeMs; } catch { /* file gone */ }
           }
 
-          // LAYER 1: JSONL mtime heartbeat — refresh lastActionAt so
+          // LAYER 1: JSONL mtime heartbeat  --  refresh lastActionAt so
           // telemetry.tick() doesn't interfere while discovery is active.
           if (cachedMtime > 0 && Date.now() - cachedMtime < 30_000) {
             existing.lastActionAt = Date.now();
@@ -591,7 +591,7 @@ end tell
           const hasNativeHooks = !existing.model || existing.model === "claude";
 
           if (hasNativeHooks && hookAge < 5_000) {
-            // Hooks are live (<5s) — trust hook-set status, but apply hysteresis
+            // Hooks are live (<5s)  --  trust hook-set status, but apply hysteresis
             // for working→idle transitions to prevent flapping (58 transitions/15min).
             if (existing.status === "working") {
               this.lastConfirmedWorking.set(id, Date.now());
@@ -612,11 +612,11 @@ end tell
                 this.checkTransition(id, tty, "idle", `hooks fresh (${Math.round(hookAge)}ms)`, auditCtx);
               }
             } else {
-              // stuck, waiting — pass through
+              // stuck, waiting  --  pass through
               this.checkTransition(id, tty, existing.status, `hooks fresh (${Math.round(hookAge)}ms)`, auditCtx);
             }
           } else if (hasNativeHooks && hookAge < 15_000) {
-            // Hooks recent (<15s) — trust hook state for stuck/toolInFlight
+            // Hooks recent (<15s)  --  trust hook state for stuck/toolInFlight
             if (existing.status === "stuck") {
               this.checkTransition(id, tty, "stuck", "hook-trusted stuck", auditCtx);
             } else if (this.telemetry.isToolInFlight(id)) {
@@ -627,17 +627,17 @@ end tell
               this.runJsonlAnalysis(id, existing, tty, cachedPath, cachedMtime, hookAge, auditCtx);
             }
           } else {
-            // Hooks stale (>15s) or non-hook model — session/CPU analysis is the authority.
+            // Hooks stale (>15s) or non-hook model  --  session/CPU analysis is the authority.
             // The Agent tool spawns a subagent that runs for minutes. During this time,
             // the parent process goes completely silent (no hooks, no JSONL writes).
-            // toolInFlight persists from the PreToolUse hook — trust it up to 10 minutes.
+            // toolInFlight persists from the PreToolUse hook  --  trust it up to 10 minutes.
             const inflight = this.telemetry.getToolInFlight(id);
             if (inflight && Date.now() - inflight.since < 600_000) {
               existing.status = "working";
               this.lastConfirmedWorking.set(id, Date.now());
               this.checkTransition(id, tty, "working", `toolInFlight: ${inflight.tool} (${Math.round((Date.now() - inflight.since) / 1000)}s)`, auditCtx);
             } else {
-              // No tool in flight (or timed out) — JSONL analysis is the authority
+              // No tool in flight (or timed out)  --  JSONL analysis is the authority
               this.runJsonlAnalysis(id, existing, tty, cachedPath, cachedMtime, hookAge, auditCtx);
             }
           }
@@ -647,13 +647,13 @@ end tell
         continue;
       }
 
-      // New process — read JSONL for initial status
+      // New process  --  read JSONL for initial status
       const ctx = this.readSessionContext(proc.sessionIds, proc.cwd);
 
       // If the process just started (< 30s ago) and the JSONL analysis returned
       // low-confidence "working" (typically from the no-pattern fallback on a
       // fresh file with only system/startup noise), override to idle. The agent
-      // is sitting at its idle prompt waiting for the first message — not working.
+      // is sitting at its idle prompt waiting for the first message  --  not working.
       const processAge = Date.now() - proc.startedAt;
       let initialStatus = ctx.status;
       if (initialStatus === "working" && !ctx.highConfidence && processAge < 30_000) {
@@ -664,7 +664,7 @@ end tell
       // initialization writes (system prompt, context) create high-confidence
       // "user at tail" patterns that bypass the processAge guard above.
       // The spawn grace period (60s) is cleared once the identity hook fires,
-      // which only happens on real user input — not initialization.
+      // which only happens on real user input  --  not initialization.
       if (initialStatus === "working" && this.telemetry.isRecentSpawn(proc.tty)) {
         initialStatus = "idle";
       }
@@ -689,7 +689,7 @@ end tell
 
       // Clean up any spawn placeholder for this TTY and register the real worker
       // as a single atomic operation. Using silentRemoveWorker + registerDiscoveredAtomic
-      // ensures only ONE "workers" broadcast goes out with the final state — no
+      // ensures only ONE "workers" broadcast goes out with the final state  --  no
       // intermediate frame where both placeholder and real worker coexist.
       let replacedPlaceholder = false;
       if (proc.tty) {
@@ -698,7 +698,7 @@ end tell
         if (placeholder) {
           // Transfer prompt/preview state from placeholder to real worker.
           // Set a hold timer so the session-file-clear logic doesn't immediately
-          // wipe the promptType — readTerminalContent() is unreliable in the
+          // wipe the promptType  --  readTerminalContent() is unreliable in the
           // first seconds of a new terminal tab.
           if (placeholder.promptType && !worker.promptType) {
             worker.promptType = placeholder.promptType;
@@ -710,7 +710,7 @@ end tell
           } else if (placeholder.terminalPreview && !worker.terminalPreview) {
             worker.terminalPreview = placeholder.terminalPreview;
           } else {
-            // Freshly spawned agent — start as idle (red) until it receives work.
+            // Freshly spawned agent  --  start as idle (red) until it receives work.
             worker.status = "idle";
             worker.currentAction = null;
           }
@@ -721,7 +721,7 @@ end tell
       }
 
       // Register real worker. If replacing a placeholder, use atomic variant
-      // that suppresses the individual worker_update notification — the full
+      // that suppresses the individual worker_update notification  --  the full
       // workers list broadcast below is the only message the dashboard sees.
       if (replacedPlaceholder) {
         this.telemetry.registerDiscoveredSilent(id, worker);
@@ -743,7 +743,7 @@ end tell
           if (mtime < proc.startedAt) {
             unlinkSync(markerPath);
           }
-        } catch { /* marker doesn't exist — fine */ }
+        } catch { /* marker doesn't exist  --  fine */ }
       }
 
       // If the worker is idle at discovery (e.g. daemon restart while agents
@@ -765,7 +765,7 @@ end tell
           worker.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
         }
       } else if (proc.tty && sessionFile && initialStatus === "idle" && processAge < 180_000) {
-        // Young idle agent with session — check for trust prompt (session
+        // Young idle agent with session  --  check for trust prompt (session
         // file may be from state store while terminal shows a prompt).
         // Only for agents < 3min old to avoid matching stale prompt text.
         const prompt = this.detectPrompt(proc.tty);
@@ -779,7 +779,7 @@ end tell
       }
     }
 
-    // Remove dead processes — both discovered and state-restored workers.
+    // Remove dead processes  --  both discovered and state-restored workers.
     // State-restored workers (from importState) aren't in discoveredPids,
     // so we also scan the telemetry map for any discovered_* workers whose
     // PIDs are no longer in the ps output.
@@ -804,7 +804,7 @@ end tell
    * Called when hooks are stale/absent and we need ground truth.
    *
    * Philosophy: GREEN until proven RED.
-   *   - tool_use at tail = working (regardless of file age — tools can run hours)
+   *   - tool_use at tail = working (regardless of file age  --  tools can run hours)
    *   - tool_result/user at tail = thinking (generous 5min threshold for subagents)
    *   - assistant-text at tail + file fresh (<30s) = mid-stream (working)
    *   - assistant-text at tail + file stale (>30s) = likely idle
@@ -823,7 +823,7 @@ end tell
       // No cached JSONL path. For non-Claude workers, try finding their session file
       // before falling back to CPU-only. For Claude, fresh hooks are usually enough
       // to bridge startup/compaction gaps, but once hooks go stale we must not keep
-      // a stale "working" state forever — fall back to CPU analysis instead.
+      // a stale "working" state forever  --  fall back to CPU analysis instead.
       if (existing.model && existing.model !== "claude") {
         const codexFile = existing.model === "openclaw"
           ? this.findOpenClawSessionFile(existing.pid, existing.startedAt)
@@ -849,7 +849,7 @@ end tell
       return;
     }
 
-    // Gemini JSON session files need a dedicated parser — they're single JSON
+    // Gemini JSON session files need a dedicated parser  --  they're single JSON
     // objects with a messages array, not line-delimited JSONL.
     if (cachedPath.endsWith(".json")) {
       this.runGeminiSessionAnalysis(id, existing, tty, cachedPath, hookAge, auditCtx);
@@ -863,12 +863,12 @@ end tell
     // to this worker. When multiple workers share the same project directory
     // (e.g., both at ~/), session file resolution can accidentally map one
     // worker's active JSONL to another. If the file's UUID is registered to a
-    // different worker, don't trust the JSONL analysis — fall through to CPU.
+    // different worker, don't trust the JSONL analysis  --  fall through to CPU.
     const fileUuid = basename(cachedPath).replace(/\.jsonl$/, "");
     if (fileUuid && this.telemetry.isSessionOwnedByOther(fileUuid, id)) {
-      this.telemetry.recordSignal(id, "jsonl_analysis", `session file ${fileUuid.slice(0, 8)} owned by another worker — skipping JSONL`);
+      this.telemetry.recordSignal(id, "jsonl_analysis", `session file ${fileUuid.slice(0, 8)} owned by another worker  --  skipping JSONL`);
       this.checkTransition(id, tty, existing.status, `JSONL file cross-contamination detected (${fileUuid.slice(0, 8)} belongs to another worker)`, tailCtx);
-      // Don't clear subscriptions — just invalidate the cached path so
+      // Don't clear subscriptions  --  just invalidate the cached path so
       // discovery re-resolves on the next scan via findNewerSessionFile.
       this.streamer.clearSessionPath(id);
       return;
@@ -885,11 +885,11 @@ end tell
     }
 
     // idleConfirmed = idle_prompt hook fired OR hysteresis confirmed idle.
-    // Definitive RED — unless we know new input was just sent OR the process
+    // Definitive RED  --  unless we know new input was just sent OR the process
     // is actively consuming CPU/PTY (agent thinking without tool calls).
     const isIdleConfirmed = this.telemetry.isIdleConfirmed(id);
     if (isIdleConfirmed) {
-      // Don't enforce idleConfirmed if input was sent recently — the agent
+      // Don't enforce idleConfirmed if input was sent recently  --  the agent
       // is about to receive new work. But if the worker just definitively ended
       // the session or reached an idle prompt, trust that idle signal until we
       // see real working evidence. Otherwise stale terminal/JSONL noise can
@@ -900,7 +900,7 @@ end tell
         existing.lastAction === "Session ended" ||
         existing.lastAction === "Waiting for input";
       // Also override if JSONL tail shows high-confidence working (e.g., user
-      // typed directly in Terminal — no markInputSent, but JSONL has real user
+      // typed directly in Terminal  --  no markInputSent, but JSONL has real user
       // input at tail). Safe: highConfidence=false for noise, so phantom green
       // can't sneak through.
       // Extra guard: even high-confidence JSONL can't override idleConfirmed
@@ -912,7 +912,7 @@ end tell
       // LAYER 8 override: CPU activity can break out of idleConfirmed.
       // This catches the case where an idle agent starts thinking (high CPU)
       // but no hooks fire because it hasn't called any tools yet.
-      // PTY alone is NOT sufficient — user typing echoes ~900B to PTY stdout,
+      // PTY alone is NOT sufficient  --  user typing echoes ~900B to PTY stdout,
       // indistinguishable from agent output.
       const cpuPct = this.getCpuForPid(existing.pid);
       const ptyDelta = this.getPtyOutputDelta(existing.pid);
@@ -935,12 +935,12 @@ end tell
         return;
       }
       if (cpuOverride) {
-        // CPU/PTY active — clear idleConfirmed and fall through to normal analysis
+        // CPU/PTY active  --  clear idleConfirmed and fall through to normal analysis
         this.telemetry.setIdleConfirmed(id, false);
         const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
         this.telemetry.recordSignal(id, cpuPct > 25 ? "cpu_wakeup" : "pty_wakeup", signal);
       }
-      // Recent input / JSONL / CPU overrides idleConfirmed — fall through to normal analysis
+      // Recent input / JSONL / CPU overrides idleConfirmed  --  fall through to normal analysis
     }
 
     // Guard: External input sent recently, JSONL hasn't caught up
@@ -951,7 +951,7 @@ end tell
     }
 
     if (ctx.status === "working") {
-      // FIX 1 — Corroboration guard: when the agent is stable-idle and JSONL
+      // FIX 1  --  Corroboration guard: when the agent is stable-idle and JSONL
       // returns a low-confidence working signal (noise-driven "Thinking...",
       // no-pattern fallback), require corroboration from hooks or input_sent
       // before flipping green. Prevents phantom green flicker.
@@ -964,7 +964,7 @@ end tell
           return;
         }
       }
-      // FIX 1b — Spawn grace guard: during the 60s after markSpawn, even
+      // FIX 1b  --  Spawn grace guard: during the 60s after markSpawn, even
       // high-confidence JSONL "working" is from initialization (system prompt,
       // context loading), not real user work. Suppress unless there's explicit
       // input or fresh hooks proving the agent received a real task.
@@ -983,7 +983,7 @@ end tell
       this.consecutiveActiveChecks.set(id, 0); // reset CPU hysteresis
       // Only set lastConfirmedWorking from high-confidence signals (tool_use at
       // tail, real hooks). Low-confidence signals (mid-stream heuristic, noise-
-      // driven) must NOT set the cooldown timer — otherwise a 1s "ok" response
+      // driven) must NOT set the cooldown timer  --  otherwise a 1s "ok" response
       // keeps the agent green for 25s because the mid-stream check touched it.
       if (ctx.highConfidence) {
         this.lastConfirmedWorking.set(id, Date.now());
@@ -992,7 +992,7 @@ end tell
       existing.currentAction = ctx.latestAction || "Thinking...";
       existing.lastAction = ctx.latestAction || existing.lastAction;
       existing.lastActionAt = Date.now();
-      // FIX 3 (partial) — Clear idleConfirmed when we have real evidence of work.
+      // FIX 3 (partial)  --  Clear idleConfirmed when we have real evidence of work.
       // Ensures genuine transitions aren't blocked by stale idleConfirmed.
       this.telemetry.setIdleConfirmed(id, false);
       this.checkTransition(id, tty, "working", `JSONL tail: ${ctx.latestAction || "thinking"}`, tailCtx);
@@ -1004,7 +1004,7 @@ end tell
       const idleCount = (this.consecutiveIdleChecks.get(id) || 0) + 1;
       this.consecutiveIdleChecks.set(id, idleCount);
 
-      // High-confidence idle (e.g. Codex task_complete) — immediate transition,
+      // High-confidence idle (e.g. Codex task_complete)  --  immediate transition,
       // bypass all cooldowns and hysteresis. This is a definitive "done" signal.
       if (ctx.highConfidence) {
         if (ctx.latestAction) existing.lastAction = ctx.latestAction;
@@ -1021,7 +1021,7 @@ end tell
       // just because the file is fresh. The "idle but fresh" grace only
       // applies when we're currently working and unsure if we should go idle.
       if (existing.status === "idle") {
-        // LAYER 8 — idle→working recovery: even when idle, check if the
+        // LAYER 8  --  idle→working recovery: even when idle, check if the
         // process woke up. Only use CPU for idle→working (not PTY alone),
         // because user typing in the terminal echoes characters to PTY stdout
         // (~900B per keystroke burst) which is indistinguishable from agent output.
@@ -1032,7 +1032,7 @@ end tell
           const activeCount = (this.consecutiveActiveChecks.get(id) || 0) + 1;
           this.consecutiveActiveChecks.set(id, activeCount);
           if (activeCount >= 2) {
-            // 2+ consecutive active ticks — real work, flip to working
+            // 2+ consecutive active ticks  --  real work, flip to working
             const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
             existing.status = "working";
             existing.currentAction = "Thinking...";
@@ -1053,13 +1053,13 @@ end tell
         }
       } else if (ctx.fileAgeMs < 120_000 && idleCount < 2 && (hookAge < 30_000 || existing.model === "codex")) {
         // File written in last 2 min AND first idle signal AND either hooks
-        // recently active OR Codex worker — stay GREEN.
+        // recently active OR Codex worker  --  stay GREEN.
         //   - fileAgeMs < 120s: covers subagent chains (30-90s JSONL gaps)
         //   - idleCount < 2: hysteresis prevents single-scan flapping
         //   - hookAge < 30s: ensures hooks confirm the agent is actually working.
         //     Without this, noise JSONL writes keep fileAge fresh → phantom green.
         //   - Codex only (not all non-Claude): Codex has no hooks and no JSONL
-        //     idle patterns — only task_complete provides reliable idle.
+        //     idle patterns  --  only task_complete provides reliable idle.
         //     OpenClaw writes JSONL with clear assistant-at-tail idle patterns
         //     (like Claude), so it should trust its JSONL analysis.
         existing.status = "working";
@@ -1068,7 +1068,7 @@ end tell
         existing.lastActionAt = Date.now();
         this.checkTransition(id, tty, "working", `JSONL tail idle but fresh (${Math.round(ctx.fileAgeMs/1000)}s) hookAge=${Math.round(hookAge/1000)}s hysteresis=${idleCount}/2`, tailCtx);
       } else {
-        // FIX 2 — Extended cooldown: 25s after last confirmed tool activity,
+        // FIX 2  --  Extended cooldown: 25s after last confirmed tool activity,
         // keep green. Covers the API thinking gap where no JSONL is written.
         // Applies to ALL models: Claude needs it for text generation after
         // tool calls (no hooks fire), Codex needs it for API thinking between
@@ -1082,7 +1082,7 @@ end tell
         // analyzeJsonlTail). No need for a second fileAge check here.
         // The 25s cooldown only helps during the "thinking gap" (user→API→
         // no assistant message yet). Once the assistant response is at the tail,
-        // the agent is finished — go red immediately.
+        // the agent is finished  --  go red immediately.
         const jsonlConfirmsIdle = ctx.status === "idle";
         const hasJsonlIdleSignal = existing.model === "openclaw" || jsonlConfirmsIdle;
         if (workingCooldown < 25_000 && existing.status === "working" && !hasJsonlIdleSignal) {
@@ -1091,7 +1091,7 @@ end tell
           existing.lastActionAt = Date.now();
           this.checkTransition(id, tty, "working", `JSONL tail idle but cooldown active (${Math.round(workingCooldown/1000)}s/25s since last confirmed working)`, tailCtx);
         } else {
-          // LAYER 8 — CPU + PTY signal: check if the process is actively consuming
+          // LAYER 8  --  CPU + PTY signal: check if the process is actively consuming
           // CPU or writing output to the terminal before going/staying idle.
           // Cap at 3 minutes to prevent permanent green from runaway processes.
           const cpuPct = this.getCpuForPid(existing.pid);
@@ -1099,7 +1099,7 @@ end tell
           // Working keepalive: agent was RECENTLY confirmed working (tool calls).
           // During text generation, CPU is 10-25% (lower than tool calls).
           // Use 8% threshold here (not 25%) because the agent is already confirmed
-          // working — we just need to detect it's still alive. 25% is for idle→working
+          // working  --  we just need to detect it's still alive. 25% is for idle→working
           // where we need to distinguish agent work from user typing.
           const isActive = (cpuPct > 8 || ptyDelta > 500) && workingCooldown < 180_000;
 
@@ -1113,13 +1113,13 @@ end tell
             this.telemetry.setIdleConfirmed(id, false);
             const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
             this.telemetry.recordSignal(id, ptyDelta > 100 ? "pty_keepalive" : "cpu_keepalive", signal);
-            this.checkTransition(id, tty, "working", `Output active (${signal}) — generation detected`, { ...tailCtx, cpuPct, ptyDelta });
+            this.checkTransition(id, tty, "working", `Output active (${signal})  --  generation detected`, { ...tailCtx, cpuPct, ptyDelta });
           } else {
             // File >2 min stale OR 2+ consecutive idle signals OR cooldown expired OR CPU+PTY idle → RED
             if (ctx.latestAction) existing.lastAction = ctx.latestAction;
             existing.status = "idle";
             existing.currentAction = null;
-            // FIX 3 — Lock idle after hysteresis: once the full hysteresis process
+            // FIX 3  --  Lock idle after hysteresis: once the full hysteresis process
             // confirms idle (2+ checks + cooldown expired), set idleConfirmed.
             // This prevents phantom green from re-triggering on subsequent scans.
             // Only real hooks (PreToolUse/PostToolUse) or high-confidence JSONL
@@ -1228,7 +1228,7 @@ end tell
       // Fallback: use CPU
       this.runCpuOnlyAnalysis(id, existing, tty, auditCtx);
     } catch {
-      // Can't read session file — fall back to CPU
+      // Can't read session file  --  fall back to CPU
       this.runCpuOnlyAnalysis(id, existing, tty, auditCtx);
     }
   }
@@ -1240,7 +1240,7 @@ end tell
     auditCtx: Record<string, unknown>,
   ): void {
     // Guard: if input was just sent, keep current (optimistic working) status.
-    // Codex can take seconds before CPU spikes — without this guard the first
+    // Codex can take seconds before CPU spikes  --  without this guard the first
     // discovery tick after message send sees low CPU and flips to idle.
     const lastInput = this.telemetry.getLastInputSent(id);
     if (lastInput > 0 && Date.now() - lastInput < 15_000) {
@@ -1253,7 +1253,7 @@ end tell
     const ctx = { ...auditCtx, cpuPct, ptyDelta, model: existing.model };
 
     if (cpuPct > 25) {
-      // High CPU — likely working. Require 2 consecutive ticks (hysteresis).
+      // High CPU  --  likely working. Require 2 consecutive ticks (hysteresis).
       const activeCount = (this.consecutiveActiveChecks.get(id) || 0) + 1;
       this.consecutiveActiveChecks.set(id, activeCount);
       if (activeCount >= 2) {
@@ -1268,7 +1268,7 @@ end tell
         this.checkTransition(id, tty, existing.status, `CPU active unconfirmed (${activeCount}/2, ${existing.model})`, ctx);
       }
     } else if (existing.status === "working") {
-      // Was working, CPU dropped — apply cooldown before going idle
+      // Was working, CPU dropped  --  apply cooldown before going idle
       const lastWorking = this.lastConfirmedWorking.get(id) || 0;
       const cooldown = Date.now() - lastWorking;
       if (cooldown < 25_000) {
@@ -1285,7 +1285,7 @@ end tell
         }
       }
     } else {
-      // Already idle, low CPU — stay idle
+      // Already idle, low CPU  --  stay idle
       this.consecutiveActiveChecks.set(id, 0);
       this.checkTransition(id, tty, existing.status, `CPU-only steady (cpu=${cpuPct.toFixed(1)}%, ${existing.model})`, ctx);
     }
@@ -1294,7 +1294,7 @@ end tell
   /**
    * Layer 8a: Get instantaneous CPU usage for a process.
    * Returns 0 on any error (process gone, permission denied).
-   * Lightweight — single `ps` call, ~5ms.
+   * Lightweight  --  single `ps` call, ~5ms.
    */
   private getCpuForPid(pid: number): number {
     const cached = this.tickCpuCache.get(pid);
@@ -1324,7 +1324,7 @@ end tell
    * the previous scan. If bytes increased, the process is writing
    * to the terminal = actively generating output.
    *
-   * Non-invasive — reads kernel FD metadata, does not consume output.
+   * Non-invasive  --  reads kernel FD metadata, does not consume output.
    * Returns the byte delta (0 = no output, >0 = bytes written since last check).
    */
   private getPtyOutputDelta(pid: number): number {
@@ -1347,7 +1347,7 @@ end tell
         encoding: "utf-8",
         timeout: 2000,
       }).trim();
-      // Parse the SIZE/OFF column (7th field) — format is "0t12345678"
+      // Parse the SIZE/OFF column (7th field)  --  format is "0t12345678"
       const lastLine = out.split("\n").pop();
       if (!lastLine) { this.tickPtyCache.set(pid, 0); return 0; }
       const fields = lastLine.trim().split(/\s+/);
@@ -1404,7 +1404,7 @@ end tell
                       const stat = statSync(fullPath);
                       // Birthtime matching: JSONL created close to process start.
                       // Codex can take 60-90s to create its session file after the
-                      // process starts, so use a 120s window (was 60s — too tight).
+                      // process starts, so use a 120s window (was 60s  --  too tight).
                       const birthtimeDiff = Math.abs(stat.birthtimeMs - startedAt);
                       if (birthtimeDiff < 120_000 && birthtimeDiff < bestBirthtimeDiff) {
                         bestBirthtimeDiff = birthtimeDiff;
@@ -1487,7 +1487,7 @@ end tell
   /**
    * Find Gemini CLI session files. Gemini CLI currently does not persist JSONL
    * session logs, so this will return null. When Google adds session persistence,
-   * files are expected under ~/.gemini/ — the scanner is ready.
+   * files are expected under ~/.gemini/  --  the scanner is ready.
    */
   private findGeminiSessionFile(pid: number, startedAt: number): string | null {
     const cached = this.geminiSessionCache.get(pid);
@@ -1552,7 +1552,7 @@ end tell
       };
 
       scanDir(geminiDir, 0);
-      // Only use birthtime match. No mtime fallback — that picks old sessions
+      // Only use birthtime match. No mtime fallback  --  that picks old sessions
       // and shows stale chat history when a new Gemini instance is spawned.
       // If no birthtime match, return null and re-check on next scan.
       this.geminiSessionCache.set(pid, { file: birthtimeMatch, checkedAt: Date.now() });
@@ -1693,7 +1693,7 @@ end tell
 
         const info = this.getProcessInfo(pid);
         if (!info) {
-          // lsof failed (process still initializing) — use ps data as fallback.
+          // lsof failed (process still initializing)  --  use ps data as fallback.
           // This ensures newly opened instances get picked up immediately
           // instead of being silently skipped until lsof starts working.
           if (psTty && psTty !== "??" && psTty.startsWith("ttys")) {
@@ -1763,7 +1763,7 @@ end tell
         if (taskMatch && !sessionIds.includes(taskMatch[1])) {
           sessionIds.push(taskMatch[1]);
         }
-        // Direct JSONL file detection — most reliable session file source
+        // Direct JSONL file detection  --  most reliable session file source
         // Supports both Claude (.claude/projects/*/UUID.jsonl) and Codex (.codex/sessions/*/rollout-*.jsonl)
         const jsonlMatch = lines[i].match(/^n(.*\.claude\/projects\/[^/]+\/[0-9a-f-]{36}\.jsonl)$/);
         if (jsonlMatch && !jsonlFile) {
@@ -1843,7 +1843,7 @@ end tell
   /**
    * Build a TTY→file map from marker files written by identity.sh.
    * Each agent writes ~/.hive/sessions/{tty} containing its session_id on every prompt.
-   * This is ground truth — it directly links a TTY to a specific JSONL file.
+   * This is ground truth  --  it directly links a TTY to a specific JSONL file.
    * Marker files persist across daemon restarts (no in-memory state needed).
    */
   private buildTtyFileMap(processes: ProcessInfo[]): Map<string, string> {
@@ -1984,7 +1984,7 @@ end tell
 
           // Must be modified MORE RECENTLY than the current file.
           // A file born after the current one but with an older mtime was
-          // abandoned before the current file was last active — not a successor.
+          // abandoned before the current file was last active  --  not a successor.
           if (stat.mtimeMs <= currentStat.mtimeMs) continue;
 
           // Proximity check: real compaction successors are born within seconds
@@ -2054,7 +2054,7 @@ end tell
   }
 
   /**
-   * Core JSONL tail analysis — shared by both readSessionContext variants.
+   * Core JSONL tail analysis  --  shared by both readSessionContext variants.
    *
    * Reads 50KB tail and scans backward for conversation patterns to determine
    * whether Claude is working (green) or idle (red).
@@ -2093,7 +2093,7 @@ end tell
         ? allLines.slice(1)
         : allLines;
 
-      // Filter out noise entries — progress/system/file-history-snapshot are
+      // Filter out noise entries  --  progress/system/file-history-snapshot are
       // bookkeeping that Claude Code writes periodically even while idle.
       // They flood the scan window AND their writes keep file mtime fresh,
       // which causes phantom green via the 120s grace period.
@@ -2116,7 +2116,7 @@ end tell
 
       // Check if the file's mtime freshness is from noise writes (progress,
       // system, etc.) rather than real content. When the last raw line is noise,
-      // fileAgeMs is unreliable — noise keeps it artificially fresh.
+      // fileAgeMs is unreliable  --  noise keeps it artificially fresh.
       const lastRawLine = rawLines[rawLines.length - 1] || "";
       const fileAgeIsFromNoise = isNoiseLine(lastRawLine);
 
@@ -2126,7 +2126,7 @@ end tell
         if (action) { result.latestAction = action; break; }
       }
 
-      // Extract last human direction — the most recent user-typed message.
+      // Extract last human direction  --  the most recent user-typed message.
       // Claude: "type":"user" with content as a plain string.
       // Codex: "type":"user_message" in event_msg with "message" field.
       // OpenClaw: "type":"message" with "role":"user" and content as [{type:"text",text:"..."}].
@@ -2183,7 +2183,7 @@ end tell
         }
       }
 
-      // Tail analysis is the sole status engine. No mtime shortcut —
+      // Tail analysis is the sole status engine. No mtime shortcut  -- 
       // the conversation pattern in JSONL is ground truth for every state.
       // Two "still working" patterns:
       //
@@ -2213,7 +2213,7 @@ end tell
           continue;
         }
 
-        // Codex: task_complete is a definitive "done" signal — immediate idle.
+        // Codex: task_complete is a definitive "done" signal  --  immediate idle.
         // No cooldown or hysteresis needed. This is the strongest idle indicator.
         if (line.includes('"task_complete"')) {
           const completedTurnId = extractTurnId(line);
@@ -2256,11 +2256,11 @@ end tell
           return result;
         }
 
-        // Pattern 2: thinking — track last message type
+        // Pattern 2: thinking  --  track last message type
         // Claude: "type":"user" / "type":"assistant"
         // Codex: "type":"user_message" (event_msg) / "role":"assistant" (response_item)
         // OpenClaw: "type":"message" with "role":"user" / "role":"assistant"
-        // Skip Codex "agent_message" events — they accompany assistant responses, not user input.
+        // Skip Codex "agent_message" events  --  they accompany assistant responses, not user input.
         if (!lastUser && !lastAssistant) {
           if ((line.includes('"type":"user"') || line.includes('"type": "user"') ||
               line.includes('"type":"user_message"') ||
@@ -2279,7 +2279,7 @@ end tell
       }
 
       // If the last meaningful entry was user input (or tool_result) and
-      // Claude hasn't responded yet, it's thinking — show green.
+      // Claude hasn't responded yet, it's thinking  --  show green.
       // BUT: if the file is very stale (>2 min), this is likely a compacted
       // session where Claude already responded in a NEW file.
       if (lastUser && !lastAssistant && result.fileAgeMs < 120_000) {
@@ -2289,10 +2289,10 @@ end tell
         return result;
       }
 
-      // Assistant message at tail — but if the file was JUST modified (<4s),
+      // Assistant message at tail  --  but if the file was JUST modified (<4s),
       // Claude is mid-stream (still writing its response, or about to call
       // a tool). Don't flip to idle until the file has been quiet for 4s.
-      // NEVER set this above 5s or below 2s — documented in hive-daemon.md.
+      // NEVER set this above 5s or below 2s  --  documented in hive-daemon.md.
       // Skip this check when freshness is from noise writes (progress/system).
       if (lastAssistant && result.fileAgeMs < 4_000 && !fileAgeIsFromNoise) {
         result.status = "working";
@@ -2306,7 +2306,7 @@ end tell
       // by a single huge JSONL line (e.g., a massive tool_result from
       // reading a large file). If the file was recently modified (< 2 min)
       // by a REAL write (not noise), Claude almost certainly just received
-      // that content — show green.
+      // that content  --  show green.
       if (!foundAnyPattern && result.fileAgeMs < 120_000 && !fileAgeIsFromNoise) {
         result.status = "working";
         result.highConfidence = false;
@@ -2367,7 +2367,7 @@ end tell
       if (line.includes('"toolCall"') && line.includes('"role":"assistant"')) {
         const toolMatch = line.match(/"type":"toolCall"[^}]*?"name"\s*:\s*"([^"]+)"/);
         if (toolMatch) {
-          // OpenClaw uses lowercase tool names — capitalize for describeAction
+          // OpenClaw uses lowercase tool names  --  capitalize for describeAction
           const name = toolMatch[1].charAt(0).toUpperCase() + toolMatch[1].slice(1);
           const fileMatch = line.match(/"file_path"\s*:\s*"([^"]+)"/);
           const descMatch = line.match(/"description"\s*:\s*"([^"]{1,60})"/);

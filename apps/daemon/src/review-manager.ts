@@ -14,7 +14,7 @@ export type { ReviewItem } from "./review-store.js";
  * Extracted from TelemetryReceiver to reduce god-class coupling.
  */
 
-/** Narrow dependency interface — avoids circular dependency on TelemetryReceiver. */
+/** Narrow dependency interface  --  avoids circular dependency on TelemetryReceiver. */
 export interface ReviewManagerDeps {
   getQuadrant(workerId: string): number | undefined;
   getRecentArtifacts(workerId: string, limit: number): Array<{ path: string; action: string; ts: number }>;
@@ -129,7 +129,7 @@ export class ReviewManager {
       this.addReview(summary, workerId, repoName, { type: "push", url: gitUrl, artifacts });
       // Auto-update satellites when the hive repo itself is pushed
       if (repoName === "hive" && this.deps.onSatelliteUpdate) {
-        console.log(`[satellite-update] Hive repo pushed — triggering satellite updates`);
+        console.log(`[satellite-update] Hive repo pushed  --  triggering satellite updates`);
         this.deps.onSatelliteUpdate();
       }
       return;

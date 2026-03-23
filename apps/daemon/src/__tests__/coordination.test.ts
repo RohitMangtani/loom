@@ -1,5 +1,5 @@
 /**
- * Tests for CoordinationLayer — the extracted scratchpad, locks, and artifact
+ * Tests for CoordinationLayer  --  the extracted scratchpad, locks, and artifact
  * tracking module. Validates that multi-agent coordination primitives work
  * correctly in isolation.
  */

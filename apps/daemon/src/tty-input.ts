@@ -151,7 +151,7 @@ end tell
 
 /**
  * Capture the bundle ID of the currently frontmost application.
- * Returns null on failure (non-critical — restore just won't happen).
+ * Returns null on failure (non-critical  --  restore just won't happen).
  */
 function getFrontmostApp(): string | null {
   try {
@@ -179,7 +179,7 @@ async function getFrontmostAppAsync(): Promise<string | null> {
 
 /**
  * Restore focus to the app that was frontmost before we activated Terminal.
- * Fire-and-forget — if it fails, the user just stays on Terminal (no worse than before).
+ * Fire-and-forget  --  if it fails, the user just stays on Terminal (no worse than before).
  */
 function restoreFrontmostApp(bundleId: string): void {
   try {
@@ -187,7 +187,7 @@ function restoreFrontmostApp(bundleId: string): void {
       `tell application id "${bundleId}" to activate`
     ], { timeout: 2000, encoding: "utf-8" });
   } catch {
-    // Non-critical — worst case user stays on Terminal (current behavior)
+    // Non-critical  --  worst case user stays on Terminal (current behavior)
   }
 }
 
@@ -195,7 +195,7 @@ function restoreFrontmostAppAsync(bundleId: string): void {
   execFile("/usr/bin/osascript", ["-e",
     `tell application id "${bundleId}" to activate`
   ], { timeout: 2000, encoding: "utf-8" }, () => {
-    // Non-critical — worst case user stays on Terminal
+    // Non-critical  --  worst case user stays on Terminal
   });
 }
 
@@ -215,7 +215,7 @@ function restoreFrontmostAppAsync(bundleId: string): void {
 export function sendInputToTty(tty: string, text: string): { ok: boolean; error?: string } {
   const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
 
-  // Collapse newlines to spaces — Claude Code input is single-line
+  // Collapse newlines to spaces  --  Claude Code input is single-line
   const cleaned = text.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
   if (!cleaned) return { ok: false, error: "Empty message" };
 
@@ -301,7 +301,7 @@ let sendInFlight = false;
 export function isSendInFlight(): boolean { return sendInFlight; }
 
 /**
- * Async version of sendInputToTty — same two-step approach (do script + send-return)
+ * Async version of sendInputToTty  --  same two-step approach (do script + send-return)
  * but does NOT block the Node.js event loop. WebSocket messages, status updates,
  * and other requests continue flowing while the AppleScript executes.
  *
@@ -320,7 +320,7 @@ export function sendInputToTtyAsync(tty: string, text: string, model?: string): 
     return resultPromise;
   }
 
-  // Chain onto the mutex — each send waits for the previous to finish
+  // Chain onto the mutex  --  each send waits for the previous to finish
   const resultPromise = sendMutex.then(() => doSendAsync(tty, cleaned));
   // Update the mutex to wait for this send (swallow errors so chain continues)
   sendMutex = resultPromise.then(() => {}, () => {});
@@ -475,7 +475,7 @@ end tell
  * Send keystrokes (arrow keys + Enter) to a Terminal.app tab via System Events.
  *
  * Used for ink-based selection UIs (AskUserQuestion, EnterPlanMode) where
- * `do script` text injection doesn't work — ink's raw-mode selection
+ * `do script` text injection doesn't work  --  ink's raw-mode selection
  * component ignores injected text and only responds to key events.
  *
  * @param optionIndex 0-based index of the option to select (0 = first/default)
@@ -536,8 +536,8 @@ end tell
  * option is already selected and only Enter is needed.
  *
  * Two-step approach:
- * 1. AppleScript brings the correct tab to the front (Terminal.app API — works from launchd)
- * 2. CGEvent Return keystroke via ~/send-return (HID-level — works without System Events)
+ * 1. AppleScript brings the correct tab to the front (Terminal.app API  --  works from launchd)
+ * 2. CGEvent Return keystroke via ~/send-return (HID-level  --  works without System Events)
  */
 export function sendEnterToTty(tty: string): { ok: boolean; error?: string } {
   const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
@@ -545,7 +545,7 @@ export function sendEnterToTty(tty: string): { ok: boolean; error?: string } {
   const previousApp = getFrontmostApp();
 
   // Activate the correct terminal tab and send Return keystroke in one
-  // AppleScript — uses key code 36 (Return) via System Events.
+  // AppleScript  --  uses key code 36 (Return) via System Events.
   // Falls back to CGEvent via send-return if System Events fails (-1743).
   const script = `
 tell application "Terminal"
@@ -593,7 +593,7 @@ end try
   }
 
   if (needCGEvent) {
-    // System Events blocked (-1743) — fall back to CGEvent via send-return
+    // System Events blocked (-1743)  --  fall back to CGEvent via send-return
     execFileSync("/bin/sleep", ["0.5"]);
     try {
       execFileSync(SEND_RETURN_BIN, [], {
@@ -618,7 +618,7 @@ end try
 }
 
 /**
- * Async version of sendEnterToTty — routed through the same sendMutex
+ * Async version of sendEnterToTty  --  routed through the same sendMutex
  * so it never races with message sends or other Enter presses.
  *
  * Adds a 500ms post-send cooldown so consecutive trust approvals

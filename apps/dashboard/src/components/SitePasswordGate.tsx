@@ -11,7 +11,7 @@ interface SitePasswordGateProps {
 
 /**
  * Returns the current auth mode: "admin" or "viewer".
- * Default is "viewer" — everyone can see the cards.
+ * Default is "viewer"  --  everyone can see the cards.
  * Admin is unlocked by entering the token once (stored forever).
  */
 export function getAuthMode(): "admin" | "viewer" {
@@ -25,7 +25,7 @@ export function getStoredToken(): string {
   return localStorage.getItem(TOKEN_KEY) || "";
 }
 
-/** Unlock admin mode — called from the settings UI */
+/** Unlock admin mode  --  called from the settings UI */
 export function unlockAdmin(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(MODE_KEY, "admin");
@@ -38,7 +38,7 @@ export function lockAdmin(): void {
 }
 
 /**
- * No longer a gate — always renders children.
+ * No longer a gate  --  always renders children.
  * Just handles ?viewer= param cleanup for backward compat.
  */
 export function SitePasswordGate({ children }: SitePasswordGateProps) {

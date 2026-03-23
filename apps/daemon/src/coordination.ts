@@ -13,7 +13,7 @@ export type { ScratchpadEntry } from "./scratchpad.js";
 
 const MAX_ARTIFACTS = 50;
 
-/** Narrow dependency interface — avoids circular dependency on TelemetryReceiver. */
+/** Narrow dependency interface  --  avoids circular dependency on TelemetryReceiver. */
 export interface CoordinationDeps {
   isWorkerAlive(workerId: string): boolean;
   getWorkerTty(workerId: string): string | undefined;
