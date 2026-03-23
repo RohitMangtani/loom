@@ -3,7 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import { randomBytes } from "crypto";
 import { hostname } from "os";
 import { basename, join } from "path";
-import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, readdirSync, statSync } from "fs";
+import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { describeAction, truncate } from "./utils.js";
 import type { DaemonSnapshot } from "./state-store.js";
 import type { Server } from "http";
@@ -14,15 +14,16 @@ import type { ProcessDiscovery } from "./discovery.js";
 import type { ChatEntry, MachineCapabilities, WorkerState, TelemetryEvent } from "./types.js";
 import { TaskQueue } from "./task-queue.js";
 import type { QueuedTask } from "./task-queue.js";
-import { Scratchpad } from "./scratchpad.js";
-import type { ScratchpadEntry } from "./scratchpad.js";
-import { LockManager } from "./lock-manager.js";
+import { CoordinationLayer } from "./coordination.js";
+import type { ScratchpadEntry } from "./coordination.js";
 import { registerApiRoutes } from "./api-routes.js";
 import { updateTerminalTitles, arrangeTerminalWindows, detectQuadrantsFromWindowPositions, positionWindowToQuadrant, resetArrangementCache } from "./arrange-windows.js";
 import type { Collector } from "./collector.js";
 import { SuggestionEngine } from "./suggestion-engine.js";
-import { ReviewStore } from "./review-store.js";
-import type { ReviewItem } from "./review-store.js";
+import { ReviewManager } from "./review-manager.js";
+import type { ReviewItem } from "./review-manager.js";
+import { SwarmController } from "./swarm-controller.js";
+import type { SwarmSpawnRequest, SwarmExecRequest, SwarmExecResult, SwarmProjectEntry } from "./swarm-controller.js";
 import { scanLocalProjects } from "./project-discovery.js";
 
 const IDLE_THRESHOLD = 30_000;
@@ -55,41 +56,8 @@ interface WorkerContextOptions {
   artifactLimit?: number;
 }
 
-interface SwarmProjectEntry {
-  name: string;
-  path: string;
-  machines?: Record<string, string>;
-}
-
-interface SwarmSpawnRequest {
-  project?: string;
-  model?: string;
-  task?: string;
-  targetQuadrant?: number;
-  machine?: string;
-  fromMachine?: string;
-}
-
-interface SwarmExecRequest {
-  command: string;
-  cwd?: string;
-  timeoutMs?: number;
-  machine?: string;
-  fromMachine?: string;
-}
-
-interface SwarmExecResult {
-  ok: boolean;
-  machine: string;
-  command: string;
-  cwd: string;
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  timedOut: boolean;
-  durationMs: number;
-  error?: string;
-}
+// SwarmSpawnRequest, SwarmExecRequest, SwarmExecResult, SwarmProjectEntry
+// are now in swarm-controller.ts
 
 export interface WorkerContextSnapshot {
   workerId: string;
@@ -134,9 +102,8 @@ export class TelemetryReceiver {
   private lastDashboardInput = new Map<string, number>();
   private lastInputSent = new Map<string, number>();
 
-  // Artifact tracking
-  private artifacts = new Map<string, Array<{ path: string; action: string; ts: number }>>();
-  private static readonly MAX_ARTIFACTS = 50;
+  // Multi-agent coordination (scratchpad, locks, artifacts)
+  private coordination: CoordinationLayer = null!; // initialized in constructor
 
   // LLM suggestion engine (Phase 3)
   private suggestionEngine = new SuggestionEngine();
@@ -190,12 +157,6 @@ export class TelemetryReceiver {
   // messages to satellite workers (workerId contains "machineId:localId").
   private satelliteMessageRelay: ((workerId: string, content: string, from?: string) => Promise<{ ok: boolean; error?: string }>) | null = null;
   private satelliteAllWorkersGetter: (() => WorkerState[]) | null = null;
-  private swarmProjectsGetter: (() => { projects: SwarmProjectEntry[] }) | null = null;
-  private swarmCapabilitiesGetter: (() => Record<string, MachineCapabilities>) | null = null;
-  private swarmSpawnHandler: ((request: SwarmSpawnRequest) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
-  private swarmKillHandler: ((workerId: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
-  private swarmSatelliteMaintenanceHandler: ((machineId: string, action?: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown }) | null = null;
-  private swarmExecHandler: ((request: SwarmExecRequest) => Promise<SwarmExecResult>) | null = null;
 
   // Workflow handoffs: workflowId → handoff context from completed steps
   private workflowHandoffs = new Map<string, string[]>();
@@ -215,12 +176,8 @@ export class TelemetryReceiver {
 
   // Composed subsystems
   private taskQueue: TaskQueue;
-  private scratchpad: Scratchpad;
-  private lockManager: LockManager;
-  private reviewStore: ReviewStore;
-
-  // Review listeners (for WS broadcast of new reviews)
-  private reviewListeners: Array<(review: ReviewItem) => void> = [];
+  private reviewManager: ReviewManager;
+  private swarm = new SwarmController();
 
   private token: string;
   private collector: Collector | null = null;
@@ -230,12 +187,15 @@ export class TelemetryReceiver {
     this.port = port;
     this.token = token;
     this.taskQueue = new TaskQueue();
-    this.scratchpad = new Scratchpad();
-    this.reviewStore = new ReviewStore();
-    this.lockManager = new LockManager(
-      (id) => this.workers.has(id),
-      (id) => this.workers.get(id)?.tty,
-    );
+    this.coordination = new CoordinationLayer({
+      isWorkerAlive: (id) => this.workers.has(id),
+      getWorkerTty: (id) => this.workers.get(id)?.tty,
+    });
+    this.reviewManager = new ReviewManager({
+      getQuadrant: (id) => this.quadrantAssignments.get(id),
+      getRecentArtifacts: (id, limit) => this.coordination.getRecentArtifacts(id, limit),
+      onSatelliteUpdate: undefined, // Wired later via setSatelliteRelay
+    });
   }
 
   start(): void {
@@ -528,33 +488,18 @@ export class TelemetryReceiver {
     return this.lastInputSent.get(workerId) || 0;
   }
 
-  // --- Artifact tracking ---
+  // --- Artifact tracking (delegates to CoordinationLayer) ---
 
   recordArtifact(workerId: string, filePath: string, action: string): void {
-    if (!this.artifacts.has(workerId)) {
-      this.artifacts.set(workerId, []);
-    }
-    const list = this.artifacts.get(workerId)!;
-    const existing = list.find(a => a.path === filePath);
-    if (existing) {
-      existing.action = action;
-      existing.ts = Date.now();
-    } else {
-      list.push({ path: filePath, action, ts: Date.now() });
-      if (list.length > TelemetryReceiver.MAX_ARTIFACTS) {
-        list.shift();
-      }
-    }
+    this.coordination.recordArtifact(workerId, filePath, action);
   }
 
   getArtifacts(workerId: string): Array<{ path: string; action: string; ts: number }> {
-    return this.artifacts.get(workerId) || [];
+    return this.coordination.getArtifacts(workerId);
   }
 
   private getRecentArtifacts(workerId: string, limit = 5): Array<{ path: string; action: string; ts: number }> {
-    return this.getArtifacts(workerId)
-      .filter((artifact) => Date.now() - artifact.ts < 30 * 60 * 1000)
-      .slice(-limit);
+    return this.coordination.getRecentArtifacts(workerId, limit);
   }
 
   private getRecentMessages(workerId: string, limit = 6): ChatEntry[] {
@@ -690,18 +635,7 @@ export class TelemetryReceiver {
     excludeWorkerId?: string,
     maxAgeMs = 30 * 60 * 1000,
   ): Array<{ workerId: string; tty?: string; action: string; ts: number }> {
-    const results: Array<{ workerId: string; tty?: string; action: string; ts: number }> = [];
-    const now = Date.now();
-    for (const [wid, arts] of this.artifacts) {
-      if (wid === excludeWorkerId) continue;
-      for (const art of arts) {
-        if (art.path === filePath && now - art.ts < maxAgeMs) {
-          const worker = this.workers.get(wid);
-          results.push({ workerId: wid, tty: worker?.tty, action: art.action, ts: art.ts });
-        }
-      }
-    }
-    return results;
+    return this.coordination.checkConflicts(filePath, excludeWorkerId, maxAgeMs, (wid) => this.workers.get(wid)?.tty);
   }
 
   // --- Dispatch tracking ---
@@ -1013,6 +947,8 @@ export class TelemetryReceiver {
     this.satelliteMessageRelay = relay;
     this.satelliteAllWorkersGetter = allWorkers;
     this.satelliteUpdateFn = updateAll || null;
+    // Wire satellite update to ReviewManager so auto-detected hive pushes trigger updates
+    this.reviewManager.setSatelliteUpdateFn(updateAll ? () => updateAll() : undefined);
   }
 
   /** Register capability-based routing functions from ws-server. */
@@ -1041,6 +977,8 @@ export class TelemetryReceiver {
     return this.getAll();
   }
 
+  // --- Swarm controller facade (delegates to SwarmController) ---
+
   setSwarmApi(
     projectsGetter: () => { projects: SwarmProjectEntry[] },
     capabilitiesGetter: () => Record<string, MachineCapabilities>,
@@ -1049,65 +987,31 @@ export class TelemetryReceiver {
     satelliteMaintenanceHandler?: (machineId: string, action?: string, fromMachine?: string) => { ok: boolean; error?: string; [key: string]: unknown },
     execHandler?: (request: SwarmExecRequest) => Promise<SwarmExecResult>,
   ): void {
-    this.swarmProjectsGetter = projectsGetter;
-    this.swarmCapabilitiesGetter = capabilitiesGetter;
-    this.swarmSpawnHandler = spawnHandler;
-    this.swarmKillHandler = killHandler;
-    this.swarmSatelliteMaintenanceHandler = satelliteMaintenanceHandler || null;
-    this.swarmExecHandler = execHandler || null;
+    this.swarm.setControllers(projectsGetter, capabilitiesGetter, spawnHandler, killHandler, satelliteMaintenanceHandler, execHandler);
   }
 
   getSwarmProjects(): { projects: SwarmProjectEntry[] } {
-    if (this.swarmProjectsGetter) return this.swarmProjectsGetter();
-    const projects = Object.entries(scanLocalProjects(HOME)).map(([name, path]) => ({
-      name,
-      path,
-      machines: { local: path },
-    }));
-    return { projects };
+    return this.swarm.getSwarmProjects();
   }
 
   getSwarmCapabilities(): Record<string, MachineCapabilities> {
-    if (this.swarmCapabilitiesGetter) return this.swarmCapabilitiesGetter();
-    return {
-      local: {
-        node: true,
-        projects: scanLocalProjects(HOME),
-      },
-    };
+    return this.swarm.getSwarmCapabilities();
   }
 
   spawnViaSwarm(request: SwarmSpawnRequest): { ok: boolean; error?: string; [key: string]: unknown } {
-    if (!this.swarmSpawnHandler) return { ok: false, error: "Spawn control not available" };
-    return this.swarmSpawnHandler(request);
+    return this.swarm.spawnViaSwarm(request);
   }
 
   killViaSwarm(workerId: string, fromMachine?: string): { ok: boolean; error?: string; [key: string]: unknown } {
-    if (!this.swarmKillHandler) return { ok: false, error: "Kill control not available" };
-    return this.swarmKillHandler(workerId, fromMachine);
+    return this.swarm.killViaSwarm(workerId, fromMachine);
   }
 
   maintainSatelliteViaSwarm(machineId: string, action?: string, fromMachine?: string): { ok: boolean; error?: string; [key: string]: unknown } {
-    if (!this.swarmSatelliteMaintenanceHandler) return { ok: false, error: "Satellite maintenance control not available" };
-    return this.swarmSatelliteMaintenanceHandler(machineId, action, fromMachine);
+    return this.swarm.maintainSatelliteViaSwarm(machineId, action, fromMachine);
   }
 
   async execViaSwarm(request: SwarmExecRequest): Promise<SwarmExecResult> {
-    if (!this.swarmExecHandler) {
-      return {
-        ok: false,
-        machine: request.machine || request.fromMachine || "local",
-        command: request.command,
-        cwd: request.cwd || HOME,
-        stdout: "",
-        stderr: "",
-        exitCode: null,
-        timedOut: false,
-        durationMs: 0,
-        error: "Exec control not available",
-      };
-    }
-    return this.swarmExecHandler(request);
+    return this.swarm.execViaSwarm(request);
   }
 
   private getWorkerSnapshot(workerId: string): WorkerState | undefined {
@@ -1421,7 +1325,7 @@ export class TelemetryReceiver {
     this.toolInFlight.delete(id);
     this.idleConfirmed.delete(id);
     this.lastInputSent.delete(id);
-    this.lockManager.releaseAll(id);
+    this.coordination.releaseAllLocks(id);
     this.quadrantAssignments.delete(id);
     for (const [sid, wid] of this.sessionToWorker) {
       if (wid === id) {
@@ -1664,7 +1568,7 @@ export class TelemetryReceiver {
         }
         worker.status = "idle";
         worker.currentAction = null;
-        this.lockManager.releaseAll(worker.id);
+        this.coordination.releaseAllLocks(worker.id);
         this.generateSuggestions(worker);
         this.notify(worker);
       }
@@ -1673,8 +1577,8 @@ export class TelemetryReceiver {
     this.drainQueues();
     this.dispatchFromQueue();
     this.expirePendingHooks();
-    this.scratchpad.expire();
-    this.reviewStore.expire();
+    this.coordination.expireScratchpad();
+    this.reviewManager.expire();
   }
 
   notifyExternal(worker: WorkerState): void {
@@ -1690,7 +1594,7 @@ export class TelemetryReceiver {
     worker.lastActionAt = Date.now();
     if (lastAction) worker.lastAction = lastAction;
     this.idleConfirmed.set(workerId, false);
-    this.lockManager.releaseAll(workerId);
+    this.coordination.releaseAllLocks(workerId);
     this.generateSuggestions(worker);
     this.notify(worker);
   }
@@ -2320,7 +2224,7 @@ export class TelemetryReceiver {
 
       // Conflict guard: warn about files locked or recently edited by other agents
       let conflictWarning = "";
-      const activeLocks = this.lockManager.getLocksExcluding(target.id);
+      const activeLocks = this.coordination.getLocksExcluding(target.id);
       if (activeLocks.length > 0) {
         const taskNeedle = basename(resolvedTaskProject || task.project || "");
         const lockLines = activeLocks
@@ -2367,25 +2271,25 @@ export class TelemetryReceiver {
     }
   }
 
-  // --- Scratchpad facade ---
+  // --- Scratchpad facade (delegates to CoordinationLayer) ---
 
   getScratchpad(key: string): ScratchpadEntry | undefined {
-    return this.scratchpad.get(key);
+    return this.coordination.getScratchpad(key);
   }
 
   getAllScratchpad(): Record<string, ScratchpadEntry> {
-    return this.scratchpad.getAll();
+    return this.coordination.getAllScratchpad();
   }
 
   setScratchpad(key: string, value: string, setBy: string): ScratchpadEntry {
-    return this.scratchpad.set(key, value, setBy);
+    return this.coordination.setScratchpad(key, value, setBy);
   }
 
   deleteScratchpad(key: string): boolean {
-    return this.scratchpad.delete(key);
+    return this.coordination.deleteScratchpad(key);
   }
 
-  // --- Review store facade ---
+  // --- Review manager facade (delegates to ReviewManager) ---
 
   addReview(
     summary: string,
@@ -2393,227 +2297,53 @@ export class TelemetryReceiver {
     projectName: string,
     opts?: { url?: string; type?: ReviewItem["type"]; quadrant?: number; artifacts?: Array<{ path: string; action: string }> },
   ): ReviewItem {
-    const quadrant = opts?.quadrant ?? this.quadrantAssignments.get(workerId);
-    const review = this.reviewStore.add(summary, workerId, projectName, { ...opts, quadrant });
-    // Notify WS listeners
-    for (const listener of this.reviewListeners) {
-      listener(review);
-    }
-    return review;
+    return this.reviewManager.addReview(summary, workerId, projectName, opts);
   }
 
   getReviews(): ReviewItem[] {
-    return this.reviewStore.getAll();
+    return this.reviewManager.getReviews();
   }
 
   getUnseenReviews(): ReviewItem[] {
-    return this.reviewStore.getUnseen();
+    return this.reviewManager.getUnseenReviews();
   }
 
   markReviewSeen(id: string): boolean {
-    return this.reviewStore.markSeen(id);
+    return this.reviewManager.markReviewSeen(id);
   }
 
   markAllReviewsSeen(): number {
-    return this.reviewStore.markAllSeen();
+    return this.reviewManager.markAllReviewsSeen();
   }
 
   dismissReview(id: string): boolean {
-    return this.reviewStore.dismiss(id);
+    return this.reviewManager.dismissReview(id);
   }
 
   clearAllReviews(): number {
-    return this.reviewStore.clearAll();
+    return this.reviewManager.clearAllReviews();
   }
 
   onReviewAdded(listener: (review: ReviewItem) => void): void {
-    this.reviewListeners.push(listener);
+    this.reviewManager.onReviewAdded(listener);
   }
 
-  /** Resolve current git branch from a worker's project path */
-  private resolveGitBranch(worker: WorkerState): string | undefined {
-    try {
-      const { execFileSync } = require("child_process");
-      return execFileSync("/usr/bin/git", ["symbolic-ref", "--short", "HEAD"], {
-        cwd: worker.project,
-        encoding: "utf-8",
-        timeout: 3000,
-      }).trim() || undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** Resolve GitHub URL from a worker's project path */
-  private resolveGitUrl(worker: WorkerState): string | undefined {
-    try {
-      const { execFileSync } = require("child_process");
-      const remote = execFileSync("/usr/bin/git", ["remote", "get-url", "origin"], {
-        cwd: worker.project,
-        encoding: "utf-8",
-        timeout: 3000,
-      }).trim();
-      // Convert git@github.com:User/Repo.git or https://github.com/User/Repo.git to https://github.com/User/Repo
-      if (remote.startsWith("git@github.com:")) {
-        return "https://github.com/" + remote.slice(15).replace(/\.git$/, "");
-      }
-      if (remote.includes("github.com")) {
-        return remote.replace(/\.git$/, "");
-      }
-      return undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** Resolve the git repo name from a worker's project path (e.g., "hive" from the repo root) */
-  private resolveGitRepoName(worker: WorkerState): string {
-    try {
-      const { execFileSync } = require("child_process");
-      const root = execFileSync("/usr/bin/git", ["rev-parse", "--show-toplevel"], {
-        cwd: worker.project,
-        encoding: "utf-8",
-        timeout: 3000,
-      }).trim();
-      const name = root.split("/").pop();
-      if (name && name !== "unknown") return name;
-    } catch { /* not a git repo at this cwd */ }
-    // Fallback: derive from project path (last non-empty segment)
-    const segments = worker.project.replace(/\/+$/, "").split("/").filter(Boolean);
-    const last = segments[segments.length - 1];
-    if (last && last !== "unknown" && last !== process.env.USER) return last;
-    return worker.projectName !== "unknown" ? worker.projectName : "agent";
-  }
-
-  /** Build a rich review summary with quadrant, project, and branch context */
-  private buildReviewSummary(action: string, worker: WorkerState, repoName: string, branch?: string): string {
-    const q = this.quadrantAssignments.get(worker.id);
-    const qLabel = q ? `Q${q}` : (worker.tty || "agent");
-    const branchSuffix = branch ? ` (${branch})` : "";
-    return `${qLabel} ${action} ${repoName}${branchSuffix}`;
-  }
-
-  /** Get recent artifacts formatted for review attachment */
-  private getReviewArtifacts(workerId: string): Array<{ path: string; action: string }> | undefined {
-    const arts = this.getRecentArtifacts(workerId, 5);
-    if (arts.length === 0) return undefined;
-    return arts.map(a => ({
-      path: a.path.split("/").slice(-2).join("/"),
-      action: a.action,
-    }));
-  }
-
-  /** Dedup: track last review per worker to prevent duplicates from chained commands */
-  private lastReviewByWorker = new Map<string, { type: string; ts: number }>();
-
-  private isDuplicateReview(workerId: string, type: string): boolean {
-    const last = this.lastReviewByWorker.get(workerId);
-    if (last && last.type === type && Date.now() - last.ts < 30_000) return true;
-    this.lastReviewByWorker.set(workerId, { type, ts: Date.now() });
-    return false;
-  }
-
-  /**
-   * Extract the effective working directory from a bash command.
-   * Handles patterns like `cd /path/to/repo && git push`.
-   */
-  private extractCommandCwd(command: string, fallback: string): string {
-    // Match: cd /path && ..., cd "/path" && ..., cd '/path' && ...
-    const cdMatch = command.match(/\bcd\s+["']?([^"'&;|\n]+?)["']?\s*(?:&&|;)/);
-    if (cdMatch) {
-      let dir = cdMatch[1].trim();
-      // Expand ~ to home
-      if (dir.startsWith("~/") || dir === "~") {
-        const home = process.env.HOME || `/Users/${process.env.USER}`;
-        dir = dir.replace(/^~/, home);
-      }
-      try {
-        const { statSync } = require("fs");
-        if (statSync(dir).isDirectory()) return dir;
-      } catch { /* path doesn't exist, use fallback */ }
-    }
-    return fallback;
-  }
-
-  /** Auto-detect reviewable actions from Bash tool_input */
-  private autoDetectReview(
-    workerId: string,
-    worker: WorkerState,
-    toolInput: Record<string, unknown>,
-  ): void {
-    const command = (toolInput.command || toolInput.description || "") as string;
-    if (!command) return;
-
-    const cmdLower = command.toLowerCase();
-
-    // Resolve git context from the actual command cwd, not the worker's launch directory.
-    // Agents often run `cd /other/repo && git push` from a different project.
-    const effectiveCwd = this.extractCommandCwd(command, worker.project);
-    const effectiveWorker = effectiveCwd !== worker.project
-      ? { ...worker, project: effectiveCwd }
-      : worker;
-
-    const gitUrl = this.resolveGitUrl(effectiveWorker);
-    const branch = this.resolveGitBranch(effectiveWorker);
-    const repoName = this.resolveGitRepoName(effectiveWorker);
-    const artifacts = this.getReviewArtifacts(workerId);
-
-    // npm run build + git push in same command chain (check before individual patterns)
-    if (/\bgit\s+commit\b/.test(cmdLower) && /\bgit\s+push\b/.test(cmdLower)) {
-      if (this.isDuplicateReview(workerId, "push")) return;
-      const summary = this.buildReviewSummary("committed and pushed", worker, repoName, branch);
-      this.addReview(summary, workerId, repoName, { type: "push", url: gitUrl, artifacts });
-      return;
-    }
-
-    // git push
-    if (/\bgit\s+push\b/.test(cmdLower)) {
-      if (this.isDuplicateReview(workerId, "push")) return;
-      const summary = this.buildReviewSummary("pushed", worker, repoName, branch);
-      console.log(`[review] Auto-detected push by ${worker.tty || workerId} in ${repoName}`);
-      this.addReview(summary, workerId, repoName, { type: "push", url: gitUrl, artifacts });
-      // Auto-update satellites when the hive repo itself is pushed
-      if (repoName === "hive" && this.satelliteUpdateFn) {
-        console.log(`[satellite-update] Hive repo pushed — triggering satellite updates`);
-        this.satelliteUpdateFn();
-      }
-      return;
-    }
-
-    // gh pr create
-    if (/\bgh\s+pr\s+create\b/.test(cmdLower)) {
-      if (this.isDuplicateReview(workerId, "pr")) return;
-      const summary = this.buildReviewSummary("created PR in", worker, repoName, branch);
-      console.log(`[review] Auto-detected PR by ${worker.tty || workerId} in ${repoName}`);
-      this.addReview(summary, workerId, repoName, { type: "pr", url: gitUrl ? `${gitUrl}/pulls` : undefined, artifacts });
-      return;
-    }
-
-    // vercel deploy (or npx vercel)
-    if (/\bvercel\b/.test(cmdLower) && (/\bdeploy\b/.test(cmdLower) || /\bnpx\s+vercel\b/.test(cmdLower) || /^vercel(\s|$)/.test(cmdLower.trim()))) {
-      if (this.isDuplicateReview(workerId, "deploy")) return;
-      const summary = this.buildReviewSummary("deployed", worker, repoName, branch);
-      this.addReview(summary, workerId, repoName, { type: "deploy", artifacts });
-      return;
-    }
-  }
-
-  // --- Lock manager facade ---
+  // --- Lock manager facade (delegates to CoordinationLayer) ---
 
   acquireLock(filePath: string, workerId: string): { acquired: boolean; holder?: { workerId: string; tty?: string; lockedAt: number } } {
-    return this.lockManager.acquire(filePath, workerId);
+    return this.coordination.acquireLock(filePath, workerId);
   }
 
   releaseLock(filePath: string, workerId: string): boolean {
-    return this.lockManager.release(filePath, workerId);
+    return this.coordination.releaseLock(filePath, workerId);
   }
 
   releaseAllLocks(workerId: string): number {
-    return this.lockManager.releaseAll(workerId);
+    return this.coordination.releaseAllLocks(workerId);
   }
 
   getAllLocks(): Array<{ path: string; workerId: string; tty?: string; lockedAt: number }> {
-    return this.lockManager.getAll();
+    return this.coordination.getAllLocks();
   }
 
   // --- Debug state ---
@@ -2747,14 +2477,14 @@ export class TelemetryReceiver {
 
         // Auto-detect reviewable actions from Bash commands (PreToolUse has guaranteed tool_input)
         if (toolName === "Bash" && toolInput) {
-          this.autoDetectReview(workerId, worker, toolInput);
+          this.reviewManager.autoDetectReview(workerId, worker, toolInput);
         }
 
         // File lock enforcement: block Edit/Write if another agent holds the lock
         if ((toolName === "Edit" || toolName === "Write" || toolName === "NotebookEdit") && toolInput) {
           const filePath = (toolInput.file_path || toolInput.notebook_path) as string | undefined;
           if (filePath) {
-            const lockResult = this.lockManager.acquire(filePath, workerId);
+            const lockResult = this.coordination.acquireLock(filePath, workerId);
             if (!lockResult.acquired) {
               const holderName = lockResult.holder?.tty || lockResult.holder?.workerId || "another agent";
               const reason = `File locked by ${holderName}. They are actively editing this file. Wait for them to finish or coordinate via scratchpad.`;
@@ -2783,7 +2513,7 @@ export class TelemetryReceiver {
           if (filePath && (toolName === "Edit" || toolName === "Write" || toolName === "NotebookEdit")) {
             this.recordArtifact(workerId, filePath, toolName === "Edit" ? "edited" : "created");
             // Auto-acquire lock on successful write
-            this.lockManager.acquire(filePath, workerId);
+            this.coordination.acquireLock(filePath, workerId);
           }
           // Review detection moved to PreToolUse (guaranteed tool_input)
         }
@@ -2801,7 +2531,7 @@ export class TelemetryReceiver {
           worker.currentAction = null;
           worker.stuckMessage = undefined;
           worker.lastAction = "Waiting for input";
-          this.lockManager.releaseAll(workerId);
+          this.coordination.releaseAllLocks(workerId);
           this.generateSuggestions(worker);
           this.recordSignal(workerId, "idle_prompt", "done");
           break;
@@ -3035,7 +2765,7 @@ export class TelemetryReceiver {
       workers,
       messageQueue,
       messageIdCounter: this.messageIdCounter,
-      locks: this.lockManager.getAll(),
+      locks: this.coordination.exportLocks(),
       dispatchedTasks,
       workflowHandoffs,
       ttySessionMap,
@@ -3062,9 +2792,7 @@ export class TelemetryReceiver {
 
     this.messageIdCounter = snapshot.messageIdCounter;
 
-    for (const lock of snapshot.locks) {
-      this.lockManager.acquire(lock.path, lock.workerId);
-    }
+    this.coordination.importLocks(snapshot.locks);
 
     for (const [wid, dt] of Object.entries(snapshot.dispatchedTasks)) {
       this.dispatchedTasks.set(wid, { ...dt });

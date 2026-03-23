@@ -24,6 +24,8 @@ vi.mock("fs", () => ({
 
 vi.mock("../tty-input.js", () => ({
   sendInputToTty,
+  sendInputToTtyAsync: vi.fn(() => Promise.resolve({ ok: true })),
+  isSendInFlight: vi.fn(() => false),
 }));
 
 vi.mock("child_process", () => ({
