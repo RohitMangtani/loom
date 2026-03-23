@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "stage": "node ./scripts/stage-runtime.mjs",
+    "smoke": "node ./scripts/smoke-test.mjs",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },

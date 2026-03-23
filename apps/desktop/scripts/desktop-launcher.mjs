@@ -3,6 +3,7 @@ import { extname, join, normalize } from "path";
 import { homedir } from "os";
 import { spawn } from "child_process";
 import http from "http";
+import net from "net";
 
 const runtimeRoot = process.env.HIVE_RUNTIME_ROOT;
 if (!runtimeRoot) {
@@ -13,33 +14,48 @@ const mode = process.env.HIVE_DESKTOP_MODE || "fresh";
 const primaryUrl = process.env.HIVE_DESKTOP_PRIMARY_URL || "";
 const primaryToken = process.env.HIVE_DESKTOP_PRIMARY_TOKEN || "";
 const dashboardPort = Number(process.env.HIVE_DASHBOARD_PORT || 3310);
+const daemonPort = Number(process.env.HIVE_DAEMON_PORT || 3001);
+const wsPort = Number(process.env.HIVE_WS_PORT || 3002);
 const hiveRoot = join(runtimeRoot, "hive");
 const daemonEntry = join(hiveRoot, "apps", "daemon", "dist", "index.js");
 const dashboardRoot = join(hiveRoot, "apps", "dashboard", "out");
 const logsDir = join(homedir(), ".hive", "logs");
 const adminTokenPath = join(homedir(), ".hive", "token");
+const desktopDaemonEntry = join(runtimeRoot, "launcher", "desktop-daemon.mjs");
 
 mkdirSync(logsDir, { recursive: true });
 
 const daemonLog = openSync(join(logsDir, "desktop-daemon.log"), "a");
 const launcherLog = openSync(join(logsDir, "desktop-launcher.log"), "a");
 
-const daemonArgs = [daemonEntry];
+function portOpen(port) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port });
+    const done = (value) => {
+      socket.removeAllListeners();
+      try {
+        socket.destroy();
+      } catch {
+        // Ignore cleanup races.
+      }
+      resolve(value);
+    };
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+    socket.setTimeout(250, () => done(false));
+  });
+}
+
+const reuseExistingDaemon = mode === "fresh" && await portOpen(daemonPort) && await portOpen(wsPort);
+
+let daemonArgs = [desktopDaemonEntry];
 if (mode === "connect") {
+  daemonArgs = [daemonEntry];
   if (!primaryUrl || !primaryToken) {
     throw new Error("Connect mode requires primary URL and token.");
   }
   daemonArgs.push("--satellite", primaryUrl, primaryToken);
 }
-
-const daemon = spawn(process.execPath, daemonArgs, {
-  cwd: hiveRoot,
-  env: {
-    ...process.env,
-    HIVE_DESKTOP_WRAPPER: "1",
-  },
-  stdio: ["ignore", daemonLog, daemonLog],
-});
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -96,6 +112,7 @@ function serveFile(res, filePath) {
 }
 
 let dashboardServer = null;
+let daemon = null;
 
 if (mode === "fresh") {
   dashboardServer = http.createServer((req, res) => {
@@ -105,6 +122,9 @@ if (mode === "fresh") {
       sendJson(res, {
         mode,
         dashboardPort,
+        daemonPort,
+        wsPort,
+        reuseExistingDaemon,
         tokenReady: existsSync(adminTokenPath),
       });
       return;
@@ -133,6 +153,20 @@ if (mode === "fresh") {
   dashboardServer.listen(dashboardPort, "127.0.0.1");
 }
 
+if (!reuseExistingDaemon) {
+  daemon = spawn(process.execPath, daemonArgs, {
+    cwd: hiveRoot,
+    env: {
+      ...process.env,
+      HIVE_DESKTOP_WRAPPER: "1",
+      HIVE_RUNTIME_ROOT: runtimeRoot,
+      HIVE_DAEMON_PORT: String(daemonPort),
+      HIVE_WS_PORT: String(wsPort),
+    },
+    stdio: ["ignore", daemonLog, daemonLog],
+  });
+}
+
 let shuttingDown = false;
 
 function shutdown() {
@@ -143,28 +177,34 @@ function shutdown() {
     dashboardServer.close();
   }
 
-  try {
-    daemon.kill("SIGTERM");
-  } catch {
-    // Best effort only.
+  if (daemon) {
+    try {
+      daemon.kill("SIGTERM");
+    } catch {
+      // Best effort only.
+    }
   }
 
   setTimeout(() => {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // Best effort only.
+    if (daemon) {
+      try {
+        daemon.kill("SIGKILL");
+      } catch {
+        // Best effort only.
+      }
     }
     process.exit(0);
   }, 4_000);
 }
 
-daemon.on("exit", (code) => {
-  if (!shuttingDown && code && code !== 0) {
-    process.stderr.write(`Hive desktop daemon exited with code ${code}\n`);
-  }
-  shutdown();
-});
+if (daemon) {
+  daemon.on("exit", (code) => {
+    if (!shuttingDown && code && code !== 0) {
+      process.stderr.write(`Hive desktop daemon exited with code ${code}\n`);
+    }
+    shutdown();
+  });
+}
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
@@ -175,6 +215,6 @@ setInterval(() => {
   process.stdout.write(`[desktop-launcher] ${timestamp} ${mode}\n`);
 }, 60_000).unref();
 
-process.stdout.write(`Hive desktop launcher running in ${mode} mode.\n`);
+process.stdout.write(`Hive desktop launcher running in ${mode} mode${reuseExistingDaemon ? " (reusing existing daemon)" : ""}.\n`);
 process.stdout.write(`Logs: ${logsDir}\n`);
 process.stdout.write(`Launcher log fd: ${launcherLog}\n`);

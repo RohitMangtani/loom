@@ -34,3 +34,25 @@ jobs:
 
       - name: Build dashboard
         run: npm -w apps/dashboard run build
+
+  desktop-smoke:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Stage desktop runtime
+        run: npm run desktop:prepare
+
+      - name: Run desktop smoke test
+        run: npm run desktop:smoke

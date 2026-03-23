@@ -28,6 +28,9 @@ jobs:
       - name: Stage desktop runtime
         run: npm run desktop:prepare
 
+      - name: Run desktop smoke test
+        run: npm run desktop:smoke
+
       - name: Build signed DMG draft release
         uses: tauri-apps/tauri-action@v0
         env:

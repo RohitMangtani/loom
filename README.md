@@ -189,10 +189,16 @@ Open the dashboard URL on your phone and add it to your home screen. It runs ful
 **Desktop wrapper (Tauri, macOS-first)**
 ```bash
 npm run desktop:prepare
+npm run desktop:smoke
 npm run desktop:dev
 ```
 
-This safety-branch wrapper keeps `apps/daemon` and `apps/dashboard` intact. It stages the compiled daemon, a local static dashboard export, a bundled Node runtime, and a native onboarding shell into a Tauri app. Use `npm run desktop:build` to produce a DMG-capable desktop build once Rust and macOS signing prerequisites are installed.
+This safety-branch wrapper keeps `apps/daemon` and `apps/dashboard` intact. It stages the compiled daemon, a local static dashboard export, a bundled Node runtime, and a native onboarding shell into a Tauri app. `desktop:smoke` boots the wrapper on isolated ports with a temp HOME so QA can verify the desktop path without touching the live 3001/3002 daemon. Use `npm run desktop:build` to produce a DMG-capable desktop build once Rust and macOS signing prerequisites are installed.
+
+Builder prerequisites for the desktop path:
+- Rust toolchain (`rustup`)
+- Xcode Command Line Tools
+- Apple Developer signing + notarization secrets if you want signed public DMGs from GitHub Actions
 
 ## What It Does
 
