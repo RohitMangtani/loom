@@ -10,6 +10,10 @@ Hive is a lightweight visual coordination layer that mirrors active agent sessio
 
 One person. Multiple models. Multiple machines. The output of a team.
 
+**How it works**: [A Visual Workflow for AI Agents](https://rohitmangtani.com/writing/a-visual-workflow-for-ai-agents) covers the design thinking behind Hive, from cognitive science to the feedback loops that make visual coordination faster than reading terminal output.
+
+**Architecture**: See [docs/architecture.md](docs/architecture.md) for the technical deep dive, including the 7-layer status detection pipeline, multi-machine federation protocol, and module map.
+
 ## Install
 
 Paste this into Claude Code or Codex:
