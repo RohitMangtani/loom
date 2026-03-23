@@ -528,36 +528,23 @@ end tell
                 existing.terminalPreview = undefined;
                 this.clearPromptCache(proc.tty);
               }
-          } else if (!cachedSessionFile && proc.tty && Date.now() - proc.startedAt < 120_000) {
-            // Still no session  --  re-check for prompts and capture terminal preview
-            const prompt = this.detectPrompt(proc.tty, { bypassCache: true });
-            if (prompt) {
-              existing.status = "waiting";
-              existing.promptType = prompt.type;
-              existing.promptMessage = prompt.message;
-              existing.currentAction = prompt.message;
-              existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
-              this.telemetry.notifyExternal(existing);
-              this.promptHoldUntil.set(id, Date.now() + 20_000);
-              continue;
-            }
-            // No known prompt  --  leave tile clean (no raw terminal noise)
-          } else if (proc.tty && existing.status === "idle" && !existing.promptType && Date.now() - proc.startedAt < 600_000) {
-            // Young idle agent  --  check for trust/sandbox prompts.
+          } else if (!cachedSessionFile && proc.tty && !existing.promptType && Date.now() - proc.startedAt < 600_000) {
+            // No session file, no prompt set  --  check for trust/sandbox prompts.
+            // Runs for up to 10 minutes (previously 2 min was too short).
             // Skip if hooks have been received: the agent is established and
             // any prompt text in the terminal is stale from initialization.
             if (!this.telemetry.hasReceivedHook(id)) {
-            const prompt = this.detectPrompt(proc.tty, { bypassCache: true });
-            if (prompt) {
-              existing.status = "waiting";
-              existing.promptType = prompt.type;
-              existing.promptMessage = prompt.message;
-              existing.currentAction = prompt.message;
-              existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
-              this.telemetry.notifyExternal(existing);
-              this.promptHoldUntil.set(id, Date.now() + 20_000);
-              continue;
-            }
+              const prompt = this.detectPrompt(proc.tty, { bypassCache: true });
+              if (prompt) {
+                existing.status = "waiting";
+                existing.promptType = prompt.type;
+                existing.promptMessage = prompt.message;
+                existing.currentAction = prompt.message;
+                existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
+                this.telemetry.notifyExternal(existing);
+                this.promptHoldUntil.set(id, Date.now() + 20_000);
+                continue;
+              }
             }
           }
 
@@ -761,21 +748,12 @@ end tell
         this.telemetry.setIdleConfirmed(id, true);
       }
 
-      // Check for pre-session prompts (trust folder, sandbox) on new workers
-      // that have a TTY but no session file yet (prompt happens before JSONL starts).
-      if (proc.tty && !sessionFile && processAge < 60_000) {
-        const prompt = this.detectPrompt(proc.tty);
-        if (prompt) {
-          worker.status = "waiting";
-          worker.promptType = prompt.type;
-          worker.promptMessage = prompt.message;
-          worker.currentAction = prompt.message;
-          worker.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
-        }
-      } else if (proc.tty && sessionFile && initialStatus === "idle" && processAge < 180_000) {
-        // Young idle agent with session  --  check for trust prompt (session
-        // file may be from state store while terminal shows a prompt).
-        // Only for agents < 3min old to avoid matching stale prompt text.
+      // Check for pre-session prompts (trust folder, sandbox) on new workers.
+      // Always check regardless of sessionFile — heuristic session resolution can
+      // cross-contaminate and set sessionFile even when the agent is genuinely at
+      // the trust prompt. The prompt patterns only match recent terminal text, so
+      // false positives on established agents are prevented by the 500-char tail limit.
+      if (proc.tty && processAge < 180_000) {
         const prompt = this.detectPrompt(proc.tty);
         if (prompt) {
           worker.status = "waiting";
