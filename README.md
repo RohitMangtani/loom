@@ -12,7 +12,44 @@ One person. Multiple models. Multiple machines. The output of a team.
 
 ## Install
 
-Before you paste, you'll need to approve a few things as the agent works. These are all one-time prompts from your CLI and macOS. Say yes to each and the agent continues on its own:
+Hive has three install paths. You do not need to paste a prompt into a CLI unless you want the agent-assisted setup.
+
+### 1. Desktop wrapper (macOS, recommended)
+
+```bash
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
+npm install
+npm run desktop:prepare
+npm run desktop:smoke
+npm run desktop:dev
+```
+
+This launches the native Tauri wrapper around the same Hive daemon and dashboard. `desktop:smoke` verifies the desktop path on isolated ports with a temp HOME before the wrapper touches your live setup. Use `npm run desktop:build` for a DMG-capable build once Rust and Xcode prerequisites are installed.
+
+### 2. Direct script install
+
+Fresh primary machine:
+
+```bash
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
+bash scripts/install.sh --fresh
+```
+
+Join an existing Hive network from another Mac:
+
+```bash
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
+bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
+```
+
+The script handles setup, dependencies, daemon launch, and the hosted dashboard flow. Use this path if you want the existing hosted-dashboard install story directly, without going through Claude or Codex.
+
+### 3. Agent-assisted install (optional)
+
+If you want Claude Code or Codex to run the setup for you, approve a few one-time prompts as it works:
 
 1. **Allow shell commands** -Claude Code or Codex will ask permission to run terminal commands. Approve it.
 2. **Allow file access to `~/`** -the agent needs to write to `~/.hive/` for config and tokens. When it asks to expand scope beyond the project directory, approve it.
@@ -22,21 +59,21 @@ Paste this into Claude Code or Codex:
 
 > Install Hive for me. Clone https://github.com/RohitMangtani/hive. Before running the install script, ask me: "Do you want to (1) start a new Hive environment with your own dashboard, or (2) join an existing Hive network on another computer?" If I choose 1, run `bash scripts/install.sh --fresh`. It handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end. If I choose 2, ask me for the tunnel URL and token from the other machine, then run `bash scripts/install.sh --connect <URL> <TOKEN>` with what I provide. Give me whatever it prints at the end.
 
-**What you need beforehand:**
+**What you need beforehand for the hosted/script paths:**
 - macOS with Node.js 20+ installed
 - A free [Vercel](https://vercel.com) account (the dashboard deploys here so you can access it from any device)
 - At least one AI CLI installed: `claude`, `codex`, or `openclaw`
 
 ### After install: one-time macOS approvals
 
-Once the agent finishes and Hive is running, macOS may ask for a couple more permissions the first time you use certain features:
+Once setup finishes and Hive is running, macOS may ask for a couple more permissions the first time you use certain features:
 
 4. **Automation permission** -macOS asks "Terminal wants to control Terminal." Click **OK**. This lets Hive send messages to agents and close terminals from the dashboard. If you miss it: System Settings → Privacy & Security → Automation.
 5. **Accessibility permission** (optional). If setup compiled the auto-pilot binary, it opens System Settings and Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip if you prefer manual approval.
 
 ### Using your token
 
-Once setup finishes, the agent prints your token. Copy it. Open the dashboard URL the agent gives you, paste the token into the input field at the top of the page, and hit enter. You now have full control: send messages to agents, spawn new ones, close them with the X button on each tile, and manage your fleet. The token is saved at `~/.hive/token` if you need it again.
+Once setup finishes, Hive prints your token. Copy it. Open the dashboard URL Hive gives you, paste the token into the input field at the top of the page, and hit enter. You now have full control: send messages to agents, spawn new ones, close them with the X button on each tile, and manage your fleet. The token is saved at `~/.hive/token` if you need it again.
 
 ### Running agents
 
@@ -46,7 +83,7 @@ Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They app
 
 You can connect multiple Macs to the same Hive dashboard. Terminals on the second machine appear alongside your local ones. Chat, close, and manage them all from one screen.
 
-On the second computer, run the same install prompt or clone and run:
+On the second computer, use the same agent-assisted install or clone and run:
 
 ```bash
 bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
