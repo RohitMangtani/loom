@@ -495,6 +495,7 @@ export default function Home() {
                     onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
                     onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
                     onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
+                    onContextDrop={isViewer ? undefined : (sourceId) => send({ type: "context_transfer", sourceWorkerIds: [sourceId], targetWorkerId: w.id })}
                     onKill={!isViewer && managing ? () => {
                       send({ type: "kill", workerId: w.id });
                       if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }

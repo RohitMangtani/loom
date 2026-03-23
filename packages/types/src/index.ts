@@ -130,7 +130,7 @@ export interface ConnectedMachine {
 }
 
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file" | "user_list" | "user_create" | "user_remove";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file" | "user_list" | "user_create" | "user_remove" | "context_transfer";
   workerId?: string;
   project?: string;
   task?: string;
@@ -173,6 +173,10 @@ export interface DaemonMessage {
   userRole?: string;
   /** User management: id for user_remove. */
   userId?: string;
+  /** Context transfer: source worker IDs to pull context from. */
+  sourceWorkerIds?: string[];
+  /** Context transfer: target worker ID to send the concatenated context to. */
+  targetWorkerId?: string;
 }
 
 export interface ChatEntry {

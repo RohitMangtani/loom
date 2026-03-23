@@ -2462,6 +2462,56 @@ export class WsServer {
         break;
       }
 
+      case "context_transfer": {
+        const sourceIds = msg.sourceWorkerIds;
+        const targetId = msg.targetWorkerId;
+        if (!sourceIds?.length || !targetId) {
+          this.send(ws, { type: "error", error: "Missing sourceWorkerIds or targetWorkerId" });
+          return;
+        }
+
+        // Build a concatenated context summary from all source workers
+        const parts: string[] = [];
+        for (const sid of sourceIds) {
+          const srcWorker = this.telemetry.get(sid);
+          if (!srcWorker) continue;
+          const srcNum = srcWorker.quadrant || "?";
+          const srcName = srcWorker.projectName || "unknown";
+          const chatEntries = this.streamer.readHistory(sid);
+          const recent = chatEntries.slice(-20);
+          if (recent.length === 0) {
+            parts.push(`--- Q${srcNum} (${srcName}) ---\nNo recent messages.`);
+            continue;
+          }
+          const lines = recent.map((e: { role: string; text: string }) => {
+            const prefix = e.role === "user" ? "Human" : "Agent";
+            return `${prefix}: ${e.text}`;
+          });
+          parts.push(`--- Q${srcNum} (${srcName}) ---\n${lines.join("\n")}`);
+        }
+
+        if (parts.length === 0) {
+          this.send(ws, { type: "error", error: "No context found for source workers" });
+          return;
+        }
+
+        const contextMessage = `Context transferred from ${sourceIds.length === 1 ? "another agent" : `${sourceIds.length} agents`}:\n\n${parts.join("\n\n")}`;
+
+        this.telemetry.sendToWorkerAsync(targetId, contextMessage, {
+          source: "dashboard",
+          queueIfBusy: false,
+          markDashboardInput: true,
+        }).then((result) => {
+          if (!result.ok) {
+            this.send(ws, { type: "error", error: result.error });
+          }
+          if (result.ok && activeUser) {
+            this.broadcastActivity(activeUser, `Transferred context to ${targetId}`);
+          }
+        });
+        break;
+      }
+
       case "upload_file": {
         if (!msg.workerId || !msg.requestId || !msg.fileName || !msg.dataBase64) {
           this.send(ws, { type: "error", error: "Missing upload fields" });

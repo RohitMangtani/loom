@@ -220,11 +220,12 @@ export type { DotColor };
 const FLAG_COLOR = "#f97316";
 
 export function AgentCard({
-  worker, num, selected, flagged, managing, fill, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill,
+  worker, num, selected, flagged, managing, fill, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill, onContextDrop,
 }: {
-  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; fill?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void;
+  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; fill?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void; onContextDrop?: (sourceId: string) => void;
 }) {
   const [finishedPulse, setFinishedPulse] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const prevStatusRef = useRef(worker.status);
   const color = dotColor(worker);
   const stuck = color === "yellow";
@@ -248,7 +249,11 @@ export function AgentCard({
     <div
       onClick={managing ? undefined : onClick}
       onPointerDown={managing ? undefined : onPointerDown}
-      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""} ${fill ? "h-full" : ""}`}
+      onDragOver={onContextDrop ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDragOver(true); } : undefined}
+      onDragEnter={onContextDrop ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
+      onDragLeave={onContextDrop ? () => setDragOver(false) : undefined}
+      onDrop={onContextDrop ? (e) => { e.preventDefault(); setDragOver(false); const srcId = e.dataTransfer.getData("text/x-hive-worker"); if (srcId && srcId !== worker.id) onContextDrop(srcId); } : undefined}
+      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""} ${fill ? "h-full" : ""} ${dragOver ? "card-drop-target" : ""}`}
       style={{ borderLeftColor: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
       {finishedPulse && (
@@ -273,6 +278,21 @@ export function AgentCard({
             <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
+      )}
+      {!managing && onContextDrop && (
+        <div
+          draggable
+          onDragStart={(e) => { e.dataTransfer.setData("text/x-hive-worker", worker.id); e.dataTransfer.effectAllowed = "copy"; e.stopPropagation(); }}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-2 right-8 w-4 h-4 flex items-center justify-center cursor-grab active:cursor-grabbing z-10 opacity-30 hover:opacity-70 transition-opacity"
+          title={`Drag Q${num} context to another agent`}
+        >
+          <svg width="8" height="10" viewBox="0 0 8 10" fill="currentColor">
+            <circle cx="2" cy="1.5" r="1" /><circle cx="6" cy="1.5" r="1" />
+            <circle cx="2" cy="5" r="1" /><circle cx="6" cy="5" r="1" />
+            <circle cx="2" cy="8.5" r="1" /><circle cx="6" cy="8.5" r="1" />
+          </svg>
+        </div>
       )}
       {!managing && onFlag && (
         <button

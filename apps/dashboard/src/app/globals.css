@@ -70,6 +70,12 @@
     background: rgba(59, 130, 246, 0.04);
   }
 
+  .card-drop-target {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35), inset 0 0 20px rgba(59, 130, 246, 0.06);
+    background: rgba(59, 130, 246, 0.06) !important;
+  }
+
   .card-finished {
     animation: card-finish-pulse 1.4s ease-out;
   }
