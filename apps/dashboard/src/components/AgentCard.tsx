@@ -252,7 +252,7 @@ export function AgentCard({
       onDragOver={onContextDrop ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDragOver(true); } : undefined}
       onDragEnter={onContextDrop ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
       onDragLeave={onContextDrop ? () => setDragOver(false) : undefined}
-      onDrop={onContextDrop ? (e) => { e.preventDefault(); setDragOver(false); const srcId = e.dataTransfer.getData("text/x-hive-worker"); if (srcId && srcId !== worker.id) onContextDrop(srcId); } : undefined}
+      onDrop={onContextDrop ? (e) => { e.preventDefault(); setDragOver(false); const srcId = e.dataTransfer.getData("text/plain"); if (srcId && srcId !== worker.id) onContextDrop(srcId); } : undefined}
       className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""} ${fill ? "h-full" : ""} ${dragOver ? "card-drop-target" : ""}`}
       style={{ borderLeftColor: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
@@ -281,16 +281,17 @@ export function AgentCard({
       )}
       {!managing && onContextDrop && (
         <div
-          draggable
-          onDragStart={(e) => { e.dataTransfer.setData("text/x-hive-worker", worker.id); e.dataTransfer.effectAllowed = "copy"; e.stopPropagation(); }}
+          draggable={true}
+          onDragStart={(e) => { e.dataTransfer.setData("text/plain", worker.id); e.dataTransfer.effectAllowed = "copyMove"; }}
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-2 right-8 w-4 h-4 flex items-center justify-center cursor-grab active:cursor-grabbing z-10 opacity-30 hover:opacity-70 transition-opacity"
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute top-2 right-8 w-5 h-5 flex items-center justify-center cursor-grab active:cursor-grabbing z-20 opacity-40 hover:opacity-80 transition-opacity"
           title={`Drag Q${num} context to another agent`}
         >
-          <svg width="8" height="10" viewBox="0 0 8 10" fill="currentColor">
-            <circle cx="2" cy="1.5" r="1" /><circle cx="6" cy="1.5" r="1" />
-            <circle cx="2" cy="5" r="1" /><circle cx="6" cy="5" r="1" />
-            <circle cx="2" cy="8.5" r="1" /><circle cx="6" cy="8.5" r="1" />
+          <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
+            <circle cx="2.5" cy="2" r="1.2" /><circle cx="7.5" cy="2" r="1.2" />
+            <circle cx="2.5" cy="6" r="1.2" /><circle cx="7.5" cy="6" r="1.2" />
+            <circle cx="2.5" cy="10" r="1.2" /><circle cx="7.5" cy="10" r="1.2" />
           </svg>
         </div>
       )}
