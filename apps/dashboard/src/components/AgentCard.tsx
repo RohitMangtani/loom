@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { WorkerContextSnapshot, WorkerState } from "@/lib/types";
+import type { WorkerState } from "@/lib/types";
 
 type DotColor = "green" | "yellow" | "red";
 
@@ -214,72 +213,30 @@ function modelLabel(w: WorkerState): string {
   return m.charAt(0).toUpperCase() + m.slice(1);
 }
 
-function summarizeMessage(text: string | undefined, max = 96): string | null {
-  if (!text) return null;
-  const cleaned = text.replace(/\s+/g, " ").trim();
-  if (!cleaned) return null;
-  return cleaned.length > max ? `${cleaned.slice(0, max - 3)}...` : cleaned;
-}
-
-function latestByRole(context: WorkerContextSnapshot | null | undefined, role: "user" | "agent") {
-  if (!context) return null;
-  for (let i = context.recentMessages.length - 1; i >= 0; i--) {
-    if (context.recentMessages[i]?.role === role) return context.recentMessages[i];
-  }
-  return null;
-}
-
 export { dotColor, DOT_BG, statusLabel, statusWord, badgeStyle, idleSuggestions, modelLabel };
 export type { DotColor };
 
 const FLAG_COLOR = "#f97316";
 
 export function AgentCard({
-  worker, num, selected, flagged, managing, context, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill, onRequestContext, onOpenOutput,
+  worker, num, selected, flagged, managing, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill,
 }: {
-  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; context?: WorkerContextSnapshot | null; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void; onRequestContext?: () => void; onOpenOutput?: () => void;
+  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void;
 }) {
-  const [logsOpen, setLogsOpen] = useState(false);
-  const [finishedPulse, setFinishedPulse] = useState(false);
-  const prevStatusRef = useRef(worker.status);
   const color = dotColor(worker);
   const stuck = color === "yellow";
   const buttons = stuck && !worker.promptType ? quickButtons(worker) : [];
   const idle = color === "red";
   const hasPrompt = !!worker.promptType;
   const secondary = secondarySummary(worker);
-  const latestInstruction = latestByRole(context, "user");
-  const latestOutput = latestByRole(context, "agent");
-  const artifactPreview = context?.recentArtifacts.slice(0, 3) || [];
-
-  useEffect(() => {
-    if (logsOpen) onRequestContext?.();
-  }, [logsOpen, onRequestContext, worker.lastActionAt]);
-
-  useEffect(() => {
-    const prev = prevStatusRef.current;
-    if (prev === "working" && worker.status === "idle") {
-      setFinishedPulse(true);
-      const timer = window.setTimeout(() => setFinishedPulse(false), 1600);
-      prevStatusRef.current = worker.status;
-      return () => window.clearTimeout(timer);
-    }
-    prevStatusRef.current = worker.status;
-  }, [worker.status]);
 
   return (
     <div
       onClick={managing ? undefined : onClick}
       onPointerDown={managing ? undefined : onPointerDown}
-      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""}`}
+      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""}`}
       style={{ borderLeftColor: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
-      {finishedPulse && (
-        <>
-          <span className="completion-flash" aria-hidden="true" />
-          <span className="completion-chip">Done</span>
-        </>
-      )}
       {managing && onKill && (
         <button
           type="button"
@@ -391,67 +348,11 @@ export function AgentCard({
             </div>
           )}
 
-          {(onRequestContext || onOpenOutput) && (
-            <div className="mt-3 border-t border-[rgba(255,255,255,0.06)] pt-2.5" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setLogsOpen((open) => !open)}
-                  className="tile-inline-btn"
-                >
-                  {logsOpen ? "Hide logs" : "Show logs"}
-                </button>
-                {onOpenOutput && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onRequestContext?.();
-                      onOpenOutput();
-                    }}
-                    className="tile-inline-btn tile-inline-btn-accent"
-                  >
-                    Jump to last output
-                  </button>
-                )}
-              </div>
-
-              {logsOpen && (
-                <div className="mt-2.5 rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.03)] px-3 py-3">
-                  {!context ? (
-                    <p className="text-[10px] leading-5 text-[var(--text-light)]">Loading latest context...</p>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {latestInstruction && (
-                        <div>
-                          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--text-light)]">Latest instruction</p>
-                          <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">{summarizeMessage(latestInstruction.text, 140)}</p>
-                        </div>
-                      )}
-                      {latestOutput && (
-                        <div>
-                          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--text-light)]">Latest output</p>
-                          <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">{summarizeMessage(latestOutput.text, 140)}</p>
-                        </div>
-                      )}
-                      {artifactPreview.length > 0 && (
-                        <div>
-                          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--text-light)]">Recent files</p>
-                          <div className="mt-1 flex flex-wrap gap-1.5">
-                            {artifactPreview.map((artifact) => (
-                              <span key={`${artifact.path}:${artifact.ts}`} className="rounded-full border border-[rgba(59,130,246,0.2)] bg-[rgba(59,130,246,0.08)] px-2 py-1 text-[10px] text-[var(--text)]">
-                                {artifact.path.split("/").slice(-2).join("/")}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {!latestInstruction && !latestOutput && artifactPreview.length === 0 && (
-                        <p className="text-[10px] leading-5 text-[var(--text-light)]">{summarizeMessage(context.contextSummary, 200)}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+          {idle && (
+            <div className="ready-overlay absolute inset-0 flex flex-col items-center justify-center rounded-[10px]">
+              <span className="text-4xl font-bold tracking-[0.25em] uppercase text-white opacity-[0.16] pointer-events-none">
+                READY
+              </span>
             </div>
           )}
         </>

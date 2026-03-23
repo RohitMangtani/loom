@@ -7,8 +7,6 @@ import { AgentCard } from "@/components/AgentCard";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { SpawnDialog } from "@/components/SpawnDialog";
-import { QuickStartDialog } from "@/components/QuickStartDialog";
-import { OutputViewerDialog } from "@/components/OutputViewerDialog";
 import type { WorkerState } from "@/lib/types";
 import { usePushSubscription } from "@/components/ServiceWorker";
 
@@ -89,8 +87,6 @@ export default function Home() {
   const [showReviews, setShowReviews] = useState(false);
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
-  const [showQuickStartDialog, setShowQuickStartDialog] = useState(false);
-  const [viewerWorkerId, setViewerWorkerId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -137,7 +133,7 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, requestWorkerContext, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
 
@@ -195,9 +191,7 @@ export default function Home() {
   const activeCount = numbered.filter(({ worker: w }) => w.status === "working").length;
   const stuckCount = numbered.filter(({ worker: w }) => w.status === "stuck").length;
   const idleCount = numbered.filter(({ worker: w }) => w.status === "idle").length;
-  const emptyCount = MAX_SLOTS - numbered.length;
   const selectedEntry = selectedId ? numbered.find(({ worker: w }) => w.id === selectedId) : null;
-  const viewerEntry = viewerWorkerId ? numbered.find(({ worker: w }) => w.id === viewerWorkerId) : null;
 
   const rawEntries = selectedEntry ? chatEntries.get(selectedEntry.worker.id) : undefined;
   const memoEntries = useMemo(() => (rawEntries ?? []).slice(-200), [rawEntries]);
@@ -387,24 +381,13 @@ export default function Home() {
           ) : !isViewer && (
             <>
               {numbered.length < MAX_SLOTS && (
-                <>
-                  {emptyCount >= 3 && (
-                    <button
-                      type="button"
-                      onClick={() => setShowQuickStartDialog(true)}
-                      className="px-2 py-0.5 rounded border border-[rgba(59,130,246,0.3)] text-[var(--text)] bg-[rgba(59,130,246,0.08)] hover:border-[var(--accent)] hover:bg-[rgba(59,130,246,0.14)] transition-colors cursor-pointer"
-                    >
-                      Quick Start
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setShowSpawnDialog(true)}
-                    className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
-                  >
-                    + Agent
-                  </button>
-                </>
+                <button
+                  type="button"
+                  onClick={() => setShowSpawnDialog(true)}
+                  className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+                >
+                  + Agent
+                </button>
               )}
               {numbered.length > 0 && (
                 <button
@@ -442,7 +425,6 @@ export default function Home() {
                     selected={!isViewer && selectedId === w.id}
                     flagged={flaggedIds.has(w.id)}
                     managing={managing}
-                    context={workerContexts.get(w.id) || null}
                     onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
                     onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
                     onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
@@ -450,11 +432,6 @@ export default function Home() {
                     onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
                     onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
                     onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
-                    onRequestContext={() => requestWorkerContext(w.id, { includeHistory: true, historyLimit: 10 })}
-                    onOpenOutput={() => {
-                      requestWorkerContext(w.id, { includeHistory: true, historyLimit: 10 });
-                      setViewerWorkerId(w.id);
-                    }}
                     onKill={!isViewer && managing ? () => {
                       send({ type: "kill", workerId: w.id });
                       if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
@@ -467,35 +444,7 @@ export default function Home() {
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center">
-          {isViewer ? (
-            <span className="text-sm text-[var(--text-muted)]">No agents running</span>
-          ) : (
-            <div className="mx-6 w-full max-w-xl rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(59,130,246,0.08),rgba(20,20,22,0.98))] p-6 text-center shadow-[0_24px_90px_rgba(0,0,0,0.4)]">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--accent)]">Quick Start</p>
-              <h2 className="mt-3 text-2xl font-semibold text-[var(--text)]">Start with a ready-made team</h2>
-              <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
-                Skip the setup overhead. Launch a pre-configured team for competitor research, weekly reporting, or alert coverage, then manage them normally from the same grid.
-              </p>
-              <div className="mt-5 flex flex-col justify-center gap-3 sm:flex-row">
-                {emptyCount >= 3 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowQuickStartDialog(true)}
-                    className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white hover:opacity-95 transition-opacity"
-                  >
-                    Open Quick Start
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowSpawnDialog(true)}
-                  className="rounded-2xl border border-[var(--border)] px-5 py-3 text-sm font-semibold text-[var(--text)] hover:border-[var(--text-light)] transition-colors"
-                >
-                  Spawn One Manually
-                </button>
-              </div>
-            </div>
-          )}
+          <span className="text-sm text-[var(--text-muted)]">No agents running</span>
         </div>
       )}
 
@@ -575,33 +524,6 @@ export default function Home() {
             setShowSpawnDialog(false);
           }}
           onClose={() => setShowSpawnDialog(false)}
-        />
-      )}
-
-      {showQuickStartDialog && (
-        <QuickStartDialog
-          models={models}
-          machines={machines}
-          availableSlots={emptyCount}
-          pushState={pushState}
-          onEnablePush={requestPush}
-          onLaunch={(tasks, model, machine) => {
-            tasks.forEach((task, index) => {
-              window.setTimeout(() => {
-                send({ type: "spawn", project: "~", model, task, machine });
-              }, index * 150);
-            });
-            setShowQuickStartDialog(false);
-          }}
-          onClose={() => setShowQuickStartDialog(false)}
-        />
-      )}
-
-      {viewerEntry && (
-        <OutputViewerDialog
-          worker={viewerEntry.worker}
-          context={workerContexts.get(viewerEntry.worker.id) || null}
-          onClose={() => setViewerWorkerId(null)}
         />
       )}
 
