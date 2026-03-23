@@ -40,6 +40,14 @@ bash scripts/install.sh --fresh        # new environment
 bash scripts/install.sh --connect URL TOKEN  # join existing
 ```
 
+Inside the repo, the same flows are available through the local CLI wrapper:
+
+```bash
+npm run hive -- init --fresh
+npm run hive -- init --connect URL TOKEN
+npm run hive -- init --desktop
+```
+
 ### After install: one-time macOS approvals
 
 Once setup finishes and Hive is running, macOS may ask for a couple more permissions the first time you use certain features:

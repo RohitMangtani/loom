@@ -12,7 +12,7 @@ npm install
 
 ### Requirements
 
-- **macOS** (native). Linux platform layer exists (`src/platform/linux/`) but is not yet wired into the daemon.
+- **macOS** or **Linux with tmux**. The Linux platform layer is wired through the daemon now, but still needs more live-host hardening.
 - **Node.js 20+**
 - At least one AI CLI: `claude`, `codex`, or `openclaw`
 
@@ -71,6 +71,7 @@ hive/
 │   ├── dashboard/       # Next.js dashboard (static export)
 │   └── desktop/         # Tauri desktop wrapper
 ├── packages/
+│   ├── cli/             # Local `hive` CLI wrapper for init/doctor flows
 │   ├── types/           # Shared TypeScript types
 │   └── protocol/        # Protocol spec (REST, WebSocket, hooks)
 ├── scripts/             # Install, deploy, recording scripts
@@ -90,7 +91,8 @@ See [docs/architecture.md](docs/architecture.md) for a detailed data flow explan
 
 ### Bigger contributions
 
-- **Wire Linux/tmux platform into the daemon** — Platform interfaces and a tmux-based implementation exist at `src/platform/`. The remaining work is wiring `loadPlatform()` into the daemon entry point and replacing direct macOS imports. See [GitHub issue #4](https://github.com/RohitMangtani/hive/issues/4).
+- **Live-smoke and harden the Linux/tmux runtime** — The platform layer is now wired through the daemon, but it still needs more verification on real Linux hosts, better layout polish, and failure-mode hardening.
+- **Publish the CLI/init flow** — `packages/cli` now owns the local `hive init` and `hive doctor` entry points. The next step is turning that into a polished npm install surface with a final package name.
 - **Agent plugin system** — Let users add new agent types via config files
 - **VS Code extension** — Show fleet status in the status bar using the protocol spec
 

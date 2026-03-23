@@ -1,0 +1,11 @@
+{
+  "name": "@hive/cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "hive": "./bin/hive.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

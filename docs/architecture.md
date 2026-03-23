@@ -135,13 +135,14 @@ The dashboard is a Next.js static export deployed to Vercel. It connects via Web
 |--------|---------|
 | `platform/interfaces.ts` | Cross-platform interfaces (TerminalIO, ProcessDiscoverer, WindowManager) |
 | `platform/macos/index.ts` | Thin adapter wrapping existing macOS-specific daemon modules |
-| `platform/linux/` | tmux + /proc implementation (written, not yet wired into daemon) |
+| `platform/linux/` | tmux + /proc implementation for pane-based Linux runtime control |
 | `platform/index.ts` | Auto-detect OS and load the correct platform at startup |
 
 ### Packages
 
 | Package | Purpose |
 |---------|---------|
+| `@hive/cli` | Local CLI wrapper for `hive init` and `hive doctor` flows |
 | `@hive/types` | Shared TypeScript interfaces (WorkerState, etc.) |
 | `@hive/protocol` | Typed definitions for all REST, WebSocket, and hook contracts |
 
@@ -160,7 +161,7 @@ Satellite self-healing: disconnected satellites escalate from reconnect → loca
 
 ## Platform Abstraction
 
-The daemon currently runs on macOS natively. A cross-platform abstraction layer exists at `apps/daemon/src/platform/` with interfaces and a Linux/tmux implementation, but is not yet wired into the daemon entry point.
+The daemon now loads its platform at startup through `apps/daemon/src/platform/` and routes discovery, terminal I/O, layout, local spawn/kill, and satellite-side control through that abstraction.
 
 ### Interfaces (`platform/interfaces.ts`)
 
@@ -173,7 +174,7 @@ The daemon currently runs on macOS natively. A cross-platform abstraction layer 
 | Platform | Location | Status |
 |----------|----------|--------|
 | macOS | `platform/macos/index.ts` | Thin wrapper over existing `tty-input.ts`, `discovery.ts`, `arrange-windows.ts` |
-| Linux | `platform/linux/` | tmux-based: `send-keys`, `capture-pane`, `/proc` reads. Written, not yet integration-tested. |
+| Linux | `platform/linux/` | tmux-based: `send-keys`, `capture-pane`, `/proc` reads, pane-based layout. Wired into runtime, with live Linux host validation still pending. |
 
 ### macOS-specific code (current direct imports)
 
@@ -184,12 +185,12 @@ The daemon currently runs on macOS natively. A cross-platform abstraction layer 
 | `arrange-windows.ts` | AppleScript window positioning |
 | `process-mgr.ts` | Terminal.app tab spawning |
 
-### What remains for Linux support
+### What remains for Linux hardening
 
-The platform interfaces and Linux implementation exist. The remaining work is:
-1. Wire `loadPlatform()` from `platform/index.ts` into the daemon entry point
-2. Replace direct imports of `tty-input.ts` and `arrange-windows.ts` with platform calls
-3. Integration test on a Linux machine with tmux installed
-4. Handle differences in `ps` output format between macOS and Linux
+The platform interfaces and Linux implementation are live in the daemon now. The remaining work is:
+1. Integration test on a real Linux machine with tmux installed
+2. Refine pane layout behavior to better match Hive's visual quadrant model under different terminal sizes
+3. Harden Linux-specific failure modes around tmux session loss, reconnects, and process cleanup
+4. Expand end-to-end coverage beyond the unit-tested tmux pane manager
 
 See [GitHub issue #4](https://github.com/RohitMangtani/hive/issues/4).
