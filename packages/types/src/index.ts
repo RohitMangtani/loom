@@ -10,6 +10,15 @@ export interface WorkerArtifact {
   ts: number;
 }
 
+export interface UploadedFileRef {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  path: string;
+  machine?: string;
+}
+
 export interface WorkerState {
   id: string;
   pid: number;
@@ -114,7 +123,7 @@ export interface ConnectedMachine {
 }
 
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file";
   workerId?: string;
   project?: string;
   task?: string;
@@ -143,6 +152,14 @@ export interface DaemonMessage {
   includeHistory?: boolean;
   /** Max history entries to include in a worker context response. */
   historyLimit?: number;
+  /** Correlates an upload_file request with its upload_result response. */
+  requestId?: string;
+  /** Upload metadata for upload_file messages. */
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+  /** Base64-encoded file payload for upload_file messages. */
+  dataBase64?: string;
 }
 
 export interface ChatEntry {
@@ -168,7 +185,7 @@ export interface ReviewItem {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context";
+  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result";
   workers?: WorkerState[];
   worker?: WorkerState;
   /** Connected satellite machines (for spawn dialog machine picker). */
@@ -188,4 +205,7 @@ export interface DaemonResponse {
   subscribed?: boolean;
   /** On-demand worker context snapshot used by the dashboard viewer. */
   context?: WorkerContextSnapshot | null;
+  requestId?: string;
+  ok?: boolean;
+  upload?: UploadedFileRef;
 }

@@ -13,7 +13,7 @@ import { homedir, platform, arch, cpus, totalmem } from "os";
 import { join, basename } from "path";
 import { unlinkSync, existsSync, writeFileSync, readFileSync, mkdirSync, readdirSync, statSync } from "fs";
 import { execFile, execFileSync } from "child_process";
-import type { MachineCapabilities } from "@hive/types";
+import type { MachineCapabilities, UploadedFileRef } from "@hive/types";
 import { ProcessDiscovery } from "./discovery.js";
 import { TelemetryReceiver } from "./telemetry.js";
 import { SessionStreamer } from "./session-stream.js";
@@ -30,6 +30,7 @@ import {
   SATELLITE_STABLE_CONNECTION_MS,
 } from "./satellite-recovery.js";
 import { appendControlPlaneAudit } from "./control-plane-audit.js";
+import { storeUploadedFile } from "./upload-store.js";
 import {
   FederationSocketClient,
   type FederationDisconnectMeta,
@@ -79,6 +80,7 @@ interface SatelliteUpMessage {
   chatHistory?: unknown[];
   data?: unknown;
   ts?: number;
+  upload?: UploadedFileRef;
 }
 
 /** Message from primary → satellite */
@@ -104,6 +106,10 @@ interface SatelliteDownMessage {
   includeHistory?: boolean; // satellite_context: include conversation history
   historyLimit?: number;    // satellite_context: max history entries
   ts?: number;
+  fileName?: string;
+  mimeType?: string;
+  size?: number;
+  dataBase64?: string;
 }
 
 /** Probe this machine for hardware and software capabilities. */
@@ -890,6 +896,37 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           context,
           chatHistory,
         } as unknown as SatelliteUpMessage);
+        break;
+      }
+
+      case "satellite_upload": {
+        if (!msg.fileName || !msg.dataBase64) {
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: "Missing upload payload" });
+          return;
+        }
+
+        try {
+          const upload = storeUploadedFile({
+            fileName: msg.fileName,
+            mimeType: msg.mimeType,
+            dataBase64: msg.dataBase64,
+            size: msg.size,
+            machine: this.machineId,
+          });
+          this.send({
+            type: "satellite_result",
+            requestId: msg.requestId,
+            ok: true,
+            upload,
+          } as unknown as SatelliteUpMessage);
+        } catch (err) {
+          this.send({
+            type: "satellite_result",
+            requestId: msg.requestId,
+            ok: false,
+            error: err instanceof Error ? err.message : "Upload failed",
+          });
+        }
         break;
       }
 

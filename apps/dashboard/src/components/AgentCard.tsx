@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type { WorkerState } from "@/lib/types";
 
 type DotColor = "green" | "yellow" | "red";
@@ -223,6 +224,8 @@ export function AgentCard({
 }: {
   worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void;
 }) {
+  const [finishedPulse, setFinishedPulse] = useState(false);
+  const prevStatusRef = useRef(worker.status);
   const color = dotColor(worker);
   const stuck = color === "yellow";
   const buttons = stuck && !worker.promptType ? quickButtons(worker) : [];
@@ -230,13 +233,30 @@ export function AgentCard({
   const hasPrompt = !!worker.promptType;
   const secondary = secondarySummary(worker);
 
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    if (prev === "working" && worker.status === "idle") {
+      setFinishedPulse(true);
+      const timer = window.setTimeout(() => setFinishedPulse(false), 1600);
+      prevStatusRef.current = worker.status;
+      return () => window.clearTimeout(timer);
+    }
+    prevStatusRef.current = worker.status;
+  }, [worker.status]);
+
   return (
     <div
       onClick={managing ? undefined : onClick}
       onPointerDown={managing ? undefined : onPointerDown}
-      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""}`}
+      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""}`}
       style={{ borderLeftColor: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
+      {finishedPulse && (
+        <>
+          <span className="completion-flash" aria-hidden="true" />
+          <span className="completion-chip">Done</span>
+        </>
+      )}
       {managing && onKill && (
         <button
           type="button"

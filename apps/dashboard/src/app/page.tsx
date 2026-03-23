@@ -133,7 +133,7 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines, uploadToWorker } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
 
@@ -444,7 +444,26 @@ export default function Home() {
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center">
-          <span className="text-sm text-[var(--text-muted)]">No agents running</span>
+          {isViewer ? (
+            <span className="text-sm text-[var(--text-muted)]">No agents running</span>
+          ) : (
+            <div className="mx-6 w-full max-w-xl rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(59,130,246,0.08),rgba(20,20,22,0.98))] p-6 text-center shadow-[0_24px_90px_rgba(0,0,0,0.4)]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--accent)]">Dashboard Ready</p>
+              <h2 className="mt-3 text-2xl font-semibold text-[var(--text)]">Start your first agent</h2>
+              <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
+                Launch a terminal-backed worker, then manage prompts, approvals, uploads, and chat from the same grid.
+              </p>
+              <div className="mt-5 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setShowSpawnDialog(true)}
+                  className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white hover:opacity-95 transition-opacity"
+                >
+                  Spawn Agent
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -486,6 +505,7 @@ export default function Home() {
             }
             return ok;
           }}
+          onUploadFile={(payload) => uploadToWorker(selectedEntry.worker.id, payload)}
           onDismiss={() => {
             setChatExpanded(false);
             setSelectedId(null);

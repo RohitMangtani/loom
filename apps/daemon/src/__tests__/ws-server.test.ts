@@ -49,6 +49,9 @@ function createServer(initialWorkers: unknown[] = []) {
     getAll() {
       return workers;
     },
+    get(workerId: string) {
+      return (workers as Array<{ id: string }>).find((worker) => worker.id === workerId) || null;
+    },
     getReviews() {
       return [];
     },
@@ -198,6 +201,55 @@ describe("WsServer pushState", () => {
         contextSummary: "demo context",
       }),
     });
+  });
+
+  it("stores uploaded files for a local worker and returns the machine-local path", () => {
+    const home = mkdtempSync(join(tmpdir(), "hive-ws-upload-"));
+    vi.stubEnv("HOME", home);
+    try {
+      const harness = createServer([{
+        id: "w1",
+        status: "idle",
+        tty: "ttys001",
+        project: "/tmp/demo",
+        projectName: "demo",
+      }]);
+      const server = harness.server as unknown as {
+        handleMessage: (ws: WebSocket, msg: Record<string, unknown>) => void;
+      };
+      const client = {
+        readyState: WebSocket.OPEN,
+        send: vi.fn(),
+      } as unknown as WebSocket;
+      const payload = Buffer.from("hello from phone\n", "utf-8");
+
+      server.handleMessage(client, {
+        type: "upload_file",
+        requestId: "req_1",
+        workerId: "w1",
+        fileName: "notes?.txt",
+        mimeType: "text/plain",
+        size: payload.length,
+        dataBase64: payload.toString("base64"),
+      });
+
+      const sent = (client.send as unknown as { mock: { calls: [string][] } }).mock.calls
+        .map(([raw]) => JSON.parse(raw) as Record<string, unknown>);
+      expect(sent).toContainEqual(expect.objectContaining({
+        type: "upload_result",
+        requestId: "req_1",
+        workerId: "w1",
+        ok: true,
+        upload: expect.objectContaining({
+          name: "notes-.txt",
+          mimeType: "text/plain",
+          size: payload.length,
+        }),
+      }));
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("keeps immediate worker_update broadcasts unchanged", () => {

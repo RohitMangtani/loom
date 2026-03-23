@@ -10,12 +10,13 @@ import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
 import { spawnTerminalWindow, closeTerminalWindow } from "./arrange-windows.js";
 import { validateToken } from "./auth.js";
 import { ProcessDiscovery } from "./discovery.js";
-import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState, ConnectedMachine, MachineCapabilities } from "./types.js";
+import type { ChatEntry, DaemonMessage, DaemonResponse, WorkerState, ConnectedMachine, MachineCapabilities, UploadedFileRef } from "./types.js";
 import { execFileSync } from "child_process";
 import type { WebPushManager } from "./web-push.js";
 import { scanLocalProjects } from "./project-discovery.js";
 import { appendControlPlaneAudit, getControlPlaneAuditPath, readControlPlaneAudit } from "./control-plane-audit.js";
 import { normalizeExecTimeout, resolveExecCwd, runShellExec } from "./shell-exec.js";
+import { storeUploadedFile } from "./upload-store.js";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
 function getLocalVersion(): string {
@@ -2325,6 +2326,81 @@ export class WsServer {
             error: err instanceof Error ? err.message : "Failed to load worker context",
           });
         });
+        break;
+      }
+
+      case "upload_file": {
+        if (!msg.workerId || !msg.requestId || !msg.fileName || !msg.dataBase64) {
+          this.send(ws, { type: "error", error: "Missing upload fields" });
+          return;
+        }
+
+        const sendResult = (payload: { ok: boolean; upload?: UploadedFileRef; error?: string }) => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          this.send(ws, {
+            type: "upload_result",
+            workerId: msg.workerId,
+            requestId: msg.requestId,
+            ok: payload.ok,
+            ...(payload.upload ? { upload: payload.upload } : {}),
+            ...(payload.error ? { error: payload.error } : {}),
+          });
+        };
+
+        const uploadSat = this.getSatelliteForWorker(msg.workerId);
+        if (uploadSat) {
+          const parsed = this.parseSatelliteWorker(msg.workerId)!;
+          const requestId = `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          void this.requestSatelliteCommand(uploadSat, requestId, {
+            type: "satellite_upload",
+            requestId,
+            workerId: msg.workerId,
+            localWorkerId: parsed.localId,
+            fileName: msg.fileName,
+            mimeType: msg.mimeType,
+            size: msg.size,
+            dataBase64: msg.dataBase64,
+          }, 30_000).then((result) => {
+            if (result.ok) {
+              sendResult({
+                ok: true,
+                upload: result.upload as UploadedFileRef | undefined,
+              });
+            } else {
+              sendResult({
+                ok: false,
+                error: typeof result.error === "string" ? result.error : "Upload failed",
+              });
+            }
+          }).catch((err) => {
+            sendResult({
+              ok: false,
+              error: err instanceof Error ? err.message : "Upload failed",
+            });
+          });
+          break;
+        }
+
+        const uploadWorker = this.telemetry.get(msg.workerId);
+        if (!uploadWorker) {
+          this.send(ws, { type: "error", error: `Worker ${msg.workerId} not found` });
+          return;
+        }
+
+        try {
+          const upload = storeUploadedFile({
+            fileName: msg.fileName,
+            mimeType: msg.mimeType,
+            dataBase64: msg.dataBase64,
+            size: msg.size,
+          });
+          sendResult({ ok: true, upload });
+        } catch (err) {
+          sendResult({
+            ok: false,
+            error: err instanceof Error ? err.message : "Upload failed",
+          });
+        }
         break;
       }
 

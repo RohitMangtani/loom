@@ -1,19 +1,44 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatEntry, WorkerState } from "@/lib/types";
+import type { ChatEntry, UploadedFileRef, WorkerState } from "@/lib/types";
 import { dotColor, DOT_BG, statusLabel, quickButtons, modelLabel } from "./AgentCard";
 import { describePins, type Pin } from "./LivePreview";
 
+const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+
+function formatBytes(size: number): string {
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} B`;
+}
+
+function attachmentsPrompt(attachments: UploadedFileRef[]): string {
+  if (attachments.length === 0) return "";
+  return `\n\n## Uploaded attachments\nThese files are available on your local machine. Use them if relevant.\n${attachments.map((file) => `- ${file.name} (${file.mimeType}, ${formatBytes(file.size)}) at \`${file.path}\``).join("\n")}`;
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 export function ChatPanel({
   worker, num, entries, draft, onDraftChange, onSend, onClose, onDismiss, expanded, onExpand,
-  previewUrl, onPreviewUrlChange,
+  previewUrl, onPreviewUrlChange, onUploadFile,
 }: {
   worker: WorkerState; num: number; entries: ChatEntry[];
   draft: string; onDraftChange: (v: string) => void;
   onSend: (msg: string) => boolean; onClose: () => void; onDismiss: () => void;
   expanded: boolean; onExpand: (v: boolean) => void;
   previewUrl: string; onPreviewUrlChange: (url: string) => void;
+  onUploadFile: (payload: { fileName: string; mimeType?: string; size: number; dataBase64: string }) => Promise<UploadedFileRef>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -24,6 +49,10 @@ export function ChatPanel({
   const canSend = worker.managed || !!worker.tty;
   const stuck = worker.status === "stuck";
   const buttons = stuck ? quickButtons(worker) : [];
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Reference points
   const [pins, setPins] = useState<Pin[]>([]);
@@ -46,7 +75,8 @@ export function ChatPanel({
   // Guard against double-sends from rapid clicks/keypresses before React re-renders.
   // Augments message with pin reference context when pins exist.
   const guardedSend = (msg: string): boolean => {
-    const augmented = msg + describePins(pins);
+    const baseMessage = msg.trim() || (attachments.length > 0 ? "Use the uploaded attachments for this task." : "");
+    const augmented = baseMessage + describePins(pins) + attachmentsPrompt(attachments);
     const now = Date.now();
     if (augmented === lastSendRef.current.text && now - lastSendRef.current.at < 1000) return false;
     const ok = onSend(augmented);
@@ -54,9 +84,37 @@ export function ChatPanel({
       lastSendRef.current = { text: augmented, at: now };
       // Clear pins after sending — they've been consumed
       if (pins.length > 0) handleClearPins();
+      if (attachments.length > 0) setAttachments([]);
+      setUploadError(null);
     }
     return ok;
   };
+
+  const handlePickFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          throw new Error(`${file.name} exceeds 12 MB`);
+        }
+        const dataBase64 = await fileToBase64(file);
+        const upload = await onUploadFile({
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          dataBase64,
+        });
+        setAttachments((prev) => [...prev, upload]);
+      }
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [onUploadFile]);
 
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
@@ -301,7 +359,57 @@ export function ChatPanel({
                 </button>
               </div>
             )}
+            {(attachments.length > 0 || uploading || uploadError) && (
+              <div className="mb-2 space-y-1.5">
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {attachments.map((file) => (
+                      <span
+                        key={file.id}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-[rgba(59,130,246,0.22)] bg-[rgba(59,130,246,0.08)] px-2.5 py-1 text-[10px] text-[var(--text)]"
+                      >
+                        <span className="truncate max-w-[180px]">{file.name}</span>
+                        <span className="text-[var(--text-light)]">{formatBytes(file.size)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setAttachments((prev) => prev.filter((item) => item.id !== file.id))}
+                          className="text-[var(--text-light)] hover:text-[var(--text)] cursor-pointer"
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {uploading && (
+                  <p className="text-[10px] text-[var(--text-light)]">Uploading attachment…</p>
+                )}
+                {uploadError && (
+                  <p className="text-[10px] text-[#f87171]">{uploadError}</p>
+                )}
+              </div>
+            )}
             <div className="flex gap-2 items-end">
+              <div className="shrink-0">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  accept="image/*,application/pdf,text/*,.md,.csv,.json,.zip,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+                  onChange={(e) => { void handlePickFiles(e.target.files); }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="send-btn !bg-[var(--bg-panel)] !text-[var(--text)] !border !border-[var(--border)]"
+                  disabled={uploading}
+                  title="Attach photos or files"
+                >
+                  +
+                </button>
+              </div>
               <textarea
                 ref={textareaRef}
                 value={draft}
@@ -311,19 +419,19 @@ export function ChatPanel({
                     const desktop = window.matchMedia("(hover: hover)").matches;
                     if ((desktop && !e.shiftKey) || e.metaKey || e.ctrlKey) {
                       e.preventDefault();
-                      if (draft.trim()) { const sent = guardedSend(draft.trim()); if (sent) onDraftChange(""); }
+                      if (draft.trim() || attachments.length > 0) { const sent = guardedSend(draft.trim()); if (sent) onDraftChange(""); }
                     }
                   }
                 }}
                 onFocus={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }}
-                placeholder="Message agent..."
+                placeholder="Message agent or attach files..."
                 rows={1}
                 className="chat-input flex-1 min-w-0 !h-[112px] !max-h-[112px] !overflow-y-auto"
               />
               <button
                 type="button"
-                disabled={!draft.trim()}
-                onClick={() => { if (draft.trim()) { const sent = guardedSend(draft.trim()); if (sent) onDraftChange(""); } }}
+                disabled={uploading || (!draft.trim() && attachments.length === 0)}
+                onClick={() => { if (draft.trim() || attachments.length > 0) { const sent = guardedSend(draft.trim()); if (sent) onDraftChange(""); } }}
                 className="send-btn"
               >
                 Send

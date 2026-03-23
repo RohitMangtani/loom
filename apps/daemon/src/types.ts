@@ -8,4 +8,5 @@ export type {
   DaemonResponse,
   ConnectedMachine,
   MachineCapabilities,
+  UploadedFileRef,
 } from "@hive/types";

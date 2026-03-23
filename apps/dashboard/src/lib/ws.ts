@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, ReviewItem, WorkerContextSnapshot, WorkerState } from "@/lib/types";
+import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, ReviewItem, UploadedFileRef, WorkerContextSnapshot, WorkerState } from "@/lib/types";
 
 /** Extended response type for message types beyond the base DaemonResponse union */
 type ExtendedResponse = DaemonResponse | { type: "models"; models?: AgentModel[] } | { type: "vapid_key"; vapidKey?: string } | { type: "push_status"; subscribed?: boolean };
@@ -35,6 +35,11 @@ export function useHive(daemonUrl: string) {
   const optimisticIdsRef = useRef<Set<string>>(new Set());
   // Monotonic counter for unique optimistic entry IDs
   const optimisticSeqRef = useRef(0);
+  const pendingUploadsRef = useRef(new Map<string, {
+    resolve: (upload: UploadedFileRef) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>());
 
   const send = useCallback(
     (msg: DaemonMessage): boolean => {
@@ -285,6 +290,21 @@ export function useHive(daemonUrl: string) {
             break;
           }
 
+          case "upload_result": {
+            const requestId = data.requestId;
+            if (!requestId) break;
+            const pending = pendingUploadsRef.current.get(requestId);
+            if (!pending) break;
+            clearTimeout(pending.timer);
+            pendingUploadsRef.current.delete(requestId);
+            if (data.ok && data.upload) {
+              pending.resolve(data.upload);
+            } else {
+              pending.reject(new Error(data.error || "Upload failed"));
+            }
+            break;
+          }
+
           case "reviews": {
             if (data.reviews && Array.isArray(data.reviews)) {
               setReviews(data.reviews);
@@ -336,6 +356,11 @@ export function useHive(daemonUrl: string) {
       ws.onclose = () => {
         setConnected(false);
         wsRef.current = null;
+        for (const pending of pendingUploadsRef.current.values()) {
+          clearTimeout(pending.timer);
+          pending.reject(new Error("Disconnected"));
+        }
+        pendingUploadsRef.current.clear();
         reconnectTimerRef.current = setTimeout(connect, reconnectDelayRef.current);
         reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 8000);
       };
@@ -357,6 +382,11 @@ export function useHive(daemonUrl: string) {
         wsRef.current.close();
         wsRef.current = null;
       }
+      for (const pending of pendingUploadsRef.current.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("Disconnected"));
+      }
+      pendingUploadsRef.current.clear();
       setConnected(false);
     };
   }, [daemonUrl, connectEpoch]);
@@ -443,9 +473,39 @@ export function useHive(daemonUrl: string) {
     [send]
   );
 
+  const uploadToWorker = useCallback(
+    (workerId: string, payload: {
+      fileName: string;
+      mimeType?: string;
+      size: number;
+      dataBase64: string;
+    }) => new Promise<UploadedFileRef>((resolve, reject) => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        reject(new Error("Dashboard is disconnected"));
+        return;
+      }
+      const requestId = `upload_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const timer = setTimeout(() => {
+        pendingUploadsRef.current.delete(requestId);
+        reject(new Error("Upload timed out"));
+      }, 30_000);
+      pendingUploadsRef.current.set(requestId, { resolve, reject, timer });
+      wsRef.current.send(JSON.stringify({
+        type: "upload_file",
+        requestId,
+        workerId,
+        fileName: payload.fileName,
+        mimeType: payload.mimeType,
+        size: payload.size,
+        dataBase64: payload.dataBase64,
+      } satisfies DaemonMessage));
+    }),
+    []
+  );
+
   return {
     connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect,
-    requestWorkerContext,
+    requestWorkerContext, uploadToWorker,
     reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines,
   };
 }

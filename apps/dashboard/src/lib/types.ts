@@ -7,6 +7,7 @@ export type {
   DaemonResponse,
   ReviewItem,
   ConnectedMachine,
+  UploadedFileRef,
 } from "@hive/types";
 
 /** Available agent type for the spawn dialog (sent by daemon over WS). */
