@@ -47,6 +47,7 @@
     will-change: transform;
     -webkit-user-select: none;
     user-select: none;
+    -webkit-user-drag: element;
   }
 
   .card:hover {
