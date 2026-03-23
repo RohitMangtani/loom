@@ -12,59 +12,33 @@ One person. Multiple models. Multiple machines. The output of a team.
 
 ## Install
 
-Hive has three install paths. You do not need to paste a prompt into a CLI unless you want the agent-assisted setup.
-
-### 1. Desktop wrapper (macOS)
-
-```bash
-git clone https://github.com/RohitMangtani/hive.git
-cd hive
-npm install
-npm run desktop:prepare
-npm run desktop:smoke
-npm run desktop:dev
-```
-
-This launches the native Tauri wrapper around the same Hive daemon and dashboard. `desktop:smoke` verifies the desktop path on isolated ports with a temp HOME before the wrapper touches your live setup. Use `npm run desktop:build` for a DMG-capable build once Rust and Xcode prerequisites are installed.
-
-### 2. Direct script install
-
-Fresh primary machine:
-
-```bash
-git clone https://github.com/RohitMangtani/hive.git
-cd hive
-bash scripts/install.sh --fresh
-```
-
-Join an existing Hive network from another Mac:
-
-```bash
-git clone https://github.com/RohitMangtani/hive.git
-cd hive
-bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
-```
-
-The script handles setup, dependencies, daemon launch, and the hosted dashboard flow. Use this path if you want the existing hosted-dashboard install story directly, without going through Claude or Codex.
-
-### 3. Agent-assisted install (optional)
-
-If you want Claude Code or Codex to run the setup for you, approve a few one-time prompts as it works:
-
-1. **Allow shell commands** -Claude Code or Codex will ask permission to run terminal commands. Approve it.
-2. **Allow file access to `~/`** -the agent needs to write to `~/.hive/` for config and tokens. When it asks to expand scope beyond the project directory, approve it.
-3. **Sandbox mode** -if your CLI asks, select **full sandbox** so the agent can run commands without pausing on every action.
-
 Paste this into Claude Code or Codex:
 
-> Install Hive for me from https://github.com/RohitMangtani/hive. First ask me which setup I want: (1) Desktop app on this Mac, (2) New Hive environment with my own dashboard, or (3) Connect this Mac to an existing Hive network. If I choose 1, clone the repo, run `npm install`, then run `npm run desktop:prepare`, `npm run desktop:smoke`, and `npm run desktop:dev`. If I choose 2, clone the repo and run `bash scripts/install.sh --fresh`. If I choose 3, ask me for the tunnel URL and token from the other machine, then clone the repo and run `bash scripts/install.sh --connect <URL> <TOKEN>`. Before any command that needs approval, tell me exactly what prompt to accept. When you're done, give me the dashboard URL and token, or tell me the desktop app is running and what to open next.
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive and run `bash scripts/install.sh`. It handles everything. When it asks, approve shell commands, file access to `~/`, and full sandbox mode. If Vercel opens your browser, click authorize. Give me the dashboard URL and token when it finishes.
 
-That prompt is the shortest guided path if you prefer pasting one instruction into an LLM CLI instead of running commands yourself.
+That's it. The script detects your setup, installs dependencies, starts the daemon, deploys the dashboard, and prints your token.
 
-**What you need beforehand for the hosted/script paths:**
+**What you need beforehand:**
 - macOS with Node.js 20+ installed
 - A free [Vercel](https://vercel.com) account (the dashboard deploys here so you can access it from any device)
 - At least one AI CLI installed: `claude`, `codex`, or `openclaw`
+
+### Connect another computer
+
+To add a second Mac to the same dashboard, paste this on the other machine:
+
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive and run `bash scripts/install.sh --connect wss://TUNNEL-URL TOKEN` using the URL and token from my other machine.
+
+The tunnel URL and token are printed at the end of the first install.
+
+### Manual install (no AI CLI needed)
+
+```bash
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
+bash scripts/install.sh --fresh        # new environment
+bash scripts/install.sh --connect URL TOKEN  # join existing
+```
 
 ### After install: one-time macOS approvals
 
