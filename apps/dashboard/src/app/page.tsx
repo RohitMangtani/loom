@@ -453,15 +453,6 @@ export default function Home() {
               <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
                 Launch a terminal-backed worker, then manage prompts, approvals, uploads, and chat from the same grid.
               </p>
-              <div className="mt-5 flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => setShowSpawnDialog(true)}
-                  className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-white hover:opacity-95 transition-opacity"
-                >
-                  Spawn Agent
-                </button>
-              </div>
             </div>
           )}
         </div>
