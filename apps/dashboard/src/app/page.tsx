@@ -90,7 +90,7 @@ export default function Home() {
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
-  const [contextAttachments, setContextAttachments] = useState<string[]>([]);
+  const contextAttachmentsRef = useRef<Map<string, string[]>>(new Map());
 
   useEffect(() => {
     try {
@@ -499,7 +499,11 @@ export default function Home() {
                     onContextDrop={isViewer ? undefined : (sourceId) => {
                       setSelectedId(w.id);
                       subscribeTo(w.id);
-                      setContextAttachments((prev) => prev.includes(sourceId) ? prev : [...prev, sourceId]);
+                      const prev = contextAttachmentsRef.current.get(w.id) || [];
+                      if (!prev.includes(sourceId)) {
+                        contextAttachmentsRef.current.set(w.id, [...prev, sourceId]);
+                      }
+                      setDraftTick((k) => k + 1);
                     }}
                     onKill={!isViewer && managing ? () => {
                       send({ type: "kill", workerId: w.id });
@@ -557,20 +561,27 @@ export default function Home() {
               localStorage.setItem("hive_drafts", JSON.stringify(obj));
             } catch { /* quota exceeded, non-critical */ }
           }}
-          contextAttachments={contextAttachments}
+          contextAttachments={contextAttachmentsRef.current.get(selectedEntry.worker.id) || []}
           workers={workers}
-          onRemoveContextAttachment={(id) => setContextAttachments((prev) => prev.filter((x) => x !== id))}
+          onRemoveContextAttachment={(id) => {
+            const prev = contextAttachmentsRef.current.get(selectedEntry.worker.id) || [];
+            const next = prev.filter((x) => x !== id);
+            if (next.length > 0) contextAttachmentsRef.current.set(selectedEntry.worker.id, next);
+            else contextAttachmentsRef.current.delete(selectedEntry.worker.id);
+            setDraftTick((k) => k + 1);
+          }}
           onSend={(msg) => {
+            const ctxIds = contextAttachmentsRef.current.get(selectedEntry.worker.id) || [];
             const ok = send({
               type: "message",
               workerId: selectedEntry.worker.id,
               content: msg,
-              ...(contextAttachments.length > 0 ? { contextWorkerIds: contextAttachments, includeSenderContext: true } : {}),
+              ...(ctxIds.length > 0 ? { contextWorkerIds: ctxIds, includeSenderContext: true } : {}),
             } as import("@/lib/types").DaemonMessage);
             if (ok) {
               const normalized = msg.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
               addOptimisticEntry(selectedEntry.worker.id, normalized);
-              setContextAttachments([]);
+              contextAttachmentsRef.current.delete(selectedEntry.worker.id);
             }
             return ok;
           }}
