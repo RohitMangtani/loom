@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default capability set for Hive desktop.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -14,6 +14,9 @@
     "doctor": "bash scripts/doctor.sh",
     "dev:daemon": "npm -w apps/daemon run dev",
     "dev:dashboard": "npm -w apps/dashboard run dev",
+    "desktop:prepare": "npm -w apps/daemon run build && npm -w apps/dashboard run build && npm -w apps/desktop run stage",
+    "desktop:dev": "npm run desktop:prepare && npm -w apps/desktop run tauri:dev",
+    "desktop:build": "npm run desktop:prepare && npm -w apps/desktop run tauri:build",
     "build": "turbo build",
     "deploy:dashboard": "bash scripts/deploy-vercel.sh"
   },

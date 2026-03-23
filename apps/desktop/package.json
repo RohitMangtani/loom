@@ -1,0 +1,21 @@
+{
+  "name": "@hive/desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "stage": "node ./scripts/stage-runtime.mjs",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0",
+    "esbuild": "^0.25.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.7"
+  }
+}

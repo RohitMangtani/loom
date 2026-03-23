@@ -186,6 +186,14 @@ Stack your terminal windows vertically on screen. The daemon detects their posit
 
 Open the dashboard URL on your phone and add it to your home screen. It runs full-screen like a native app. See the [Install as App](#install-as-app) section below.
 
+**Desktop wrapper (Tauri, macOS-first)**
+```bash
+npm run desktop:prepare
+npm run desktop:dev
+```
+
+This safety-branch wrapper keeps `apps/daemon` and `apps/dashboard` intact. It stages the compiled daemon, a local static dashboard export, a bundled Node runtime, and a native onboarding shell into a Tauri app. Use `npm run desktop:build` to produce a DMG-capable desktop build once Rust and macOS signing prerequisites are installed.
+
 ## What It Does
 
 The system solves four problems at once:
