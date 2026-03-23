@@ -45,8 +45,16 @@ export function SitePasswordGate({ children }: SitePasswordGateProps) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Clean ?viewer= from URL if present (backward compat with old share links)
     const params = new URLSearchParams(window.location.search);
+    // Auto-authenticate from ?token= parameter (invite links)
+    const tokenParam = params.get('token');
+    if (tokenParam && tokenParam.length >= 32) {
+      localStorage.setItem(TOKEN_KEY, tokenParam);
+      localStorage.setItem(MODE_KEY, 'admin');
+      // Clean URL so the token isn't visible in the address bar
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    // Clean ?viewer= from URL if present (backward compat with old share links)
     if (params.has('viewer')) {
       window.history.replaceState({}, '', window.location.pathname);
     }
