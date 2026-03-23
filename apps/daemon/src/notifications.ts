@@ -36,6 +36,9 @@ export class NotificationManager {
   private previousStatus = new Map<string, string>();
   private completionCache = new Map<string, { action: string; ts: number }>();
   private pushMgr: WebPushManager | null = null;
+  private telemetryRef: TelemetryReceiver | null = null;
+  // Debounce: pending completion notifications. Only fire if agent is STILL idle after delay.
+  private pendingCompletions = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor() {
     this.config = this.loadConfig();
@@ -47,6 +50,7 @@ export class NotificationManager {
   }
 
   register(telemetry: TelemetryReceiver): void {
+    this.telemetryRef = telemetry;
     telemetry.onUpdate((workerId, state) => {
       this.handleUpdate(workerId, state);
     });
@@ -56,6 +60,8 @@ export class NotificationManager {
       this.lastPushed.delete(workerId);
       this.previousStatus.delete(workerId);
       this.completionCache.delete(workerId);
+      const pending = this.pendingCompletions.get(workerId);
+      if (pending) { clearTimeout(pending); this.pendingCompletions.delete(workerId); }
     });
 
     console.log(`  Notifications: ${this.config.enabled ? "enabled" : "disabled"} (config: ${CONFIG_PATH})`);
@@ -88,6 +94,16 @@ export class NotificationManager {
     const prev = this.previousStatus.get(workerId);
     this.previousStatus.set(workerId, state.status);
 
+    // If agent went back to working, cancel any pending completion notification.
+    // This prevents false "done" notifications from brief idle flickers.
+    if (state.status === "working") {
+      const pending = this.pendingCompletions.get(workerId);
+      if (pending) {
+        clearTimeout(pending);
+        this.pendingCompletions.delete(workerId);
+      }
+    }
+
     // Stuck → macOS desktop notification (existing behavior)
     if (state.status === "stuck" && prev !== "stuck") {
       this.notify(workerId, state);
@@ -98,9 +114,22 @@ export class NotificationManager {
       this.notify(workerId, state);
     }
 
-    // Working → Idle (green → red) → push notification
+    // Working → Idle (green → red) → debounced push notification.
+    // Wait 6 seconds and verify the agent is STILL idle before notifying.
+    // Prevents false "done" notifications from transient idle flickers
+    // between tool calls or during CPU dips.
     if (this.config.pushOnComplete && this.isCompletionTransition(workerId, state, prev)) {
-      this.pushComplete(workerId, state);
+      if (!this.pendingCompletions.has(workerId)) {
+        const snapshot = { ...state };
+        this.pendingCompletions.set(workerId, setTimeout(() => {
+          this.pendingCompletions.delete(workerId);
+          // Re-check: is the agent still idle?
+          const current = this.telemetryRef?.get(workerId);
+          if (current && current.status === "idle") {
+            this.pushComplete(workerId, current);
+          }
+        }, 6_000));
+      }
     }
   }
 

@@ -599,11 +599,13 @@ end tell
             } else if (existing.status === "idle") {
               const prevTrans = this.prevStatus.get(id);
               if (prevTrans === "working") {
-                // Require 2 consecutive idle checks before transitioning
+                // Require 3 consecutive idle checks before transitioning (was 2).
+                // 3 checks = ~9s at the 3s scan interval. This prevents the brief
+                // red flash between tool calls when hooks go stale for a few seconds.
                 const idleCount = (this.consecutiveIdleChecks.get(id) || 0) + 1;
                 this.consecutiveIdleChecks.set(id, idleCount);
-                if (idleCount < 2) {
-                  this.checkTransition(id, tty, "working", `hooks fresh idle but hysteresis (${idleCount}/2)`, auditCtx);
+                if (idleCount < 3) {
+                  this.checkTransition(id, tty, "working", `hooks fresh idle but hysteresis (${idleCount}/3)`, auditCtx);
                 } else {
                   this.checkTransition(id, tty, "idle", `hooks fresh (${Math.round(hookAge)}ms) hysteresis=${idleCount}`, auditCtx);
                 }
@@ -1050,11 +1052,11 @@ end tell
           if (ctx.latestAction) existing.lastAction = ctx.latestAction;
           this.checkTransition(id, tty, "idle", `JSONL tail idle, already idle (count=${idleCount}) cpu=${cpuPct.toFixed(1)}%`, tailCtx);
         }
-      } else if (ctx.fileAgeMs < 120_000 && idleCount < 2 && (hookAge < 30_000 || existing.model === "codex")) {
-        // File written in last 2 min AND first idle signal AND either hooks
+      } else if (ctx.fileAgeMs < 120_000 && idleCount < 3 && (hookAge < 30_000 || existing.model === "codex")) {
+        // File written in last 2 min AND not enough idle signals AND either hooks
         // recently active OR Codex worker  --  stay GREEN.
         //   - fileAgeMs < 120s: covers subagent chains (30-90s JSONL gaps)
-        //   - idleCount < 2: hysteresis prevents single-scan flapping
+        //   - idleCount < 3: hysteresis prevents multi-scan flapping (was 2, raised to 3)
         //   - hookAge < 30s: ensures hooks confirm the agent is actually working.
         //     Without this, noise JSONL writes keep fileAge fresh → phantom green.
         //   - Codex only (not all non-Claude): Codex has no hooks and no JSONL
