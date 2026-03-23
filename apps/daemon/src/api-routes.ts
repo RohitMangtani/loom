@@ -16,6 +16,24 @@ import {
   isValidQuadrant,
   isValidSatelliteAction,
 } from "./control-plane-guards.js";
+import type { HiveUser } from "./user-registry.js";
+import { UserRegistry } from "./user-registry.js";
+import type { ParsedQs } from "qs";
+
+function normalizeQueryString(
+  value: string | string[] | ParsedQs | ParsedQs[] | (string | ParsedQs)[] | undefined,
+): string | undefined {
+  if (Array.isArray(value)) {
+    const [first] = value;
+    return typeof first === "string" ? first : undefined;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return undefined;
+}
+
+type ApiRequest = Request & { hiveUser?: HiveUser };
 
 export function registerApiRoutes(
   app: ReturnType<typeof express>,
@@ -23,7 +41,15 @@ export function registerApiRoutes(
   receiver: TelemetryReceiver,
   procMgr: ProcessManager,
   discovery: ProcessDiscovery,
+  userRegistry: UserRegistry,
 ): void {
+  const requireAdmin = (req: ApiRequest, res: Response, next: NextFunction) => {
+    if (req.hiveUser?.role !== "admin") {
+      res.status(403).json({ error: "Admin access required" });
+      return;
+    }
+    next();
+  };
 
   // GET /api/workers  --  includes satellite workers when available
   app.get("/api/workers", requireAuth, (_req, res) => {
@@ -98,7 +124,8 @@ export function registerApiRoutes(
       ? req.query.workerIds.split(",").map((id) => id.trim()).filter(Boolean)
       : undefined;
     const history = req.query.history === "1" || req.query.history === "true";
-    const historyLimit = Number(req.query.historyLimit || 6);
+    const historyLimitString = normalizeQueryString(req.query.historyLimit);
+    const historyLimit = Number(historyLimitString ?? 6);
     const options = {
       includeHistory: history,
       historyLimit: Number.isFinite(historyLimit) ? Math.max(1, Math.min(12, historyLimit)) : 6,
@@ -197,6 +224,31 @@ export function registerApiRoutes(
     }
     const conflicts = receiver.checkConflicts(path, exclude);
     res.json({ path, conflicts, hasConflict: conflicts.length > 0 });
+  });
+
+  // User management (admin-only)
+  app.get("/api/users", requireAuth, requireAdmin, (_req, res) => {
+    res.json(userRegistry.getAll());
+  });
+
+  app.post("/api/users", requireAuth, requireAdmin, (req, res) => {
+    const { name, role } = req.body as { name?: string; role?: string };
+    const validRoles = ["admin", "operator", "viewer"] as const;
+    if (!name || !role || !validRoles.includes(role as typeof validRoles[number])) {
+      res.status(400).json({ error: "Missing or invalid name/role" });
+      return;
+    }
+    const user = userRegistry.createUser(name, role as typeof validRoles[number]);
+    res.status(201).json(user);
+  });
+
+  app.delete("/api/users/:id", requireAuth, requireAdmin, (req, res) => {
+    const removed = userRegistry.removeUser(req.params.id as string);
+    if (removed) {
+      res.json({ ok: true });
+    } else {
+      res.status(404).json({ error: "User not found" });
+    }
   });
 
   // POST /api/learning

@@ -28,6 +28,8 @@ import {
   isSafeWorkerId,
   isValidQuadrant,
 } from "./control-plane-guards.js";
+import { HiveUser, UserRegistry } from "./user-registry.js";
+import type { HiveUser as HiveUserInfo } from "@hive/types";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
 function getLocalVersion(): string {
@@ -41,6 +43,16 @@ function getLocalVersion(): string {
 
 const LOCAL_MACHINE_LABEL = osHostname();
 const TUNNEL_FILE = join(homedir(), ".hive", "tunnel-url.txt");
+
+function createLegacyAdminUser(token: string): HiveUser {
+  return {
+    id: "legacy_admin",
+    name: "admin",
+    role: "admin",
+    token,
+    createdAt: 0,
+  };
+}
 
 /** Satellite connection state */
 interface SatelliteConnection {
@@ -65,6 +77,8 @@ export class WsServer {
   private viewerToken: string;
   private terminal: TerminalIO | null;
   private windows: WindowManager | null;
+  private userRegistry: UserRegistry;
+  private connectedUsers = new Map<WebSocket, HiveUser>();
   private clients = new Set<WebSocket>();
   private readOnlyClients = new Set<WebSocket>();
   // Track which worker each client is subscribed to
@@ -111,6 +125,7 @@ export class WsServer {
     port: number,
     token: string,
     viewerToken: string,
+    userRegistry: UserRegistry,
     platform?: { terminal: TerminalIO; windows: WindowManager },
   ) {
     this.telemetry = telemetry;
@@ -119,6 +134,7 @@ export class WsServer {
     this.port = port;
     this.token = token;
     this.viewerToken = viewerToken;
+    this.userRegistry = userRegistry;
     this.terminal = platform?.terminal || null;
     this.windows = platform?.windows || null;
 
@@ -1768,13 +1784,30 @@ export class WsServer {
     this.wss.on("connection", (ws, req) => {
       const reqUrl = new URL(req.url || "/", "http://localhost");
       const candidate = reqUrl.searchParams.get("token") || "";
-      const isAdmin = candidate ? validateToken(candidate, this.token) : false;
       const satelliteId = reqUrl.searchParams.get("satellite") || "";
+      let user = candidate ? this.userRegistry.authenticate(candidate) : null;
+      if (!user && candidate && validateToken(candidate, this.token)) {
+        user = createLegacyAdminUser(candidate);
+      }
 
-      console.log(`[ws] New connection: satellite=${satelliteId || "none"} admin=${isAdmin} url=${req.url?.slice(0, 80)}`);
+      if (!user) {
+        this.send(ws, { type: "error", error: "Unauthorized" });
+        ws.close();
+        return;
+      }
+
+      const isAdmin = user.role === "admin";
+      const isViewer = user.role === "viewer";
+
+      console.log(`[ws] New connection: satellite=${satelliteId || "none"} user=${user.name} role=${user.role} admin=${isAdmin} url=${req.url?.slice(0, 80)}`);
 
       // ── Satellite connection ──────────────────────────────────
-      if (satelliteId && isAdmin) {
+      if (satelliteId) {
+        if (!isAdmin) {
+          this.send(ws, { type: "error", error: "Admin token required for satellite" });
+          ws.close();
+          return;
+        }
         console.log(`[satellite] "${satelliteId}" connected`);
         this.registerSatelliteSocket(ws, satelliteId);
 
@@ -1793,7 +1826,10 @@ export class WsServer {
 
       // ── Dashboard / viewer connection ─────────────────────────
       this.clients.add(ws);
-      if (!isAdmin) this.readOnlyClients.add(ws);
+      if (isViewer) this.readOnlyClients.add(ws);
+      this.connectedUsers.set(ws, user);
+      this.broadcastPresence();
+      this.broadcastActivity(user, "connected");
       // Send current workers list (local + satellite merged)
       const workers = this.getAllWorkers();
       this.lastWorkersSnapshot = JSON.stringify(workers);
@@ -1811,6 +1847,8 @@ export class WsServer {
       if (this.pushMgr) {
         this.send(ws, { type: "vapid_key", vapidKey: this.pushMgr.getPublicKey() });
       }
+      // Share current presence snapshot
+      this.send(ws, { type: "presence", users: this.getPresenceSnapshot() });
 
       ws.on("message", (raw) => {
         let msg: DaemonMessage;
@@ -1851,6 +1889,12 @@ export class WsServer {
       }
       this.clientSubs.delete(ws);
     }
+    const departedUser = this.connectedUsers.get(ws);
+    if (departedUser) {
+      this.connectedUsers.delete(ws);
+      this.broadcastPresence();
+      this.broadcastActivity(departedUser, "disconnected");
+    }
     this.clients.delete(ws);
     this.readOnlyClients.delete(ws);
   }
@@ -1861,6 +1905,7 @@ export class WsServer {
   }
 
   private handleMessage(ws: WebSocket, msg: DaemonMessage): void {
+    const activeUser = this.connectedUsers.get(ws);
     // Read-only viewers can only request the worker list or manage push subscriptions
     if (this.readOnlyClients.has(ws) && msg.type !== "list" && msg.type !== "push_subscribe" && msg.type !== "push_unsubscribe" && msg.type !== "worker_context") {
       this.send(ws, { type: "error", error: "Read-only access" });
@@ -2174,6 +2219,10 @@ export class WsServer {
           workers: this.telemetry.getAll(),
         });
         console.log(`Spawned ${model} terminal for ${msg.project} (tty=${termResult.tty})`);
+        if (activeUser) {
+          const projectLabel = msg.project || "~";
+          this.broadcastActivity(activeUser, `Spawned ${model} in ${projectLabel}`);
+        }
         break;
       }
 
@@ -2238,6 +2287,9 @@ export class WsServer {
           }, 500);
         }
         console.log(`Killed worker ${msg.workerId} (pid=${killPid}, tty=${killTty})`);
+        if (activeUser) {
+          this.broadcastActivity(activeUser, `Killed ${msg.workerId}`);
+        }
         break;
       }
 
@@ -2293,6 +2345,9 @@ export class WsServer {
             this.send(ws, { type: "error", error: result.error });
           } else if (!result.queued) {
             this.streamer.nudge(msg.workerId!);
+          }
+          if (result.ok && activeUser) {
+            this.broadcastActivity(activeUser, `Sent message to ${msg.workerId}`);
           }
         });
         break;
@@ -2356,6 +2411,9 @@ export class WsServer {
           this.telemetry.notifyExternal(selWorker);
           this.streamer.nudge(msg.workerId);
           console.log(`Selection sent to ${selWorker.tty}: option ${msg.optionIndex || 0}`);
+          if (activeUser) {
+            this.broadcastActivity(activeUser, `Selected option ${msg.optionIndex ?? 0} on ${msg.workerId}`);
+          }
         } else {
           this.send(ws, { type: "error", error: selResult.error || "Selection failed" });
         }
@@ -2584,6 +2642,9 @@ export class WsServer {
             console.log(`Prompt approve failed for ${approveTty}: ${approveResult.error}`);
           }
         });
+        if (activeUser) {
+          this.broadcastActivity(activeUser, `Approved prompt for ${msg.workerId}`);
+        }
         break;
       }
 
@@ -2635,5 +2696,35 @@ export class WsServer {
         client.send(data);
       }
     }
+  }
+
+  private getPresenceSnapshot(): HiveUserInfo[] {
+    const seen = new Map<string, HiveUser>();
+    for (const user of this.connectedUsers.values()) {
+      seen.set(user.id, user);
+    }
+    return Array.from(seen.values()).map((user) => ({
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      createdAt: user.createdAt,
+    }));
+  }
+
+  private broadcastPresence(): void {
+    this.broadcast({
+      type: "presence",
+      users: this.getPresenceSnapshot(),
+    });
+  }
+
+  private broadcastActivity(user: HiveUser, action: string): void {
+    this.broadcast({
+      type: "activity",
+      userId: user.id,
+      userName: user.name,
+      action,
+      timestamp: Date.now(),
+    });
   }
 }

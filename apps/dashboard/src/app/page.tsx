@@ -133,7 +133,7 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines, uploadToWorker } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines, presence, activity, uploadToWorker } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
 
@@ -364,6 +364,28 @@ export default function Home() {
         {authError && (
           <p className="text-center text-[10px] text-[#f87171] mt-2">Wrong token</p>
         )}
+
+        <div className="presence-bar">
+          <div className="presence-header">
+            <span className="presence-label">Connected people</span>
+            <span className="presence-count">{presence.length} online</span>
+          </div>
+          <div className="presence-list">
+            {presence.length > 0 ? (
+              presence.map((user) => (
+                <span key={user.id} className={`presence-chip role-${user.role}`}>
+                  <span className="presence-dot" />
+                  {user.name}
+                </span>
+              ))
+            ) : (
+              <span className="presence-chip empty">No one else is here</span>
+            )}
+          </div>
+          {activity && (
+            <p className="presence-activity">{activity.text} · {new Date(activity.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p>
+          )}
+        </div>
 
         <div className="flex items-center justify-center gap-3 mt-2 text-[10px] text-[var(--text-light)]">
           <span className="font-medium">{numbered.length}/{MAX_SLOTS} agents</span>

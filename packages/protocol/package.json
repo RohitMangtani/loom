@@ -8,6 +8,9 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@hive/types": "*"
+  },
   "devDependencies": {
     "typescript": "^5.9.3"
   }

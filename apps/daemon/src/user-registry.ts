@@ -36,7 +36,7 @@ export class UserRegistry {
   private users = new Map<string, HiveUser>();
   private tokenIndex = new Map<string, string>(); // token -> userId
   private legacyAdminToken: string | null = null;
-  private legacyViewerToken: string | null = null;
+  private legacyViewerTokens = new Set<string>();
 
   constructor() {
     this.loadLegacyTokens();
@@ -47,11 +47,15 @@ export class UserRegistry {
     try {
       if (existsSync(LEGACY_TOKEN_PATH)) {
         this.legacyAdminToken = readFileSync(LEGACY_TOKEN_PATH, "utf-8").trim();
-        // Viewer token is SHA-256 of admin token (same derivation as auth.ts)
-        this.legacyViewerToken = createHash("sha256")
+        const legacyViewerV1 = createHash("sha256")
           .update(this.legacyAdminToken)
           .digest("hex")
           .slice(0, 32);
+        const legacyViewerV2 = createHash("sha256")
+          .update(`${this.legacyAdminToken}:viewer`)
+          .digest("hex");
+        this.legacyViewerTokens.add(legacyViewerV1);
+        this.legacyViewerTokens.add(legacyViewerV2);
       }
     } catch { /* no legacy token */ }
   }
@@ -140,7 +144,7 @@ export class UserRegistry {
     }
 
     // Legacy viewer token (backwards compat)
-    if (this.legacyViewerToken && token === this.legacyViewerToken) {
+    if (this.legacyViewerTokens.size > 0 && this.legacyViewerTokens.has(token)) {
       return {
         id: "legacy_viewer",
         name: "Viewer",

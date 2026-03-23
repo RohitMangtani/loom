@@ -106,6 +106,36 @@ The dashboard is a Next.js static export deployed to Vercel. It connects via Web
 - Chat panel for sending messages to any agent
 - Spawn dialog for creating new agents
 - Review drawer for git push/PR/deploy notifications
+- Presence bar showing connected users
+- Message attribution (who sent each message)
+- Activity feed (human actions visible to all)
+
+## Multiplayer
+
+Hive supports multiple humans on the same dashboard with role-based access.
+
+### User Registry (`user-registry.ts`)
+
+Named users with per-user tokens and three roles:
+- **Admin**: full control (spawn, kill, message, manage users)
+- **Operator**: can message agents and manage tasks, cannot kill/spawn/manage users
+- **Viewer**: read-only dashboard access
+
+Users are stored at `~/.hive/users.json`. The existing single admin token from `~/.hive/token` is backwards-compatible: on first load, a bootstrap admin user is created from it. The legacy viewer token (SHA-256 derived) also continues to work.
+
+### Presence
+
+The WebSocket server tracks which users are connected and broadcasts presence to all clients. The dashboard shows who is watching in real time.
+
+### Activity Feed
+
+Human actions (messages sent, agents spawned, prompts approved) are broadcast as activity events to all connected clients with the user's name attached.
+
+### REST API
+
+- `GET /api/users` -- list all users (admin only, no tokens in response)
+- `POST /api/users { name, role }` -- create user, returns token (admin only)
+- `DELETE /api/users/:id` -- remove user (admin only)
 
 ## Module Map
 
@@ -120,6 +150,7 @@ The dashboard is a Next.js static export deployed to Vercel. It connects via Web
 | `session-stream.ts` | JSONL tail following, chat history parsing | fs.watch, multi-format (Claude/Codex/Gemini) |
 | `auto-pilot.ts` | Auto-respond to stuck prompts (3s grace) | telemetry, tty-input |
 | `watchdog.ts` | Anomaly detection, adaptive suppression, auto-learn | telemetry |
+| `user-registry.ts` | Named users, role-based tokens, presence tracking | standalone |
 
 ### Extracted Modules
 

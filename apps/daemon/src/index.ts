@@ -18,6 +18,7 @@ import { loadOrCreateToken, deriveViewerToken, patchHookUrls } from "./auth.js";
 import { SatelliteClient } from "./satellite.js";
 import { acquireRuntimeSingleton } from "./runtime-singleton.js";
 import { loadPlatform } from "./platform/index.js";
+import { UserRegistry } from "./user-registry.js";
 
 // ── Satellite mode ──────────────────────────────────────────────────
 // Usage: npx tsx apps/daemon/src/index.ts --satellite wss://URL TOKEN
@@ -104,6 +105,7 @@ if (satFlagIdx !== -1) {
   const viewerToken = deriveViewerToken(token);
   patchHookUrls(token);
   const platform = loadPlatform();
+  const userRegistry = new UserRegistry();
   const daemonLock = acquireRuntimeSingleton("daemon");
   if (!daemonLock.ok) {
     const owner = daemonLock.conflict.metadata;
@@ -115,10 +117,11 @@ if (satFlagIdx !== -1) {
   const telemetry = new TelemetryReceiver(3001, token, {
     terminal: platform.terminal,
     windows: platform.windows,
+    userRegistry,
   });
   const procMgr = new ProcessManager(telemetry);
   const streamer = new SessionStreamer();
-  const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken, {
+  const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken, userRegistry, {
     terminal: platform.terminal,
     windows: platform.windows,
   });

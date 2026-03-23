@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, ReviewItem, UploadedFileRef, WorkerContextSnapshot, WorkerState } from "@/lib/types";
+import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, HiveUser, ReviewItem, UploadedFileRef, WorkerContextSnapshot, WorkerState } from "@/lib/types";
 
 /** Extended response type for message types beyond the base DaemonResponse union */
 type ExtendedResponse = DaemonResponse | { type: "models"; models?: AgentModel[] } | { type: "vapid_key"; vapidKey?: string } | { type: "push_status"; subscribed?: boolean };
@@ -25,6 +25,8 @@ export function useHive(daemonUrl: string) {
   ]);
   const [vapidKey, setVapidKey] = useState<string | null>(null);
   const [machines, setMachines] = useState<ConnectedMachine[]>([]);
+  const [presence, setPresence] = useState<HiveUser[]>([]);
+  const [activity, setActivity] = useState<{ text: string; timestamp: number } | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -163,6 +165,19 @@ export function useHive(daemonUrl: string) {
                 const next = new Map(prev);
                 next.delete(rid);
                 return next;
+              });
+            }
+            break;
+          }
+          case "presence": {
+            setPresence(data.users ?? []);
+            break;
+          }
+          case "activity": {
+            if (data.userName && data.action && typeof data.timestamp === "number") {
+              setActivity({
+                text: `${data.userName} ${data.action}`,
+                timestamp: data.timestamp,
               });
             }
             break;
@@ -507,5 +522,6 @@ export function useHive(daemonUrl: string) {
     connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect,
     requestWorkerContext, uploadToWorker,
     reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines,
+    presence, activity,
   };
 }

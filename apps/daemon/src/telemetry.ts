@@ -26,6 +26,8 @@ import { SwarmController } from "./swarm-controller.js";
 import type { SwarmSpawnRequest, SwarmExecRequest, SwarmExecResult, SwarmProjectEntry } from "./swarm-controller.js";
 import { scanLocalProjects } from "./project-discovery.js";
 import type { TerminalIO, WindowManager } from "./platform/interfaces.js";
+import type { HiveUser } from "./user-registry.js";
+import { UserRegistry } from "./user-registry.js";
 
 const IDLE_THRESHOLD = 30_000;
 const HOME = process.env.HOME || `/Users/${process.env.USER}`;
@@ -55,6 +57,10 @@ interface WorkerContextOptions {
   includeHistory?: boolean;
   historyLimit?: number;
   artifactLimit?: number;
+}
+
+interface AuthenticatedRequest extends Request {
+  hiveUser?: HiveUser;
 }
 
 // SwarmSpawnRequest, SwarmExecRequest, SwarmExecResult, SwarmProjectEntry
@@ -98,6 +104,7 @@ export class TelemetryReceiver {
   // Hook support
   private sessionToWorker = new Map<string, string>();
   private lastHookTime = new Map<string, number>();
+  private workersWithRealHooks = new Set<string>();
   private toolInFlight = new Map<string, { tool: string; since: number } | null>();
   private idleConfirmed = new Map<string, boolean>();
   private lastDashboardInput = new Map<string, number>();
@@ -185,16 +192,32 @@ export class TelemetryReceiver {
   private processManager: ProcessManager | null = null;
   private terminal: TerminalIO | null = null;
   private windows: WindowManager | null = null;
+  private userRegistry: UserRegistry | null = null;
+
+  private createLegacyAdminUser(): HiveUser {
+    return {
+      id: "legacy_admin",
+      name: "admin",
+      role: "admin",
+      token: this.token,
+      createdAt: 0,
+    };
+  }
 
   constructor(
     port: number,
     token: string,
-    platform?: { terminal: TerminalIO; windows: WindowManager },
+    options?: {
+      terminal?: TerminalIO;
+      windows?: WindowManager;
+      userRegistry?: UserRegistry;
+    },
   ) {
     this.port = port;
     this.token = token;
-    this.terminal = platform?.terminal || null;
-    this.windows = platform?.windows || null;
+    this.terminal = options?.terminal || null;
+    this.windows = options?.windows || null;
+    this.userRegistry = options?.userRegistry || null;
     this.taskQueue = new TaskQueue();
     this.coordination = new CoordinationLayer({
       isWorkerAlive: (id) => this.workers.has(id),
@@ -212,15 +235,23 @@ export class TelemetryReceiver {
     app.use(express.json({ limit: "10mb" }));
     this.app = app;
 
-    const requireAuth = (req: Request, res: Response, next: NextFunction) => {
+    const requireAuth = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
       const header = req.headers.authorization || "";
       const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
       const query = (req.query.token as string) || "";
       const candidate = bearer || query;
-      if (!validateToken(candidate, this.token)) {
+      let user: HiveUser | null = null;
+      if (this.userRegistry) {
+        user = this.userRegistry.authenticate(candidate);
+      }
+      if (!user && validateToken(candidate, this.token)) {
+        user = this.createLegacyAdminUser();
+      }
+      if (!user) {
         res.status(401).json({ error: "Unauthorized" });
         return;
       }
+      req.hiveUser = user;
       next();
     };
     this.requireAuth = requireAuth;
@@ -331,7 +362,7 @@ export class TelemetryReceiver {
     if (!this.app || !this.requireAuth) {
       throw new Error("registerApi() called before start()");
     }
-    registerApiRoutes(this.app, this.requireAuth, this, procMgr, discovery);
+    registerApiRoutes(this.app, this.requireAuth, this, procMgr, discovery, this.userRegistry || new UserRegistry());
   }
 
   registerCollector(collector: Collector): void {
@@ -435,6 +466,10 @@ export class TelemetryReceiver {
 
   getLastHookTime(workerId: string): number | undefined {
     return this.lastHookTime.get(workerId);
+  }
+
+  hasReceivedHook(workerId: string): boolean {
+    return this.workersWithRealHooks.has(workerId);
   }
 
   /** Mark a TTY as freshly spawned so discovery skips heuristic session resolution */
@@ -1331,6 +1366,7 @@ export class TelemetryReceiver {
     this.workers.delete(id);
     this.messageQueue.delete(id);
     this.lastHookTime.delete(id);
+    this.workersWithRealHooks.delete(id);
     this.toolInFlight.delete(id);
     this.idleConfirmed.delete(id);
     this.lastInputSent.delete(id);
@@ -2453,6 +2489,7 @@ export class TelemetryReceiver {
 
     const now = Date.now();
     this.lastHookTime.set(workerId, now);
+    this.workersWithRealHooks.add(workerId);
     worker.lastActionAt = now;
 
     if (cwd) {

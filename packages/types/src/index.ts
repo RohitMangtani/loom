@@ -4,6 +4,13 @@ export interface Suggestion {
   reason?: string;
 }
 
+export interface HiveUser {
+  id: string;
+  name: string;
+  role: "admin" | "operator" | "viewer";
+  createdAt: number;
+}
+
 export interface WorkerArtifact {
   path: string;
   action: string;
@@ -185,7 +192,7 @@ export interface ReviewItem {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result";
+  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result" | "presence" | "activity";
   workers?: WorkerState[];
   worker?: WorkerState;
   /** Connected satellite machines (for spawn dialog machine picker). */
@@ -208,4 +215,11 @@ export interface DaemonResponse {
   requestId?: string;
   ok?: boolean;
   upload?: UploadedFileRef;
+  /** Presence payload for connected users. */
+  users?: HiveUser[];
+  /** Activity feed payload. */
+  userId?: string;
+  userName?: string;
+  action?: string;
+  timestamp?: number;
 }

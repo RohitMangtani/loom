@@ -12,6 +12,7 @@
  */
 
 import type { WorkerState, WorkerContextSnapshot, ReviewItem, MachineCapabilities } from "./rest-api.js";
+import type { HiveUser } from "@hive/types";
 
 // ── Dashboard → Daemon (client sends) ───────────────────────────────
 
@@ -57,6 +58,8 @@ export type DaemonBroadcast =
   | { type: "push_status"; subscribed: boolean }
   | { type: "worker_context"; workerId: string; context: WorkerContextSnapshot | null }
   | { type: "upload_result"; requestId: string; ok: boolean; upload?: UploadedFileRef; error?: string }
+  | { type: "presence"; users: Array<Pick<HiveUser, "id" | "name" | "role" | "createdAt">> }
+  | { type: "activity"; userId: string; userName: string; action: string; timestamp: number }
   | { type: "orchestrator"; [key: string]: unknown }
   | { type: "error"; error: string };
 

@@ -62,6 +62,7 @@ hive/
 │   │   │   ├── review-manager.ts  # Auto-detect git push/PR/deploy
 │   │   │   ├── coordination.ts    # Scratchpad, locks, artifacts
 │   │   │   ├── swarm-controller.ts # Cross-machine spawn/kill/exec
+│   │   │   ├── user-registry.ts   # Multiplayer: named users, roles, tokens
 │   │   │   ├── platform/          # Cross-platform abstraction
 │   │   │   │   ├── interfaces.ts  # TerminalIO, ProcessDiscoverer, WindowManager
 │   │   │   │   ├── linux/         # tmux-based implementation

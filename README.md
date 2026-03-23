@@ -1,6 +1,6 @@
 # Hive
 
-Multi-agent orchestration layer for LLM-based development workflows. One dashboard across multiple models, multiple machines, and every handoff in plain English. macOS native, Linux via tmux in progress.
+Multi-agent orchestration layer for LLM-based development workflows. One dashboard across multiple models, multiple machines, multiple people, and every handoff in plain English. macOS native, Linux via tmux in progress.
 
 ![Hive stacked dashboard diagram](docs/hive-stack.svg)
 
@@ -8,7 +8,9 @@ When multiple AI agents are working at the same time, the bottleneck quickly bec
 
 Hive is a lightweight visual coordination layer that mirrors active agent sessions as a grid of tiles with real-time status. The dashboard maps 1:1 to your terminal layout. Green means working. Red means done. Yellow means it needs you. You look at your phone and know exactly which terminal needs attention without reading output.
 
-One person. Multiple models. Multiple machines. The output of a team.
+One person or a team. Multiple models. Multiple machines. The output of a company.
+
+**Multiplayer**: Invite collaborators to the same dashboard. Named users with roles (admin, operator, viewer), live presence (see who is watching), message attribution (see who sent what), and an activity feed. Like Google Docs for AI agents.
 
 **How it works**: [A Visual Workflow for AI Agents](https://rohitmangtani.com/writing/a-visual-workflow-for-ai-agents) covers the design thinking behind Hive, from cognitive science to the feedback loops that make visual coordination faster than reading terminal output.
 

@@ -500,8 +500,7 @@ end tell
             if (holdExpiry && Date.now() < holdExpiry) {
               // Still in hold period  --  keep promptType, skip clear logic.
               // But if hooks arrived (agent is past the prompt), clear anyway.
-              const lastHook = this.telemetry.getLastHookTime(id);
-              if (!lastHook) {
+              if (!this.telemetry.hasReceivedHook(id)) {
                 this.telemetry.notifyExternal(existing);
                 continue;
               }
@@ -540,8 +539,7 @@ end tell
             // Young idle agent  --  check for trust/sandbox prompts.
             // Skip if hooks have been received: the agent is established and
             // any prompt text in the terminal is stale from initialization.
-            const lastHook = this.telemetry.getLastHookTime(id);
-            if (!lastHook) {
+            if (!this.telemetry.hasReceivedHook(id)) {
               const prompt = this.detectPrompt(proc.tty);
               if (prompt) {
                 existing.status = "waiting";
@@ -574,7 +572,9 @@ end tell
           // When no hooks have EVER arrived, treat as very stale (60s) so JSONL
           // analysis runs. Avoids both extremes: 0 (thinks hooks fresh, skips
           // JSONL) and Date.now() (1.7B ms → bogus audit entries).
-          const lastHook = this.telemetry.getLastHookTime(id);
+          const lastHook = this.telemetry.hasReceivedHook(id)
+            ? this.telemetry.getLastHookTime(id)
+            : undefined;
           const hookAge = lastHook ? Date.now() - lastHook : 60_000;
           const tty = existing.tty || "?";
           const auditCtx = {
@@ -907,7 +907,7 @@ end tell
       // without corroboration when no hooks have EVER been seen for this worker.
       // This catches the startup race where session file resolution is wrong
       // and isSessionOwnedByOther can't help (neither UUID registered yet).
-      const neverHadHooks = !this.telemetry.getLastHookTime(id);
+      const neverHadHooks = !this.telemetry.hasReceivedHook(id);
       const jsonlOverride = ctx.status === "working" && ctx.highConfidence && !neverHadHooks;
       // LAYER 8 override: CPU activity can break out of idleConfirmed.
       // This catches the case where an idle agent starts thinking (high CPU)

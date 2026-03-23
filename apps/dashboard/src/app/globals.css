@@ -168,6 +168,79 @@
     background: rgba(255, 255, 255, 0.03);
   }
 
+  .presence-bar {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+  }
+
+  .presence-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+  }
+
+  .presence-count {
+    color: var(--text-light);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  .presence-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .presence-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-light);
+  }
+
+  .presence-chip.empty {
+    opacity: 0.6;
+  }
+
+  .presence-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--dot-active);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
+  }
+
+  .presence-chip.role-admin .presence-dot {
+    background: #a855f7;
+  }
+
+  .presence-chip.role-operator .presence-dot {
+    background: var(--dot-needs);
+  }
+
+  .presence-chip.role-viewer .presence-dot {
+    background: var(--dot-offline);
+  }
+
+  .presence-activity {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
   /* Apply button */
   .apply-btn {
     font-size: 12px;

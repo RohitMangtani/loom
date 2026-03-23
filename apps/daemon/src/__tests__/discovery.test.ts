@@ -14,6 +14,8 @@ function writeSession(lines: string[]): string {
 function createDiscoveryHarness(options?: {
   idleConfirmed?: boolean;
   lastInputMsAgo?: number;
+  hasReceivedHook?: boolean;
+  lastHookTime?: number;
 }) {
   const telemetry = {
     isIdleConfirmed: vi.fn(() => options?.idleConfirmed ?? false),
@@ -26,7 +28,8 @@ function createDiscoveryHarness(options?: {
     recordSignal: vi.fn(),
     isRecentSpawn: vi.fn(() => false),
     isSessionOwnedByOther: vi.fn(() => false),
-    getLastHookTime: vi.fn(() => Date.now()),
+    hasReceivedHook: vi.fn(() => options?.hasReceivedHook ?? true),
+    getLastHookTime: vi.fn(() => options?.lastHookTime ?? Date.now()),
   };
   const discovery = new ProcessDiscovery(telemetry as never, {} as never) as unknown as {
     runJsonlAnalysis: (
@@ -182,5 +185,83 @@ describe("ProcessDiscovery idle-confirmed handling", () => {
     discovery.runJsonlAnalysis("w1", worker, "ttys000", null, 0, 3_000, {});
     expect(worker.status).toBe("working");
     expect(worker.currentAction).toBe("Thinking...");
+  });
+
+  it("keeps a held trust prompt visible until a real hook arrives", () => {
+    const worker = {
+      id: "discovered_123",
+      pid: 123,
+      project: "/Users/rmgtni/factory/projects/hive",
+      projectName: "hive",
+      status: "waiting",
+      currentAction: "Trust this project folder?",
+      lastAction: "Spawning terminal",
+      lastActionAt: Date.now(),
+      errorCount: 0,
+      startedAt: Date.now() - 5_000,
+      task: null,
+      managed: false,
+      tty: "ttys000",
+      model: "claude",
+      promptType: "trust",
+      promptMessage: "Trust this project folder?",
+    };
+    const telemetry = {
+      registerSession: vi.fn(),
+      getPinnedSessionForWorker: vi.fn(() => null),
+      isRecentSpawn: vi.fn(() => true),
+      get: vi.fn(() => worker),
+      getAll: vi.fn(() => [worker]),
+      getLastHookTime: vi.fn(() => Date.now()),
+      hasReceivedHook: vi.fn(() => false),
+      notifyExternal: vi.fn(),
+      isToolInFlight: vi.fn(() => false),
+      getToolInFlight: vi.fn(() => null),
+      setIdleConfirmed: vi.fn(),
+      isIdleConfirmed: vi.fn(() => false),
+      getLastInputSent: vi.fn(() => 0),
+      isSessionOwnedByOther: vi.fn(() => false),
+      registerDiscovered: vi.fn(),
+      registerDiscoveredSilent: vi.fn(),
+      silentRemoveWorker: vi.fn(),
+      forceFullBroadcast: vi.fn(),
+    };
+    const streamer = {
+      getSessionFile: vi.fn(() => "/tmp/session.jsonl"),
+      isFileMappedToOther: vi.fn(() => false),
+      setSessionFile: vi.fn(),
+    };
+    const discovery = new ProcessDiscovery(telemetry as never, streamer as never);
+    const discoveryHarness = discovery as unknown as {
+      discoveredPids: Set<number>;
+      promptHoldUntil: Map<string, number>;
+      findClaudeProcesses: () => Array<Record<string, unknown>>;
+      buildTtyFileMap: () => Map<string, string>;
+      detectPrompt: ReturnType<typeof vi.fn>;
+    };
+
+    discoveryHarness.discoveredPids = new Set([123]);
+    discoveryHarness.promptHoldUntil = new Map([[worker.id, Date.now() + 20_000]]);
+    discoveryHarness.findClaudeProcesses = () => [{
+      pid: 123,
+      cpuPercent: 0,
+      startedAt: worker.startedAt,
+      tty: "ttys000",
+      cwd: worker.project,
+      project: worker.project,
+      projectName: worker.projectName,
+      sessionIds: [],
+      jsonlFile: "/tmp/session.jsonl",
+      model: "claude",
+    }];
+    discoveryHarness.buildTtyFileMap = () => new Map();
+    discoveryHarness.detectPrompt = vi.fn(() => null);
+
+    discovery.scan();
+
+    expect(worker.promptType).toBe("trust");
+    expect(worker.currentAction).toBe("Trust this project folder?");
+    expect(telemetry.notifyExternal).toHaveBeenCalledWith(worker);
+    expect(discoveryHarness.detectPrompt).not.toHaveBeenCalled();
   });
 });
