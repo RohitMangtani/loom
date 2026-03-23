@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hive Demo</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0a0b;
+        --panel: rgba(19, 21, 26, 0.92);
+        --panel-2: rgba(14, 16, 21, 0.88);
+        --stroke: rgba(255, 255, 255, 0.08);
+        --text: #f4f7fb;
+        --muted: rgba(225, 232, 241, 0.62);
+        --green: #4cff8f;
+        --yellow: #ffd44d;
+        --red: #ff6474;
+        --shadow: 0 28px 80px rgba(0, 0, 0, 0.48);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        font-family: "SF Pro Display", "SF Pro Text", ui-sans-serif, system-ui, -apple-system, sans-serif;
+        background:
+          radial-gradient(circle at 20% 0%, rgba(92, 125, 255, 0.18), transparent 32%),
+          radial-gradient(circle at 100% 100%, rgba(37, 255, 165, 0.12), transparent 28%),
+          linear-gradient(180deg, #0d0e12 0%, #070708 100%);
+        color: var(--text);
+      }
+
+      .backdrop {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 32px 32px;
+        mask-image: radial-gradient(circle at center, black 45%, transparent 90%);
+        opacity: 0.45;
+        pointer-events: none;
+      }
+
+      .stage {
+        position: relative;
+        width: min(100vw, 520px);
+        padding: 30px 18px;
+      }
+
+      .phone {
+        position: relative;
+        width: min(100%, 400px);
+        margin: 0 auto;
+        padding: 18px 16px 20px;
+        border-radius: 32px;
+        background:
+          linear-gradient(180deg, rgba(27, 31, 39, 0.96) 0%, rgba(10, 10, 11, 0.98) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .phone::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(circle at top right, rgba(118, 156, 255, 0.12), transparent 28%),
+          radial-gradient(circle at bottom left, rgba(76, 255, 143, 0.08), transparent 26%);
+        pointer-events: none;
+      }
+
+      .header {
+        position: relative;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      .eyebrow {
+        margin: 0 0 4px;
+        color: rgba(242, 246, 255, 0.5);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .title {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1;
+        letter-spacing: -0.03em;
+      }
+
+      .connection {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.03);
+        font-size: 12px;
+        font-weight: 600;
+        color: rgba(242, 246, 255, 0.84);
+        white-space: nowrap;
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: var(--red);
+        box-shadow: 0 0 0 4px rgba(255, 100, 116, 0.18);
+        flex: 0 0 auto;
+      }
+
+      .dot.green {
+        background: var(--green);
+        box-shadow: 0 0 0 4px rgba(76, 255, 143, 0.18);
+      }
+
+      .dot.yellow {
+        background: var(--yellow);
+        box-shadow: 0 0 0 4px rgba(255, 212, 77, 0.18);
+      }
+
+      .top-strip {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .meta-copy {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .loop-chip {
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        color: rgba(242, 246, 255, 0.75);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .timeline {
+        position: relative;
+        height: 6px;
+        margin-bottom: 18px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.07);
+        overflow: hidden;
+      }
+
+      .timeline-fill {
+        height: 100%;
+        width: 0%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, rgba(76, 255, 143, 0.9), rgba(92, 125, 255, 0.92));
+      }
+
+      .grid {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .card {
+        position: relative;
+        min-height: 165px;
+        padding: 14px;
+        border-radius: 22px;
+        background:
+          linear-gradient(180deg, rgba(20, 23, 30, 0.96) 0%, rgba(11, 13, 17, 0.94) 100%);
+        border: 1px solid var(--stroke);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+      }
+
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 40%);
+        opacity: 0.6;
+        pointer-events: none;
+      }
+
+      .card.working {
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.03),
+          0 0 0 1px rgba(76, 255, 143, 0.08);
+      }
+
+      .card.needs-input {
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.03),
+          0 0 0 1px rgba(255, 212, 77, 0.12);
+      }
+
+      .card.finished,
+      .card.idle {
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.03),
+          0 0 0 1px rgba(255, 100, 116, 0.08);
+      }
+
+      .card-head,
+      .card-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .quad-tag {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 34px;
+        height: 24px;
+        padding: 0 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(244, 247, 251, 0.92);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 26px;
+        padding: 0 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.05);
+        color: rgba(244, 247, 251, 0.88);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .card h2 {
+        margin: 14px 0 6px;
+        font-size: 19px;
+        line-height: 1.05;
+        letter-spacing: -0.03em;
+      }
+
+      .project {
+        margin: 0 0 14px;
+        color: rgba(244, 247, 251, 0.54);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: lowercase;
+      }
+
+      .activity {
+        min-height: 42px;
+        margin: 0 0 18px;
+        color: rgba(244, 247, 251, 0.82);
+        font-size: 13px;
+        line-height: 1.42;
+      }
+
+      .model {
+        color: rgba(244, 247, 251, 0.52);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .stamp {
+        color: rgba(244, 247, 251, 0.42);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .message-bubble,
+      .fleet-banner {
+        position: absolute;
+        left: 18px;
+        right: 18px;
+        z-index: 2;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: var(--shadow);
+        pointer-events: none;
+      }
+
+      .message-bubble {
+        top: 274px;
+        padding: 12px 14px;
+        border-radius: 20px;
+        background: rgba(13, 15, 19, 0.94);
+        opacity: 0;
+        transform: translateY(16px) scale(0.98);
+      }
+
+      .message-bubble::after {
+        content: "";
+        position: absolute;
+        top: -7px;
+        left: 38px;
+        width: 14px;
+        height: 14px;
+        background: inherit;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-left: 1px solid rgba(255, 255, 255, 0.1);
+        transform: rotate(45deg);
+      }
+
+      .message-label,
+      .banner-label {
+        margin: 0 0 4px;
+        color: rgba(76, 255, 143, 0.88);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .message-text,
+      .banner-text {
+        margin: 0;
+        color: rgba(244, 247, 251, 0.92);
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      .fleet-banner {
+        bottom: 18px;
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(20, 27, 35, 0.96), rgba(11, 15, 19, 0.96));
+        opacity: 0;
+        transform: translateY(14px);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <div class="stage">
+      <main class="phone">
+        <header class="header">
+          <div>
+            <p class="eyebrow">Swarm Dashboard</p>
+            <h1 class="title">Hive</h1>
+          </div>
+          <div class="connection">
+            <span class="dot green"></span>
+            <span>Connected</span>
+          </div>
+        </header>
+
+        <div class="top-strip">
+          <p class="meta-copy">4 agents active across live projects</p>
+          <div class="loop-chip">20s loop</div>
+        </div>
+
+        <div class="timeline">
+          <div class="timeline-fill" id="timeline-fill"></div>
+        </div>
+
+        <section class="grid">
+          <article class="card" data-agent="q1">
+            <div class="card-head">
+              <span class="quad-tag">Q1</span>
+              <span class="status-pill"><span class="dot"></span><span class="status-copy"></span></span>
+            </div>
+            <h2>Claude</h2>
+            <p class="project">hive</p>
+            <p class="activity"></p>
+            <div class="card-foot">
+              <span class="model">Coordinator</span>
+              <span class="stamp"></span>
+            </div>
+          </article>
+
+          <article class="card" data-agent="q2">
+            <div class="card-head">
+              <span class="quad-tag">Q2</span>
+              <span class="status-pill"><span class="dot"></span><span class="status-copy"></span></span>
+            </div>
+            <h2>Codex</h2>
+            <p class="project">crawler</p>
+            <p class="activity"></p>
+            <div class="card-foot">
+              <span class="model">Executor</span>
+              <span class="stamp"></span>
+            </div>
+          </article>
+
+          <article class="card" data-agent="q3">
+            <div class="card-head">
+              <span class="quad-tag">Q3</span>
+              <span class="status-pill"><span class="dot"></span><span class="status-copy"></span></span>
+            </div>
+            <h2>Claude</h2>
+            <p class="project">stotram</p>
+            <p class="activity"></p>
+            <div class="card-foot">
+              <span class="model">Specialist</span>
+              <span class="stamp"></span>
+            </div>
+          </article>
+
+          <article class="card" data-agent="q4">
+            <div class="card-head">
+              <span class="quad-tag">Q4</span>
+              <span class="status-pill"><span class="dot"></span><span class="status-copy"></span></span>
+            </div>
+            <h2>Claude</h2>
+            <p class="project">rmgtni-web</p>
+            <p class="activity"></p>
+            <div class="card-foot">
+              <span class="model">Publisher</span>
+              <span class="stamp"></span>
+            </div>
+          </article>
+        </section>
+
+        <aside class="message-bubble" id="message-bubble">
+          <p class="message-label">Message Sent</p>
+          <p class="message-text">Q1 -> Q2: Demo is ready. Recover the stuck run and continue.</p>
+        </aside>
+
+        <aside class="fleet-banner" id="fleet-banner">
+          <p class="banner-label">Fleet Active</p>
+          <p class="banner-text">All four quadrants are working in sync.</p>
+        </aside>
+      </main>
+    </div>
+
+    <script>
+      const durationMs = 20000;
+      const statusMeta = {
+        working: { label: "Working", dot: "green" },
+        idle: { label: "Idle", dot: "red" },
+        finished: { label: "Finished", dot: "red" },
+        "needs-input": { label: "Needs input", dot: "yellow" }
+      };
+
+      const cards = new Map(
+        Array.from(document.querySelectorAll("[data-agent]")).map((card) => [
+          card.dataset.agent,
+          {
+            card,
+            statusCopy: card.querySelector(".status-copy"),
+            dot: card.querySelector(".status-pill .dot"),
+            activity: card.querySelector(".activity"),
+            stamp: card.querySelector(".stamp")
+          }
+        ])
+      );
+
+      const messageBubble = document.getElementById("message-bubble");
+      const fleetBanner = document.getElementById("fleet-banner");
+      const timelineFill = document.getElementById("timeline-fill");
+
+      const params = new URLSearchParams(window.location.search);
+      let frozenTime = null;
+      let startTime = performance.now();
+
+      function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+      }
+
+      function ease(value) {
+        return value * value * (3 - 2 * value);
+      }
+
+      function phasedOpacity(time, start, fadeIn, end, fadeOut) {
+        if (time < start || time >= end) {
+          return 0;
+        }
+        if (time < start + fadeIn) {
+          return ease((time - start) / fadeIn);
+        }
+        if (time > end - fadeOut) {
+          return ease((end - time) / fadeOut);
+        }
+        return 1;
+      }
+
+      function snapshot(time) {
+        const q1 = time < 10000 ? "working" : time < 18000 ? "finished" : "working";
+        const q2 = time < 3000 ? "working" : time < 7000 ? "needs-input" : "working";
+        const q3 = time < 13000 ? "idle" : "working";
+        const q4 = time < 16000 ? "idle" : "working";
+        return {
+          q1,
+          q2,
+          q3,
+          q4,
+          messageOpacity: phasedOpacity(time, 5000, 300, 7200, 350),
+          bannerOpacity: phasedOpacity(time, 18000, 350, 19850, 150)
+        };
+      }
+
+      function activityText(agentId, state, time) {
+        if (agentId === "q1") {
+          if (time >= 18000) {
+            return "Fleet is fully synchronized and routing fresh work again.";
+          }
+          if (state === "finished") {
+            return "Finished the coordination pass and moved back to standby.";
+          }
+          return "Coordinating the dashboard sweep across the fleet.";
+        }
+
+        if (agentId === "q2") {
+          if (state === "needs-input") {
+            return "Crawler paused mid-run and is waiting for teammate input.";
+          }
+          return time < 7000
+            ? "Streaming crawler output and keeping the task moving."
+            : "Recovered immediately after the incoming message.";
+        }
+
+        if (agentId === "q3") {
+          return state === "working"
+            ? "Picked up a newly dispatched task and joined the swarm."
+            : "Idle in the queue while the next assignment is prepared.";
+        }
+
+        return state === "working"
+          ? "Publishing work for rmgtni-web and syncing the final pass."
+          : "Standing by for the next routed action.";
+      }
+
+      function stampText(agentId, state, time) {
+        if (agentId === "q1" && state === "finished") {
+          return "Completed";
+        }
+        if (agentId === "q2" && state === "needs-input") {
+          return "Blocked";
+        }
+        if (time >= 18000) {
+          return "Fleet active";
+        }
+        return state === "idle" ? "Queued" : "Live";
+      }
+
+      function render(time) {
+        const current = ((time % durationMs) + durationMs) % durationMs;
+        const state = snapshot(current);
+
+        timelineFill.style.width = `${(current / durationMs) * 100}%`;
+
+        for (const [agentId, elements] of cards.entries()) {
+          const agentState = state[agentId];
+          const meta = statusMeta[agentState];
+          elements.card.className = `card ${agentState}`;
+          elements.statusCopy.textContent = meta.label;
+          elements.dot.className = `dot ${meta.dot}`;
+          elements.activity.textContent = activityText(agentId, agentState, current);
+          elements.stamp.textContent = stampText(agentId, agentState, current);
+        }
+
+        messageBubble.style.opacity = state.messageOpacity;
+        messageBubble.style.transform = `translateY(${(1 - state.messageOpacity) * 16}px) scale(${0.98 + state.messageOpacity * 0.02})`;
+
+        fleetBanner.style.opacity = state.bannerOpacity;
+        fleetBanner.style.transform = `translateY(${(1 - state.bannerOpacity) * 14}px)`;
+      }
+
+      function loop(now) {
+        const time = frozenTime === null ? (now - startTime) % durationMs : frozenTime;
+        render(time);
+        requestAnimationFrame(loop);
+      }
+
+      window.setDemoTime = (time) => {
+        frozenTime = ((time % durationMs) + durationMs) % durationMs;
+        render(frozenTime);
+      };
+
+      window.resumeDemoLoop = () => {
+        frozenTime = null;
+        startTime = performance.now();
+      };
+
+      if (params.has("t")) {
+        const parsedTime = Number(params.get("t"));
+        if (Number.isFinite(parsedTime)) {
+          frozenTime = ((parsedTime % durationMs) + durationMs) % durationMs;
+        }
+      }
+
+      render(frozenTime === null ? 0 : frozenTime);
+      window.__hiveDemoReady = true;
+
+      if (frozenTime === null) {
+        requestAnimationFrame(loop);
+      }
+    </script>
+  </body>
+</html>
