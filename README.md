@@ -14,22 +14,18 @@ One person. Multiple models. Multiple machines. The output of a team.
 
 Paste this into Claude Code or Codex:
 
-> Install Hive for me. Clone https://github.com/RohitMangtani/hive and run `bash scripts/install.sh`. It handles everything. When it asks, approve shell commands, file access to `~/`, and full sandbox mode. If Vercel opens your browser, click authorize. Give me the dashboard URL and token when it finishes.
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive. Before running the install script, ask me: "Do you want to (1) start a new Hive environment with your own dashboard, or (2) join an existing Hive network on another computer?" If I choose 1, run `bash scripts/install.sh --fresh`. It handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end. If I choose 2, ask me for the tunnel URL and token from the other machine, then run `bash scripts/install.sh --connect <URL> <TOKEN>` with what I provide. Give me whatever it prints at the end.
 
-That's it. The script detects your setup, installs dependencies, starts the daemon, deploys the dashboard, and prints your token.
+When the agent runs, approve these one-time prompts:
+
+1. **Allow shell commands** - the agent needs to run git, npm, and the install script.
+2. **Allow file access to `~/`** - Hive writes config and tokens to `~/.hive/`.
+3. **Sandbox mode** - select full sandbox so the agent can run commands without pausing on every action.
 
 **What you need beforehand:**
 - macOS with Node.js 20+ installed
 - A free [Vercel](https://vercel.com) account (the dashboard deploys here so you can access it from any device)
 - At least one AI CLI installed: `claude`, `codex`, or `openclaw`
-
-### Connect another computer
-
-To add a second Mac to the same dashboard, paste this on the other machine:
-
-> Install Hive for me. Clone https://github.com/RohitMangtani/hive and run `bash scripts/install.sh --connect wss://TUNNEL-URL TOKEN` using the URL and token from my other machine.
-
-The tunnel URL and token are printed at the end of the first install.
 
 ### Manual install (no AI CLI needed)
 
