@@ -145,6 +145,13 @@ export class SessionStreamer {
       for (const projectDir of readdirSync(projectsDir)) {
         const candidatePath = join(projectsDir, projectDir, `${markerSessionId}.jsonl`);
         if (existsSync(candidatePath)) {
+          // Guard: don't steal a session file already mapped to another live worker.
+          // This prevents Worker B from inheriting Worker A's session when both
+          // share the same TTY (stale marker from a previous agent on this TTY).
+          if (this.isFileMappedToOther(candidatePath, workerId)) {
+            console.log(`[session-verify] Skipping ${workerId} (${tty}): ${markerSessionId}.jsonl already mapped to another worker`);
+            return false;
+          }
           const oldName = currentFile ? basename(currentFile) : "none";
           console.log(`[session-verify] Correcting ${workerId} (${tty}): ${oldName} → ${markerSessionId}.jsonl`);
           this.sessionFiles.set(workerId, candidatePath);
