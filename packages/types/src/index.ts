@@ -4,6 +4,12 @@ export interface Suggestion {
   reason?: string;
 }
 
+export interface WorkerArtifact {
+  path: string;
+  action: string;
+  ts: number;
+}
+
 export interface WorkerState {
   id: string;
   pid: number;
@@ -35,6 +41,22 @@ export interface WorkerState {
   machine?: string;
   /** Human-readable machine label for peer summaries and workers.json snapshots. */
   machineLabel?: string;
+}
+
+export interface WorkerContextSnapshot {
+  workerId: string;
+  quadrant?: number;
+  tty?: string;
+  model: string;
+  project: string;
+  projectName: string;
+  status: WorkerState["status"];
+  currentAction: string | null;
+  lastAction: string;
+  lastDirection?: string;
+  recentArtifacts: WorkerArtifact[];
+  recentMessages: ChatEntry[];
+  contextSummary: string;
 }
 
 export interface TelemetryEvent {
@@ -92,7 +114,7 @@ export interface ConnectedMachine {
 }
 
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context";
   workerId?: string;
   project?: string;
   task?: string;
@@ -117,6 +139,10 @@ export interface DaemonMessage {
   };
   /** Label for the push subscription (e.g. "iPhone", "iPad") */
   pushLabel?: string;
+  /** Include recent conversation history in a worker context response. */
+  includeHistory?: boolean;
+  /** Max history entries to include in a worker context response. */
+  historyLimit?: number;
 }
 
 export interface ChatEntry {
@@ -142,7 +168,7 @@ export interface ReviewItem {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines";
+  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context";
   workers?: WorkerState[];
   worker?: WorkerState;
   /** Connected satellite machines (for spawn dialog machine picker). */
@@ -160,4 +186,6 @@ export interface DaemonResponse {
   vapidKey?: string;
   /** Whether push is subscribed on this connection */
   subscribed?: boolean;
+  /** On-demand worker context snapshot used by the dashboard viewer. */
+  context?: WorkerContextSnapshot | null;
 }
