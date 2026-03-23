@@ -48,16 +48,32 @@ export function useHive(daemonUrl: string) {
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   }>());
+  const pendingMessagesRef = useRef<DaemonMessage[]>([]);
+  const flushPendingMessages = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const queue = pendingMessagesRef.current.slice();
+    if (queue.length === 0) return;
+    pendingMessagesRef.current.length = 0;
+    for (const queued of queue) {
+      ws.send(JSON.stringify(queued));
+    }
+  }, []);
 
   const send = useCallback(
     (msg: DaemonMessage): boolean => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify(msg));
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        if (pendingMessagesRef.current.length > 0) {
+          flushPendingMessages();
+        }
+        ws.send(JSON.stringify(msg));
         return true;
       }
-      return false;
+      pendingMessagesRef.current.push(msg);
+      return true;
     },
-    []
+    [flushPendingMessages]
   );
 
   // Track whether we received a non-empty full history for the current subscription.
@@ -123,6 +139,7 @@ export function useHive(daemonUrl: string) {
         if (subscribedRef.current) {
           ws.send(JSON.stringify({ type: "subscribe", workerId: subscribedRef.current }));
         }
+        flushPendingMessages();
       };
 
       ws.onmessage = (event) => {

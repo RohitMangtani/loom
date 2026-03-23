@@ -646,6 +646,7 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
       case "satellite_spawn": {
         const project = (!msg.project || msg.project === "~") ? homedir() : msg.project;
         const model = msg.model || "claude";
+        const isClaude = model === "claude";
         const result = this.runtimePlatform.windows.spawnTerminal(
           project,
           model,
@@ -667,7 +668,7 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
             project,
             projectName,
             status: "waiting" as const,
-            currentAction: "Starting...",
+            currentAction: isClaude ? "Trust this project folder?" : "Starting...",
             lastAction: "Spawning terminal",
             lastActionAt: Date.now(),
             errorCount: 0,
@@ -676,6 +677,8 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
             managed: false,
             tty: result.tty,
             model,
+            promptType: isClaude ? "trust" : null,
+            promptMessage: isClaude ? "Trust this project folder?" : undefined,
           });
 
           // Match local spawn behavior: poll the new terminal immediately so
@@ -712,7 +715,7 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
               }
             }
 
-            const prompt = this.discovery.detectPrompt(result.tty!);
+            const prompt = this.discovery.detectPrompt(result.tty!, { bypassCache: true });
             if (prompt) {
               current.status = "waiting";
               current.promptType = prompt.type;

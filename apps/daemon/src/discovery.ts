@@ -48,6 +48,9 @@ interface SessionContext {
    *  noise-driven mid-stream, stale file heuristic). runJsonlAnalysis uses this
    *  to decide whether JSONL alone can override a stable idle state. */
   highConfidence: boolean;
+  /** true if the JSONL tail is dominated by noise entries (progress/sys) that
+   *  keep the file mtime fresh; keeps noise-induced freshness from auto-green. */
+  fileAgeIsFromNoise: boolean;
 }
 
 function extractTurnId(line: string): string | null {
@@ -191,14 +194,15 @@ end tell
    * Detect pre-session prompts (trust folder, sandbox) from terminal content.
    * Returns the prompt type and a human-readable message, or null if no prompt detected.
    */
-  detectPrompt(tty: string): { type: "trust" | "sandbox"; message: string; content: string } | null {
+  detectPrompt(tty: string, opts?: { bypassCache?: boolean }): { type: "trust" | "sandbox"; message: string; content: string } | null {
     // Suppressed: dashboard approved this prompt  --  permanent per TTY
     if (this.promptSuppressed.has(tty)) return null;
 
     // Rate-limit: don't re-check the same TTY within 3 seconds (aligned
     // with the scan interval so each tick can get a fresh reading)
+    const bypass = !!opts?.bypassCache;
     const cached = this.promptCheckedTtys.get(tty);
-    if (cached && Date.now() - cached.checkedAt < 3000) {
+    if (!bypass && cached && Date.now() - cached.checkedAt < 3000) {
       if (!cached.result) return null;
       return { type: cached.result, message: cached.result === "trust" ? "Trust this folder?" : "Allow sandbox?", content: "" };
     }
@@ -496,35 +500,34 @@ end tell
             // seconds of a new terminal tab. Without this, the session file
             // appearing immediately clears the prompt and the dashboard
             // never shows the approval button.
-            const holdExpiry = this.promptHoldUntil.get(id);
-            if (holdExpiry && Date.now() < holdExpiry) {
-              // Still in hold period  --  keep promptType, skip clear logic.
-              // But if hooks arrived (agent is past the prompt), clear anyway.
-              if (!this.telemetry.hasReceivedHook(id)) {
+              const holdExpiry = this.promptHoldUntil.get(id);
+              const holdActive = holdExpiry !== undefined && Date.now() < holdExpiry;
+              if (holdActive) {
                 this.telemetry.notifyExternal(existing);
-                continue;
               }
-              // Hooks arrived  --  agent is past the prompt, fall through to clear
-              this.promptHoldUntil.delete(id);
-            }
-            // If the agent is young (<10min), verify the prompt is actually
-            // gone before clearing. Older agents always clear  --  their
-            // terminal history contains stale prompt text.
-            if (proc.tty && Date.now() - proc.startedAt < 600_000) {
-              const stillPrompt = this.detectPrompt(proc.tty);
+              if (holdExpiry && !holdActive) {
+                this.promptHoldUntil.delete(id);
+              }
+              // If the agent is young (<10min), verify the prompt is actually
+              // gone before clearing. Older agents always clear  --  their
+              // terminal history contains stale prompt text.
+            if (!holdActive && proc.tty && Date.now() - proc.startedAt < 600_000) {
+              const stillPrompt = this.detectPrompt(proc.tty, { bypassCache: true });
               if (stillPrompt) {
+                this.promptHoldUntil.set(id, Date.now() + 20_000);
                 this.telemetry.notifyExternal(existing);
                 continue;
               }
             }
-            existing.promptType = null;
-            existing.promptMessage = undefined;
-            existing.terminalPreview = undefined;
-            this.promptHoldUntil.delete(id);
-            this.clearPromptCache(proc.tty);
+              if (!holdActive) {
+                existing.promptType = null;
+                existing.promptMessage = undefined;
+                existing.terminalPreview = undefined;
+                this.clearPromptCache(proc.tty);
+              }
           } else if (!cachedSessionFile && proc.tty && Date.now() - proc.startedAt < 120_000) {
             // Still no session  --  re-check for prompts and capture terminal preview
-            const prompt = this.detectPrompt(proc.tty);
+            const prompt = this.detectPrompt(proc.tty, { bypassCache: true });
             if (prompt) {
               existing.status = "waiting";
               existing.promptType = prompt.type;
@@ -532,6 +535,7 @@ end tell
               existing.currentAction = prompt.message;
               existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
               this.telemetry.notifyExternal(existing);
+              this.promptHoldUntil.set(id, Date.now() + 20_000);
               continue;
             }
             // No known prompt  --  leave tile clean (no raw terminal noise)
@@ -540,16 +544,17 @@ end tell
             // Skip if hooks have been received: the agent is established and
             // any prompt text in the terminal is stale from initialization.
             if (!this.telemetry.hasReceivedHook(id)) {
-              const prompt = this.detectPrompt(proc.tty);
-              if (prompt) {
-                existing.status = "waiting";
-                existing.promptType = prompt.type;
-                existing.promptMessage = prompt.message;
-                existing.currentAction = prompt.message;
-                existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
-                this.telemetry.notifyExternal(existing);
-                continue;
-              }
+            const prompt = this.detectPrompt(proc.tty, { bypassCache: true });
+            if (prompt) {
+              existing.status = "waiting";
+              existing.promptType = prompt.type;
+              existing.promptMessage = prompt.message;
+              existing.currentAction = prompt.message;
+              existing.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
+              this.telemetry.notifyExternal(existing);
+              this.promptHoldUntil.set(id, Date.now() + 20_000);
+              continue;
+            }
             }
           }
 
@@ -857,7 +862,13 @@ end tell
     }
 
     const ctx = this.readSessionContextFromFile(cachedPath);
-    const tailCtx = { ...auditCtx, tailStatus: ctx.status, tailAction: ctx.latestAction, tailFileAgeMs: Math.round(ctx.fileAgeMs) };
+    const tailCtx = {
+      ...auditCtx,
+      tailStatus: ctx.status,
+      tailAction: ctx.latestAction,
+      tailFileAgeMs: Math.round(ctx.fileAgeMs),
+      tailFileAgeFromNoise: ctx.fileAgeIsFromNoise,
+    };
 
     // Cross-contamination guard: verify the cached session file actually belongs
     // to this worker. When multiple workers share the same project directory
@@ -925,8 +936,9 @@ end tell
       if (cpuActive) this.consecutiveActiveChecks.set(id, activeCount);
       else this.consecutiveActiveChecks.set(id, 0);
       const cpuOverride = cpuActive && activeCount >= 2;
+      const noiseWriteActive = ctx.fileAgeIsFromNoise && ctx.fileAgeMs < 120_000 && ptyDelta > 300;
       const recentInputOverride = recentInput && !stickyIdle;
-      if (!recentInputOverride && !jsonlOverride && !cpuOverride) {
+      if (!recentInputOverride && !jsonlOverride && !cpuOverride && !noiseWriteActive) {
         if (ctx.latestAction) existing.lastAction = ctx.latestAction;
         existing.status = "idle";
         existing.currentAction = null;
@@ -934,11 +946,13 @@ end tell
         this.checkTransition(id, tty, "idle", `idleConfirmed=true fileAge=${Math.round(ctx.fileAgeMs/1000)}s cpu=${cpuPct.toFixed(1)}%`, tailCtx);
         return;
       }
-      if (cpuOverride) {
+      if (cpuOverride || noiseWriteActive) {
         // CPU/PTY active  --  clear idleConfirmed and fall through to normal analysis
         this.telemetry.setIdleConfirmed(id, false);
-        const signal = ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`;
-        this.telemetry.recordSignal(id, cpuPct > 25 ? "cpu_wakeup" : "pty_wakeup", signal);
+        const signal = noiseWriteActive
+          ? `noise-write ${ptyDelta}B (noise tail)`
+          : (ptyDelta > 100 ? `PTY +${ptyDelta}B` : `CPU ${cpuPct.toFixed(1)}%`);
+        this.telemetry.recordSignal(id, noiseWriteActive ? "pty_wakeup" : (cpuPct > 25 ? "cpu_wakeup" : "pty_wakeup"), signal);
       }
       // Recent input / JSONL / CPU overrides idleConfirmed  --  fall through to normal analysis
     }
@@ -2024,7 +2038,7 @@ end tell
   private readSessionContextFromFile(filePath: string): SessionContext {
     const result: SessionContext = {
       projectName: null, projectPath: null, latestAction: null, lastDirection: null,
-      status: "idle", fileAgeMs: Infinity, highConfidence: false,
+      status: "idle", fileAgeMs: Infinity, highConfidence: false, fileAgeIsFromNoise: false,
     };
 
     try {
@@ -2043,7 +2057,7 @@ end tell
   private readSessionContext(sessionIds: string[], cwd?: string): SessionContext {
     const result: SessionContext = {
       projectName: null, projectPath: null, latestAction: null, lastDirection: null,
-      status: "idle", fileAgeMs: Infinity, highConfidence: false,
+      status: "idle", fileAgeMs: Infinity, highConfidence: false, fileAgeIsFromNoise: false,
     };
 
     const best = this.findBestJsonlFile(sessionIds, cwd);
@@ -2119,6 +2133,7 @@ end tell
       // fileAgeMs is unreliable  --  noise keeps it artificially fresh.
       const lastRawLine = rawLines[rawLines.length - 1] || "";
       const fileAgeIsFromNoise = isNoiseLine(lastRawLine);
+      result.fileAgeIsFromNoise = fileAgeIsFromNoise;
 
       // Extract latest action for display
       for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {

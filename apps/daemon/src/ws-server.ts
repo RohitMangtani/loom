@@ -2187,7 +2187,7 @@ export class WsServer {
               }
 
               // Check for trust/sandbox prompts
-              const prompt = this.discovery.detectPrompt(spawnTty);
+              const prompt = this.discovery.detectPrompt(spawnTty, { bypassCache: true });
               if (prompt) {
                 current.status = "waiting";
                 current.promptType = prompt.type;
