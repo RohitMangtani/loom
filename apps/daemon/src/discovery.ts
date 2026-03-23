@@ -132,6 +132,10 @@ export class ProcessDiscovery {
   // indefinitely, so time-based expiry doesn't work. TTYs are unique per terminal tab,
   // so a new agent in a new tab gets a fresh TTY and won't be affected.
   private promptSuppressed = new Set<string>(); // tty
+  // Track when promptType was set from a spawn placeholder transfer.
+  // The session-file-appearance logic must not clear it until this hold period expires,
+  // because readTerminalContent() is unreliable in the first seconds of a new tab.
+  private promptHoldUntil = new Map<string, number>(); // workerId → timestamp
 
   constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
     this.telemetry = telemetry;
@@ -179,9 +183,10 @@ end tell
     // Suppressed: dashboard approved this prompt — permanent per TTY
     if (this.promptSuppressed.has(tty)) return null;
 
-    // Rate-limit: don't re-check the same TTY within 5 seconds
+    // Rate-limit: don't re-check the same TTY within 3 seconds (aligned
+    // with the scan interval so each tick can get a fresh reading)
     const cached = this.promptCheckedTtys.get(tty);
-    if (cached && Date.now() - cached.checkedAt < 5000) {
+    if (cached && Date.now() - cached.checkedAt < 3000) {
       if (!cached.result) return null;
       return { type: cached.result, message: cached.result === "trust" ? "Trust this folder?" : "Allow sandbox?", content: "" };
     }
@@ -243,6 +248,10 @@ end tell
   suppressPrompt(tty: string): void {
     this.promptSuppressed.add(tty);
     this.promptCheckedTtys.delete(tty);
+    // Clear any hold timer for workers on this TTY
+    for (const w of this.telemetry.getAll()) {
+      if (w.tty === tty) this.promptHoldUntil.delete(w.id);
+    }
   }
 
   /** Record a status transition with full decision context */
@@ -470,7 +479,24 @@ end tell
           // passed the trust/sandbox prompts and started a real session.
           const cachedSessionFile = this.streamer.getSessionFile(id);
           if (existing.promptType && cachedSessionFile) {
-            // If the agent is young (<3min), verify the prompt is actually
+            // Hold timer: placeholder-transferred prompts are kept for 20s
+            // because readTerminalContent() is unreliable in the first
+            // seconds of a new terminal tab. Without this, the session file
+            // appearing immediately clears the prompt and the dashboard
+            // never shows the approval button.
+            const holdExpiry = this.promptHoldUntil.get(id);
+            if (holdExpiry && Date.now() < holdExpiry) {
+              // Still in hold period — keep promptType, skip clear logic.
+              // But if hooks arrived (agent is past the prompt), clear anyway.
+              const lastHook = this.telemetry.getLastHookTime(id);
+              if (!lastHook) {
+                this.telemetry.notifyExternal(existing);
+                continue;
+              }
+              // Hooks arrived — agent is past the prompt, fall through to clear
+              this.promptHoldUntil.delete(id);
+            }
+            // If the agent is young (<10min), verify the prompt is actually
             // gone before clearing. Older agents always clear — their
             // terminal history contains stale prompt text.
             if (proc.tty && Date.now() - proc.startedAt < 600_000) {
@@ -483,6 +509,7 @@ end tell
             existing.promptType = null;
             existing.promptMessage = undefined;
             existing.terminalPreview = undefined;
+            this.promptHoldUntil.delete(id);
             this.clearPromptCache(proc.tty);
           } else if (!cachedSessionFile && proc.tty && Date.now() - proc.startedAt < 120_000) {
             // Still no session — re-check for prompts and capture terminal preview
@@ -657,13 +684,17 @@ end tell
         const placeholderId = `spawning_${proc.tty.replace(/\//g, "_")}`;
         const placeholder = this.telemetry.get(placeholderId);
         if (placeholder) {
-          // Transfer prompt/preview state from placeholder to real worker
+          // Transfer prompt/preview state from placeholder to real worker.
+          // Set a hold timer so the session-file-clear logic doesn't immediately
+          // wipe the promptType — readTerminalContent() is unreliable in the
+          // first seconds of a new terminal tab.
           if (placeholder.promptType && !worker.promptType) {
             worker.promptType = placeholder.promptType;
             worker.promptMessage = placeholder.promptMessage;
             worker.terminalPreview = placeholder.terminalPreview;
             worker.status = "waiting";
             worker.currentAction = placeholder.currentAction;
+            this.promptHoldUntil.set(id, Date.now() + 20_000);
           } else if (placeholder.terminalPreview && !worker.terminalPreview) {
             worker.terminalPreview = placeholder.terminalPreview;
           } else {
