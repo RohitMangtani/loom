@@ -4,7 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, HiveUser, ReviewItem, UploadedFileRef, WorkerContextSnapshot, WorkerState } from "@/lib/types";
 
 /** Extended response type for message types beyond the base DaemonResponse union */
-type ExtendedResponse = DaemonResponse | { type: "models"; models?: AgentModel[] } | { type: "vapid_key"; vapidKey?: string } | { type: "push_status"; subscribed?: boolean };
+type ExtendedResponse = DaemonResponse
+  | { type: "models"; models?: AgentModel[] }
+  | { type: "vapid_key"; vapidKey?: string }
+  | { type: "push_status"; subscribed?: boolean }
+  | { type: "user_list"; users?: unknown[] }
+  | { type: "user_created"; user?: unknown }
+  | { type: "user_removed"; userId?: string; ok?: boolean };
 
 const MAX_CHAT_ENTRIES = 150;
 
@@ -361,6 +367,19 @@ export function useHive(daemonUrl: string) {
 
           case "push_status":
             break;
+
+          case "user_list":
+          case "user_created":
+          case "user_removed": {
+            // Forward to InviteDialog via custom event
+            const target = typeof window !== "undefined"
+              ? (window as unknown as Record<string, EventTarget>).__hiveInviteTarget
+              : null;
+            if (target) {
+              target.dispatchEvent(new CustomEvent("msg", { detail: data }));
+            }
+            break;
+          }
 
           case "orchestrator":
           case "error":

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface InviteDialogProps {
-  daemonUrl: string;
+  send: (msg: Record<string, unknown>) => boolean;
   onClose: () => void;
 }
 
@@ -29,88 +29,101 @@ const ROLE_COLORS: Record<Role, string> = {
   viewer: "#94a3b8",
 };
 
-function getHttpBase(daemonUrl: string): string {
-  return daemonUrl
-    .replace(/^wss:\/\//, "https://")
-    .replace(/^ws:\/\//, "http://")
-    .replace(/:3002/, ":3001");
-}
-
-function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem("hive_token") || "";
-  return {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`,
-  };
-}
-
-export function InviteDialog({ daemonUrl, onClose }: InviteDialogProps) {
+export function InviteDialog({ send, onClose }: InviteDialogProps) {
   const [view, setView] = useState<View>("members");
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   // Invite form state
   const [inviteName, setInviteName] = useState("");
   const [inviteRole, setInviteRole] = useState<Role>("operator");
-  const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteResult, setInviteResult] = useState<{ token: string; name: string; role: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Confirm delete
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const httpBase = getHttpBase(daemonUrl);
+  // Listen for WS responses via a global handler registered once
+  const handlersRef = useRef<{
+    onUserList?: (users: UserInfo[]) => void;
+    onUserCreated?: (user: { token: string; name: string; role: string; id: string }) => void;
+    onUserRemoved?: (userId: string, ok: boolean) => void;
+  }>({});
 
-  const fetchUsers = useCallback(async () => {
-    try {
-      const res = await fetch(`${httpBase}/api/users`, { headers: getAuthHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(Array.isArray(data) ? data : []);
-      }
-    } catch { /* silent */ }
-    finally { setLoading(false); }
-  }, [httpBase]);
+  useEffect(() => {
+    // Register a temporary message listener on the WebSocket
+    const handler = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "user_list" && data.users) {
+          handlersRef.current.onUserList?.(data.users);
+        } else if (data.type === "user_created" && data.user) {
+          handlersRef.current.onUserCreated?.(data.user);
+        } else if (data.type === "user_removed") {
+          handlersRef.current.onUserRemoved?.(data.userId, data.ok);
+        }
+      } catch { /* ignore non-JSON */ }
+    };
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+    // Find the active WebSocket. It's stored in the useHive hook's wsRef.
+    // We can't access it directly, so we'll listen on all WebSocket instances.
+    // Simpler approach: just poll via send + listen on window message events.
+    // Actually the cleanest approach: add the handler to the existing WS.
+    // The WS object dispatches 'message' events. We need the raw WS reference.
+    // Let's use a different approach: the send() function returns true if connected.
+    // We'll use the send function and handle responses through a shared event target.
 
-  const handleInvite = async () => {
+    // Use a shared event target for WS responses
+    const target = (window as unknown as Record<string, EventTarget>).__hiveInviteTarget ||
+      ((window as unknown as Record<string, EventTarget>).__hiveInviteTarget = new EventTarget());
+
+    const onMsg = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.type === "user_list") handlersRef.current.onUserList?.(detail.users || []);
+      if (detail.type === "user_created") handlersRef.current.onUserCreated?.(detail.user);
+      if (detail.type === "user_removed") handlersRef.current.onUserRemoved?.(detail.userId, detail.ok);
+    };
+    target.addEventListener("msg", onMsg);
+    return () => target.removeEventListener("msg", onMsg);
+  }, []);
+
+  // Fetch users on mount
+  useEffect(() => {
+    handlersRef.current.onUserList = (list) => {
+      setUsers(list);
+      setLoading(false);
+    };
+    send({ type: "user_list" });
+    // Timeout fallback
+    const timer = setTimeout(() => setLoading(false), 3000);
+    return () => clearTimeout(timer);
+  }, [send]);
+
+  const handleInvite = useCallback(() => {
     if (!inviteName.trim()) return;
-    setInviteLoading(true);
     setError(null);
-    try {
-      const res = await fetch(`${httpBase}/api/users`, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ name: inviteName.trim(), role: inviteRole }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Request failed" }));
-        setError(data.error || `Error ${res.status}`);
-        return;
-      }
-      const user = await res.json();
+
+    handlersRef.current.onUserCreated = (user) => {
       setInviteResult({ token: user.token, name: user.name, role: user.role });
       setView("invite-ready");
-      fetchUsers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create invite");
-    } finally {
-      setInviteLoading(false);
-    }
-  };
+      // Refresh user list
+      send({ type: "user_list" });
+    };
 
-  const handleRemove = async (id: string) => {
-    try {
-      await fetch(`${httpBase}/api/users/${id}`, {
-        method: "DELETE",
-        headers: getAuthHeaders(),
-      });
-      setUsers((prev) => prev.filter((u) => u.id !== id));
+    const sent = send({ type: "user_create", userName: inviteName.trim(), userRole: inviteRole });
+    if (!sent) setError("Not connected to dashboard");
+  }, [inviteName, inviteRole, send]);
+
+  const handleRemove = useCallback((id: string) => {
+    handlersRef.current.onUserRemoved = (removedId, ok) => {
+      if (ok) {
+        setUsers((prev) => prev.filter((u) => u.id !== removedId));
+      }
       setConfirmDeleteId(null);
-    } catch { /* silent */ }
-  };
+    };
+    send({ type: "user_remove", userId: id });
+  }, [send]);
 
   const handleCopy = () => {
     if (!inviteResult) return;
@@ -137,7 +150,6 @@ export function InviteDialog({ daemonUrl, onClose }: InviteDialogProps) {
 
       <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-lg w-full max-w-sm mx-4 overflow-hidden">
 
-        {/* ── Members list ── */}
         {view === "members" && (
           <div className="p-6">
             <div className="flex items-center justify-between mb-4">
@@ -165,7 +177,7 @@ export function InviteDialog({ daemonUrl, onClose }: InviteDialogProps) {
                     <div className="flex items-center gap-2 min-w-0">
                       <span
                         className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: ROLE_COLORS[user.role] }}
+                        style={{ backgroundColor: ROLE_COLORS[user.role] || "#94a3b8" }}
                       />
                       <span className="text-sm font-medium truncate">{user.name}</span>
                       <span className="text-xs text-[var(--text-muted)] capitalize">{user.role}</span>
@@ -212,7 +224,6 @@ export function InviteDialog({ daemonUrl, onClose }: InviteDialogProps) {
           </div>
         )}
 
-        {/* ── Invite form ── */}
         {view === "invite" && (
           <div className="p-6">
             <h2 className="text-lg font-semibold mb-4">Invite to Hive</h2>
@@ -264,16 +275,15 @@ export function InviteDialog({ daemonUrl, onClose }: InviteDialogProps) {
               <button
                 type="button"
                 onClick={handleInvite}
-                disabled={!inviteName.trim() || inviteLoading}
+                disabled={!inviteName.trim()}
                 className="flex-1 px-3 py-2 text-sm rounded-md bg-[var(--accent)] text-white font-medium disabled:opacity-40 transition-opacity"
               >
-                {inviteLoading ? "Creating..." : "Create Invite"}
+                Create Invite
               </button>
             </div>
           </div>
         )}
 
-        {/* ── Invite ready ── */}
         {view === "invite-ready" && inviteResult && (
           <div className="p-6">
             <h2 className="text-lg font-semibold mb-1">Invite Ready</h2>

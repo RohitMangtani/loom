@@ -2682,6 +2682,45 @@ export class WsServer {
         break;
       }
 
+      case "user_list": {
+        const users = this.userRegistry.getAll();
+        this.send(ws, { type: "user_list", users });
+        break;
+      }
+
+      case "user_create": {
+        const connUser = this.connectedUsers.get(ws);
+        if (!connUser || connUser.role !== "admin") {
+          this.send(ws, { type: "error", error: "Admin access required" });
+          break;
+        }
+        const userName = typeof msg.userName === "string" ? msg.userName.trim() : "";
+        const userRole = msg.userRole as string;
+        if (!userName || !["admin", "operator", "viewer"].includes(userRole)) {
+          this.send(ws, { type: "error", error: "Missing userName or invalid userRole" });
+          break;
+        }
+        const created = this.userRegistry.createUser(userName, userRole as "admin" | "operator" | "viewer");
+        this.send(ws, { type: "user_created", user: created });
+        break;
+      }
+
+      case "user_remove": {
+        const connUser2 = this.connectedUsers.get(ws);
+        if (!connUser2 || connUser2.role !== "admin") {
+          this.send(ws, { type: "error", error: "Admin access required" });
+          break;
+        }
+        const removeId = typeof msg.userId === "string" ? msg.userId : "";
+        if (!removeId) {
+          this.send(ws, { type: "error", error: "Missing userId" });
+          break;
+        }
+        const removed = this.userRegistry.removeUser(removeId);
+        this.send(ws, { type: "user_removed", userId: removeId, ok: removed });
+        break;
+      }
+
       default:
         this.send(ws, { type: "error", error: "Unknown message type" });
     }

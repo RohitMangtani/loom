@@ -569,7 +569,7 @@ export default function Home() {
 
       {showInviteDialog && (
         <InviteDialog
-          daemonUrl={daemonUrl}
+          send={(msg) => send(msg as unknown as import("@/lib/types").DaemonMessage)}
           onClose={() => setShowInviteDialog(false)}
         />
       )}

@@ -130,7 +130,7 @@ export interface ConnectedMachine {
 }
 
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file" | "user_list" | "user_create" | "user_remove";
   workerId?: string;
   project?: string;
   task?: string;
@@ -167,6 +167,12 @@ export interface DaemonMessage {
   size?: number;
   /** Base64-encoded file payload for upload_file messages. */
   dataBase64?: string;
+  /** User management: name for user_create. */
+  userName?: string;
+  /** User management: role for user_create. */
+  userRole?: string;
+  /** User management: id for user_remove. */
+  userId?: string;
 }
 
 export interface ChatEntry {
@@ -192,7 +198,7 @@ export interface ReviewItem {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result" | "presence" | "activity";
+  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result" | "presence" | "activity" | "user_list" | "user_created" | "user_removed";
   workers?: WorkerState[];
   worker?: WorkerState;
   /** Connected satellite machines (for spawn dialog machine picker). */
@@ -222,4 +228,6 @@ export interface DaemonResponse {
   userName?: string;
   action?: string;
   timestamp?: number;
+  /** User management: created/returned user object. */
+  user?: HiveUser | Record<string, unknown>;
 }
