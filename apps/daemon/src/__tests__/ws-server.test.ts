@@ -203,6 +203,35 @@ describe("WsServer pushState", () => {
     });
   });
 
+  it("rejects malformed privileged ws payloads before handling them", () => {
+    const harness = createServer([{ id: "w1", status: "idle" }]);
+    const server = harness.server as unknown as {
+      handleMessage: (ws: WebSocket, msg: Record<string, unknown>) => void;
+    };
+    const adminWs = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+
+    server.handleMessage(adminWs, { type: "spawn", model: "claude;rm", project: "~" });
+    server.handleMessage(adminWs, { type: "kill", workerId: "../bad-worker" });
+    server.handleMessage(adminWs, {
+      type: "upload_file",
+      workerId: "w1",
+      requestId: "bad id",
+      fileName: "notes.txt",
+      dataBase64: Buffer.from("hello", "utf-8").toString("base64"),
+    });
+
+    const sent = (adminWs.send as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([raw]) => JSON.parse(raw) as Record<string, unknown>);
+    expect(sent).toEqual([
+      { type: "error", error: "Invalid model" },
+      { type: "error", error: "Invalid workerId" },
+      { type: "error", error: "Invalid requestId" },
+    ]);
+  });
+
   it("stores uploaded files for a local worker and returns the machine-local path", () => {
     const home = mkdtempSync(join(tmpdir(), "hive-ws-upload-"));
     vi.stubEnv("HOME", home);

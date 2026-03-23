@@ -18,8 +18,6 @@ import { ProcessDiscovery } from "./discovery.js";
 import { TelemetryReceiver } from "./telemetry.js";
 import { SessionStreamer } from "./session-stream.js";
 import { ProcessManager } from "./process-mgr.js";
-import { spawnTerminalWindow, closeTerminalWindow, arrangeTerminalWindows, updateTerminalTitles } from "./arrange-windows.js";
-import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
 import { patchHookUrls } from "./auth.js";
 import { AutoPilot } from "./auto-pilot.js";
 import { Watchdog } from "./watchdog.js";
@@ -35,6 +33,7 @@ import {
   FederationSocketClient,
   type FederationDisconnectMeta,
 } from "./federation-socket.js";
+import type { LoadedPlatform } from "./platform/interfaces.js";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
 function getGitVersion(): string {
@@ -213,6 +212,7 @@ export class SatelliteClient {
   private readonly streamer: SessionStreamer;
   private readonly procMgr: ProcessManager;
   private readonly federation: FederationSocketClient<SatelliteDownMessage, SatelliteUpMessage>;
+  private readonly runtimePlatform: LoadedPlatform;
   private autoPilot: AutoPilot | null = null;
   private watchdog: Watchdog | null = null;
   private chatSubs = new Map<string, string>(); // prefixed workerId → subKey
@@ -228,17 +228,24 @@ export class SatelliteClient {
   private lastSelfHealAt = 0;
   private selfHealInFlight = false;
 
-  constructor(primaryUrl: string, token: string, localToken: string) {
+  constructor(primaryUrl: string, token: string, localToken: string, runtimePlatform: LoadedPlatform) {
     this.machineId = hostname().toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 24) || "satellite";
     this.capabilities = detectCapabilities();
+    this.runtimePlatform = runtimePlatform;
 
     console.log(`[satellite] Capabilities: ${JSON.stringify(this.capabilities)}`);
 
     // Local telemetry server (receives hooks from local Claude instances)
-    this.telemetry = new TelemetryReceiver(3001, localToken);
+    this.telemetry = new TelemetryReceiver(3001, localToken, {
+      terminal: runtimePlatform.terminal,
+      windows: runtimePlatform.windows,
+    });
     this.procMgr = new ProcessManager(this.telemetry);
     this.streamer = new SessionStreamer();
-    this.discovery = new ProcessDiscovery(this.telemetry, this.streamer);
+    this.discovery = new ProcessDiscovery(this.telemetry, this.streamer, {
+      discovery: runtimePlatform.discovery,
+      terminal: runtimePlatform.terminal,
+    });
 
     // Patch hook URLs so local Claude instances report to local telemetry
     patchHookUrls(localToken);
@@ -357,7 +364,7 @@ export class SatelliteClient {
     this.installClaudeMd();
 
     // Auto-pilot + watchdog — same as primary, runs locally on satellite
-    this.autoPilot = new AutoPilot(this.telemetry, this.streamer);
+    this.autoPilot = new AutoPilot(this.telemetry, this.streamer, this.runtimePlatform.terminal);
     this.watchdog = new Watchdog(this.telemetry);
 
     // Initial discovery scan
@@ -639,7 +646,13 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
       case "satellite_spawn": {
         const project = (!msg.project || msg.project === "~") ? homedir() : msg.project;
         const model = msg.model || "claude";
-        const result = spawnTerminalWindow(project, model, msg.targetQuadrant, msg.initialMessage, this.telemetry.getAll().length);
+        const result = this.runtimePlatform.windows.spawnTerminal(
+          project,
+          model,
+          msg.targetQuadrant,
+          msg.initialMessage,
+          this.telemetry.getAll().length,
+        );
         if (result.tty) {
           this.telemetry.markSpawn(result.tty);
           // Create spawn placeholder so the dashboard sees the tile immediately
@@ -757,7 +770,9 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           try { unlinkSync(markerPath); } catch { /* already gone */ }
 
           // Close terminal window
-          setTimeout(() => closeTerminalWindow(worker.tty!), 500);
+          setTimeout(() => {
+            this.runtimePlatform.windows.closeTerminal(worker.tty!);
+          }, 500);
         }
 
         this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
@@ -798,7 +813,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: "No TTY" });
           return;
         }
-        const result = sendSelectionToTty(worker.tty, msg.optionIndex || 0);
+        const result = this.runtimePlatform.terminal.sendSelection(worker.tty, msg.optionIndex || 0);
         if (result.ok) {
           worker.status = "working";
           worker.currentAction = "Thinking...";
@@ -819,7 +834,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: "No TTY" });
           return;
         }
-        const result = sendEnterToTty(worker.tty);
+        const result = this.runtimePlatform.terminal.sendKeystroke(worker.tty, "enter");
         if (result.ok) {
           worker.promptType = null;
           worker.promptMessage = undefined;
@@ -1016,8 +1031,7 @@ All API calls go to \`127.0.0.1:3001\` — the local satellite daemon relays the
           // positions 1..N so N agents = N-row full-screen stack.
           slots.sort((a, b) => a.quadrant - b.quadrant);
           const localSlots = slots.map((s, i) => ({ ...s, quadrant: i + 1 }));
-          arrangeTerminalWindows(localSlots);
-          updateTerminalTitles(localSlots);
+          this.runtimePlatform.windows.arrangeWindows(localSlots);
         }
         break;
       }

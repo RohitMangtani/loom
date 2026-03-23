@@ -25,6 +25,7 @@ import type { ReviewItem } from "./review-manager.js";
 import { SwarmController } from "./swarm-controller.js";
 import type { SwarmSpawnRequest, SwarmExecRequest, SwarmExecResult, SwarmProjectEntry } from "./swarm-controller.js";
 import { scanLocalProjects } from "./project-discovery.js";
+import type { TerminalIO, WindowManager } from "./platform/interfaces.js";
 
 const IDLE_THRESHOLD = 30_000;
 const HOME = process.env.HOME || `/Users/${process.env.USER}`;
@@ -182,10 +183,18 @@ export class TelemetryReceiver {
   private token: string;
   private collector: Collector | null = null;
   private processManager: ProcessManager | null = null;
+  private terminal: TerminalIO | null = null;
+  private windows: WindowManager | null = null;
 
-  constructor(port: number, token: string) {
+  constructor(
+    port: number,
+    token: string,
+    platform?: { terminal: TerminalIO; windows: WindowManager },
+  ) {
     this.port = port;
     this.token = token;
+    this.terminal = platform?.terminal || null;
+    this.windows = platform?.windows || null;
     this.taskQueue = new TaskQueue();
     this.coordination = new CoordinationLayer({
       isWorkerAlive: (id) => this.workers.has(id),
@@ -1381,7 +1390,8 @@ export class TelemetryReceiver {
       const workerSnapshot = workersWithTty.map(w => ({ id: w.id, tty: w.tty! }));
       const allWorkerSnapshot = workers.map(w => ({ id: w.id }));
 
-      detectQuadrantsFromWindowPositions(
+      const detectQuadrants = this.windows?.detectQuadrants || detectQuadrantsFromWindowPositions;
+      detectQuadrants(
         workerSnapshot.map(w => w.tty),
         (positionMap, rawSlots) => {
           if (positionMap.size === 0) return;
@@ -1418,7 +1428,8 @@ export class TelemetryReceiver {
             }
           }
           if (drifted) {
-            resetArrangementCache();
+            if (this.windows?.resetArrangement) this.windows.resetArrangement();
+            else resetArrangementCache();
             this.forceRearrange();
           }
 
@@ -1521,12 +1532,14 @@ export class TelemetryReceiver {
         projectName: s.projectName,
         model: s.model,
       }));
-    arrangeTerminalWindows(arrangeSlots);
+    if (this.windows) this.windows.arrangeWindows(arrangeSlots);
+    else arrangeTerminalWindows(arrangeSlots);
   }
 
   /** Force rearrange terminal windows (resets cache and fires immediately). */
   forceRearrange(): void {
-    resetArrangementCache();
+    if (this.windows?.resetArrangement) this.windows.resetArrangement();
+    else resetArrangementCache();
     const slots = [...this.quadrantAssignments.entries()]
       .map(([workerId, q]) => {
         const w = this.workers.get(workerId);
@@ -1534,7 +1547,10 @@ export class TelemetryReceiver {
         return { quadrant: q, tty: w.tty, projectName: w.projectName, model: w.model || "claude" };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
-    if (slots.length > 0) arrangeTerminalWindows(slots);
+    if (slots.length > 0) {
+      if (this.windows) this.windows.arrangeWindows(slots);
+      else arrangeTerminalWindows(slots);
+    }
   }
 
   /** Returns the lowest slot (1-8) not currently assigned, or undefined if full. */
@@ -1757,7 +1773,9 @@ export class TelemetryReceiver {
         }
       }
     } else if (worker.tty) {
-      const result = sendInputToTty(worker.tty, payload);
+      const result = this.terminal
+        ? this.terminal.sendText(worker.tty, payload, worker.model)
+        : sendInputToTty(worker.tty, payload);
       if (!result.ok) {
         error = result.error || `Failed to send to ${worker.tty}`;
       }
@@ -1934,7 +1952,9 @@ export class TelemetryReceiver {
         }
       }
     } else if (worker.tty) {
-      const result = await sendInputToTtyAsync(worker.tty, payload, worker.model);
+      const result = this.terminal
+        ? await this.terminal.sendTextAsync(worker.tty, payload, worker.model)
+        : await sendInputToTtyAsync(worker.tty, payload, worker.model);
       if (!result.ok) {
         error = result.error || `Failed to send to ${worker.tty}`;
       }

@@ -2,6 +2,7 @@ import type { TelemetryReceiver } from "./telemetry.js";
 import type { SessionStreamer } from "./session-stream.js";
 import { sendInputToTty, sendSelectionToTty, isSendInFlight } from "./tty-input.js";
 import { readTail } from "./utils.js";
+import type { TerminalIO } from "./platform/interfaces.js";
 
 /**
  * Auto-pilot: ensures agents NEVER stay stuck waiting for keyboard input.
@@ -27,13 +28,15 @@ const COOLDOWN_MS = 2_000;
 export class AutoPilot {
   private telemetry: TelemetryReceiver;
   private streamer: SessionStreamer;
+  private terminal: TerminalIO | null;
   private responded = new Set<string>();
   private lastAutoSend = new Map<string, number>();
   private firstSeen = new Map<string, number>();
 
-  constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
+  constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer, terminal?: TerminalIO) {
     this.telemetry = telemetry;
     this.streamer = streamer;
+    this.terminal = terminal || null;
   }
 
   tick(): void {
@@ -49,7 +52,7 @@ export class AutoPilot {
 
       // Skip while another TTY send is in progress — sync auto-pilot sends
       // would race with async message/approval sends for Terminal focus.
-      if (isSendInFlight()) continue;
+      if (this.terminal ? this.terminal.isSendInFlight() : isSendInFlight()) continue;
 
       // Unique key for this stuck instance (so we don't re-respond to the same prompt)
       const stuckKey = `${worker.id}_${worker.lastActionAt}`;
@@ -82,8 +85,12 @@ export class AutoPilot {
         action.includes("approval") ||
         hasNumberedOptions;
       const result = isSelectionPrompt
-        ? sendSelectionToTty(worker.tty, parseInt(response.text, 10) - 1 || 0)
-        : sendInputToTty(worker.tty, response.text);
+        ? (this.terminal
+            ? this.terminal.sendSelection(worker.tty, parseInt(response.text, 10) - 1 || 0)
+            : sendSelectionToTty(worker.tty, parseInt(response.text, 10) - 1 || 0))
+        : (this.terminal
+            ? this.terminal.sendText(worker.tty, response.text, worker.model)
+            : sendInputToTty(worker.tty, response.text));
       if (result.ok) {
         this.responded.add(stuckKey);
         this.firstSeen.delete(stuckKey);
@@ -203,7 +210,7 @@ export class AutoPilot {
 
       const lastSend = this.lastAutoSend.get(worker.id) || 0;
       if (now - lastSend < COOLDOWN_MS) continue;
-      if (isSendInFlight()) continue;
+      if (this.terminal ? this.terminal.isSendInFlight() : isSendInFlight()) continue;
 
       const sessionFile = this.streamer.getSessionFile(worker.id);
       if (!sessionFile) continue;
@@ -223,8 +230,12 @@ export class AutoPilot {
       // Selection prompts (AskUserQuestion, EnterPlanMode, ExitPlanMode) use
       // ink's selection UI → need System Events keystrokes, not text injection.
       const result = prompt.isSelection
-        ? sendSelectionToTty(worker.tty, parseInt(prompt.response, 10) - 1 || 0)
-        : sendInputToTty(worker.tty, prompt.response);
+        ? (this.terminal
+            ? this.terminal.sendSelection(worker.tty, parseInt(prompt.response, 10) - 1 || 0)
+            : sendSelectionToTty(worker.tty, parseInt(prompt.response, 10) - 1 || 0))
+        : (this.terminal
+            ? this.terminal.sendText(worker.tty, prompt.response, worker.model)
+            : sendInputToTty(worker.tty, prompt.response));
       if (result.ok) {
         this.responded.add(prompt.toolUseId);
         this.firstSeen.delete(prompt.toolUseId);

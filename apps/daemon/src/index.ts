@@ -1,7 +1,7 @@
 import { execFile } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, platform as osPlatform } from "os";
 import { TelemetryReceiver } from "./telemetry.js";
 import { ProcessManager } from "./process-mgr.js";
 import { SessionStreamer } from "./session-stream.js";
@@ -17,6 +17,7 @@ import { OutboxScanner } from "./outbox.js";
 import { loadOrCreateToken, deriveViewerToken, patchHookUrls } from "./auth.js";
 import { SatelliteClient } from "./satellite.js";
 import { acquireRuntimeSingleton } from "./runtime-singleton.js";
+import { loadPlatform } from "./platform/index.js";
 
 // ── Satellite mode ──────────────────────────────────────────────────
 // Usage: npx tsx apps/daemon/src/index.ts --satellite wss://URL TOKEN
@@ -46,12 +47,14 @@ if (satFlagIdx !== -1) {
     primaryUrl = primaryUrl.replace("https://", "wss://");
   }
 
-  // Probe Automation permission
-  execFile("/usr/bin/osascript", ["-e",
-    'tell application "Terminal" to get name of first window'
-  ], { timeout: 5000 }, () => { });
+  if (osPlatform() === "darwin") {
+    execFile("/usr/bin/osascript", ["-e",
+      'tell application "Terminal" to get name of first window'
+    ], { timeout: 5000 }, () => { });
+  }
 
   const localToken = loadOrCreateToken();
+  const platform = loadPlatform();
   const satLock = acquireRuntimeSingleton("satellite", { primaryUrl });
   if (!satLock.ok) {
     const owner = satLock.conflict.metadata;
@@ -59,7 +62,7 @@ if (satFlagIdx !== -1) {
     console.log(`[satellite] Runtime already owned by ${ownerText}. Exiting duplicate instance.`);
     process.exit(0);
   }
-  const satellite = new SatelliteClient(primaryUrl, primaryToken, localToken);
+  const satellite = new SatelliteClient(primaryUrl, primaryToken, localToken, platform);
   satellite.start();
 
   console.log("Hive satellite running.");
@@ -89,15 +92,18 @@ if (satFlagIdx !== -1) {
 
   // ── Primary mode (default) ──────────────────────────────────────────
 
-  // Probe Automation permission early — macOS shows the approval dialog on first
-  // use, so we trigger it at startup rather than waiting for the user to click X.
-  execFile("/usr/bin/osascript", ["-e",
-    'tell application "Terminal" to get name of first window'
-  ], { timeout: 5000 }, () => { /* result doesn't matter — the dialog is the point */ });
+  if (osPlatform() === "darwin") {
+    // Probe Automation permission early — macOS shows the approval dialog on first
+    // use, so we trigger it at startup rather than waiting for the user to click X.
+    execFile("/usr/bin/osascript", ["-e",
+      'tell application "Terminal" to get name of first window'
+    ], { timeout: 5000 }, () => { /* result doesn't matter — the dialog is the point */ });
+  }
 
   const token = loadOrCreateToken();
   const viewerToken = deriveViewerToken(token);
   patchHookUrls(token);
+  const platform = loadPlatform();
   const daemonLock = acquireRuntimeSingleton("daemon");
   if (!daemonLock.ok) {
     const owner = daemonLock.conflict.metadata;
@@ -106,17 +112,26 @@ if (satFlagIdx !== -1) {
     process.exit(0);
   }
 
-  const telemetry = new TelemetryReceiver(3001, token);
+  const telemetry = new TelemetryReceiver(3001, token, {
+    terminal: platform.terminal,
+    windows: platform.windows,
+  });
   const procMgr = new ProcessManager(telemetry);
   const streamer = new SessionStreamer();
-  const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken);
-  const discovery = new ProcessDiscovery(telemetry, streamer);
+  const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken, {
+    terminal: platform.terminal,
+    windows: platform.windows,
+  });
+  const discovery = new ProcessDiscovery(telemetry, streamer, {
+    discovery: platform.discovery,
+    terminal: platform.terminal,
+  });
   const pushMgr = new WebPushManager();
   const notifications = new NotificationManager();
   notifications.setPushManager(pushMgr);
   ws.setDiscovery(discovery);
   ws.setPushManager(pushMgr);
-  const autoPilot = new AutoPilot(telemetry, streamer);
+  const autoPilot = new AutoPilot(telemetry, streamer, platform.terminal);
   const watchdog = new Watchdog(telemetry);
   const collector = new Collector();
   const outbox = new OutboxScanner(telemetry);

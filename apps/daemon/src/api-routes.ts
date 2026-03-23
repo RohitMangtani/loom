@@ -6,6 +6,16 @@ import type { ProcessManager } from "./process-mgr.js";
 import { ProcessDiscovery } from "./discovery.js";
 import type { TelemetryReceiver } from "./telemetry.js";
 import { getControlPlaneAuditPath, readControlPlaneAudit } from "./control-plane-audit.js";
+import {
+  isSafeCommandField,
+  isSafeMachineId,
+  isSafeModelId,
+  isSafePathField,
+  isSafeTaskField,
+  isSafeWorkerId,
+  isValidQuadrant,
+  isValidSatelliteAction,
+} from "./control-plane-guards.js";
 
 export function registerApiRoutes(
   app: ReturnType<typeof express>,
@@ -37,6 +47,18 @@ export function registerApiRoutes(
     };
     if (!workerId || !content) {
       res.status(400).json({ error: "Missing workerId or content" });
+      return;
+    }
+    if (!isSafeWorkerId(workerId)) {
+      res.status(400).json({ error: "Invalid workerId" });
+      return;
+    }
+    if (from && !isSafeWorkerId(from)) {
+      res.status(400).json({ error: "Invalid from workerId" });
+      return;
+    }
+    if (contextWorkerIds && contextWorkerIds.some((id) => !isSafeWorkerId(id))) {
+      res.status(400).json({ error: "Invalid context workerId" });
       return;
     }
 
@@ -369,6 +391,26 @@ export function registerApiRoutes(
       targetQuadrant?: number;
       machine?: string;
     };
+    if (project && !isSafePathField(project)) {
+      res.status(400).json({ error: "Invalid project path" });
+      return;
+    }
+    if (model && !isSafeModelId(model)) {
+      res.status(400).json({ error: "Invalid model" });
+      return;
+    }
+    if (task && !isSafeTaskField(task)) {
+      res.status(400).json({ error: "Invalid task" });
+      return;
+    }
+    if (machine && !isSafeMachineId(machine)) {
+      res.status(400).json({ error: "Invalid machine" });
+      return;
+    }
+    if (!isValidQuadrant(targetQuadrant)) {
+      res.status(400).json({ error: "Invalid targetQuadrant" });
+      return;
+    }
     const result = receiver.spawnViaSwarm({ project, model, task, targetQuadrant, machine });
     if (!result.ok) {
       const message = typeof result.error === "string" ? result.error : "Failed to spawn worker";
@@ -389,6 +431,10 @@ export function registerApiRoutes(
       res.status(400).json({ error: "Missing workerId" });
       return;
     }
+    if (!isSafeWorkerId(workerId)) {
+      res.status(400).json({ error: "Invalid workerId" });
+      return;
+    }
     const result = receiver.killViaSwarm(workerId);
     if (!result.ok) {
       const message = typeof result.error === "string" ? result.error : `Worker ${workerId} not found`;
@@ -403,6 +449,14 @@ export function registerApiRoutes(
     const { machine, action } = req.body as { machine?: string; action?: string };
     if (!machine) {
       res.status(400).json({ error: "Missing machine" });
+      return;
+    }
+    if (!isSafeMachineId(machine)) {
+      res.status(400).json({ error: "Invalid machine" });
+      return;
+    }
+    if (!isValidSatelliteAction(action)) {
+      res.status(400).json({ error: "Invalid action" });
       return;
     }
     const result = receiver.maintainSatelliteViaSwarm(machine, action);
@@ -424,6 +478,18 @@ export function registerApiRoutes(
     };
     if (!command?.trim()) {
       res.status(400).json({ error: "Missing command" });
+      return;
+    }
+    if (!isSafeCommandField(command)) {
+      res.status(400).json({ error: "Invalid command" });
+      return;
+    }
+    if (cwd && !isSafePathField(cwd)) {
+      res.status(400).json({ error: "Invalid working directory" });
+      return;
+    }
+    if (machine && !isSafeMachineId(machine)) {
+      res.status(400).json({ error: "Invalid machine" });
       return;
     }
     const result = await receiver.execViaSwarm({

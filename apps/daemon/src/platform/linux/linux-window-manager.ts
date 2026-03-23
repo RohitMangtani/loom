@@ -1,77 +1,147 @@
 // Requires tmux to be installed
 
-import { execFile, execFileSync } from "child_process";
+import { execFileSync } from "child_process";
 import { homedir } from "os";
 import { join } from "path";
-import { promisify } from "util";
-import type { WindowManager } from "../interfaces.js";
+import type { WindowManager, WindowSlot } from "../interfaces.js";
 
-const execFileAsync = promisify(execFile);
 const TMUX_SESSION = "hive";
+const TMUX_WINDOW = "swarm";
 const HOME = process.env.HOME || homedir();
+let lastArrangement = "";
 
-function resolveSpawnCommand(model: string): string {
-  if (model === "claude") return "claude";
-  if (model === "codex") return "codex";
-  if (model === "openclaw") return "openclaw tui";
-  if (model === "gemini") return "gemini";
-
-  try {
-    const { readFileSync } = require("fs") as typeof import("fs");
-    const raw = readFileSync(join(HOME, ".hive", "agents.json"), "utf-8");
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      const custom = parsed.find((entry: Record<string, unknown>) => entry.id === model);
-      if (typeof custom?.spawnCommand === "string" && custom.spawnCommand.trim()) {
-        return custom.spawnCommand;
-      }
-    }
-  } catch {
-    // Fall back to the model string.
-  }
-
-  return model;
+interface PaneInfo {
+  paneId: string;
+  paneTty: string;
+  paneTop: number;
+  paneIndex: number;
 }
 
-async function resolveWindowTargetForTty(tty: string): Promise<string | null> {
-  const normalized = tty.replace(/^\/dev\//, "");
-  try {
-    const { stdout } = await execFileAsync("tmux", [
-      "list-panes",
-      "-a",
-      "-F",
-      "#{session_name}\t#{window_index}\t#{pane_tty}",
-    ], {
-      encoding: "utf-8",
-      timeout: 5000,
-    });
+function normalizeTty(tty: string): string {
+  return tty.replace(/^\/dev\//, "");
+}
 
-    for (const line of (stdout as string).split("\n")) {
-      const [sessionName, windowIndex, paneTty] = line.trim().split("\t");
-      if (sessionName !== TMUX_SESSION) continue;
-      if (!windowIndex || !paneTty) continue;
-      if (paneTty.replace(/^\/dev\//, "") === normalized) {
-        return `${TMUX_SESSION}:${windowIndex}`;
+function resolveSpawnCommand(model: string, initialMessage?: string): string {
+  let cliCmd: string;
+  if (model === "claude") cliCmd = "claude";
+  else if (model === "codex") cliCmd = "codex";
+  else if (model === "openclaw") cliCmd = "openclaw tui";
+  else if (model === "gemini") cliCmd = "gemini";
+  else {
+    try {
+      const { readFileSync } = require("fs") as typeof import("fs");
+      const raw = readFileSync(join(HOME, ".hive", "agents.json"), "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const custom = parsed.find((entry: Record<string, unknown>) => entry.id === model);
+        if (typeof custom?.spawnCommand === "string" && custom.spawnCommand.trim()) {
+          cliCmd = custom.spawnCommand;
+        } else {
+          cliCmd = model;
+        }
+      } else {
+        cliCmd = model;
       }
+    } catch {
+      cliCmd = model;
     }
-    return null;
-  } catch {
-    return null;
+  }
+
+  if (initialMessage && model === "claude") {
+    const escaped = initialMessage.replace(/'/g, "'\\''");
+    cliCmd += ` '${escaped}'`;
+  }
+
+  return cliCmd;
+}
+
+function sessionTarget(): string {
+  return `${TMUX_SESSION}:${TMUX_WINDOW}`;
+}
+
+function runTmux(args: string[]): { ok: boolean; stdout?: string; error?: string } {
+  try {
+    const stdout = execFileSync("tmux", args, {
+      encoding: "utf-8",
+      timeout: 10000,
+    }) as string;
+    return { ok: true, stdout };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg.slice(0, 180) };
+  }
+}
+
+function sessionExists(): boolean {
+  return runTmux(["has-session", "-t", TMUX_SESSION]).ok;
+}
+
+function listPanes(): PaneInfo[] {
+  const result = runTmux([
+    "list-panes",
+    "-t",
+    sessionTarget(),
+    "-F",
+    "#{pane_id}\t#{pane_tty}\t#{pane_top}\t#{pane_index}",
+  ]);
+  if (!result.ok || !result.stdout) return [];
+
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split("\t"))
+    .filter((parts) => parts[0] && parts[1])
+    .map((parts) => ({
+      paneId: parts[0],
+      paneTty: normalizeTty(parts[1]),
+      paneTop: parseInt(parts[2] || "0", 10) || 0,
+      paneIndex: parseInt(parts[3] || "0", 10) || 0,
+    }))
+    .sort((a, b) => (a.paneTop - b.paneTop) || (a.paneIndex - b.paneIndex));
+}
+
+function resolvePaneByTty(tty: string): PaneInfo | null {
+  const normalized = normalizeTty(tty);
+  return listPanes().find((pane) => pane.paneTty === normalized) || null;
+}
+
+function applyPaneChrome(): void {
+  runTmux(["set-window-option", "-t", sessionTarget(), "automatic-rename", "off"]);
+  runTmux(["set-window-option", "-t", sessionTarget(), "pane-border-status", "top"]);
+  runTmux(["set-window-option", "-t", sessionTarget(), "pane-border-format", "#{pane_title}"]);
+}
+
+function restackPanes(desiredTtys: string[]): void {
+  if (desiredTtys.length <= 1) return;
+
+  let panes = listPanes();
+  for (let index = 0; index < desiredTtys.length; index += 1) {
+    const desiredTty = normalizeTty(desiredTtys[index]);
+    const currentPane = panes[index];
+    if (!currentPane || currentPane.paneTty === desiredTty) continue;
+
+    const desiredPane = panes.find((pane) => pane.paneTty === desiredTty);
+    if (!desiredPane) continue;
+
+    const swapped = runTmux(["swap-pane", "-s", desiredPane.paneId, "-t", currentPane.paneId]);
+    if (!swapped.ok) continue;
+    panes = listPanes();
   }
 }
 
 export class LinuxWindowManager implements WindowManager {
-  async spawnTerminal(project: string, model: string, quadrant?: number): Promise<string> {
-    const windowName = `Q${quadrant ?? await this.getNextWindowLabel()}`;
-    const spawnCommand = resolveSpawnCommand(model);
+  spawnTerminal(
+    project: string,
+    model: string,
+    quadrant?: number,
+    initialMessage?: string,
+    _currentAgentCount?: number,
+  ): { ok: boolean; tty?: string; error?: string } {
+    const spawnCommand = resolveSpawnCommand(model, initialMessage);
 
-    try {
-      execFileSync("tmux", ["has-session", "-t", TMUX_SESSION], {
-        encoding: "utf-8",
-        timeout: 3000,
-      });
-    } catch {
-      const tty = execFileSync("tmux", [
+    if (!sessionExists()) {
+      const created = runTmux([
         "new-session",
         "-d",
         "-P",
@@ -80,81 +150,105 @@ export class LinuxWindowManager implements WindowManager {
         "-s",
         TMUX_SESSION,
         "-n",
-        windowName,
+        TMUX_WINDOW,
         "-c",
         project,
         spawnCommand,
-      ], {
-        encoding: "utf-8",
-        timeout: 10000,
-      }).trim();
-      return tty.replace(/^\/dev\//, "");
+      ]);
+      if (!created.ok) {
+        return { ok: false, error: `Spawn terminal failed: ${created.error}` };
+      }
+      applyPaneChrome();
+      lastArrangement = "";
+      return { ok: true, tty: created.stdout?.trim() };
     }
 
-    const tty = execFileSync("tmux", [
-      "new-window",
-      "-P",
-      "-F",
-      "#{pane_tty}",
-      "-t",
-      TMUX_SESSION,
-      "-n",
-      windowName,
-      "-c",
-      project,
-      spawnCommand,
-    ], {
-      encoding: "utf-8",
-      timeout: 10000,
-    }).trim();
+    const panes = listPanes();
+    if (panes.length === 0) {
+      const created = runTmux([
+        "new-window",
+        "-P",
+        "-F",
+        "#{pane_tty}",
+        "-t",
+        TMUX_SESSION,
+        "-n",
+        TMUX_WINDOW,
+        "-c",
+        project,
+        spawnCommand,
+      ]);
+      if (!created.ok) {
+        return { ok: false, error: `Spawn terminal failed: ${created.error}` };
+      }
+      applyPaneChrome();
+      lastArrangement = "";
+      return { ok: true, tty: created.stdout?.trim() };
+    }
 
-    return tty.replace(/^\/dev\//, "");
+    const desiredIndex = Math.max(0, Math.min(
+      typeof quadrant === "number" ? quadrant - 1 : panes.length,
+      panes.length,
+    ));
+    const targetPane = desiredIndex <= 0
+      ? panes[0]
+      : panes[Math.min(desiredIndex - 1, panes.length - 1)];
+
+    const splitArgs = desiredIndex <= 0
+      ? ["split-window", "-v", "-b", "-P", "-F", "#{pane_tty}", "-t", targetPane.paneId, "-c", project, spawnCommand]
+      : ["split-window", "-v", "-P", "-F", "#{pane_tty}", "-t", targetPane.paneId, "-c", project, spawnCommand];
+
+    const created = runTmux(splitArgs);
+    if (!created.ok) {
+      return { ok: false, error: `Spawn terminal failed: ${created.error}` };
+    }
+
+    applyPaneChrome();
+    runTmux(["select-layout", "-t", sessionTarget(), "even-vertical"]);
+    lastArrangement = "";
+    return { ok: true, tty: created.stdout?.trim() };
   }
 
-  async closeTerminal(tty: string): Promise<void> {
-    const target = await resolveWindowTargetForTty(tty);
-    if (!target) return;
+  closeTerminal(tty: string): { ok: boolean; error?: string } {
+    const pane = resolvePaneByTty(tty);
+    if (!pane) return { ok: true };
 
-    try {
-      await execFileAsync("tmux", ["kill-window", "-t", target], {
-        encoding: "utf-8",
-        timeout: 5000,
-      });
-    } catch {
-      // Best effort — window may already be gone.
+    const killed = runTmux(["kill-pane", "-t", pane.paneId]);
+    if (!killed.ok) {
+      return { ok: false, error: `Close terminal failed: ${killed.error}` };
+    }
+
+    applyPaneChrome();
+    runTmux(["select-layout", "-t", sessionTarget(), "even-vertical"]);
+    lastArrangement = "";
+    return { ok: true };
+  }
+
+  arrangeWindows(slots: WindowSlot[], totalAgentCount?: number): void {
+    const desired = slots
+      .filter((slot) => !!slot.tty)
+      .sort((a, b) => a.quadrant - b.quadrant);
+    if (desired.length === 0 || !sessionExists()) return;
+
+    const fingerprint = desired
+      .map((slot) => `${slot.quadrant}:${normalizeTty(slot.tty)}:${slot.projectName}:${slot.model}`)
+      .join("|") + `@${totalAgentCount || desired.length}`;
+    if (fingerprint === lastArrangement) return;
+    lastArrangement = fingerprint;
+
+    applyPaneChrome();
+    runTmux(["select-layout", "-t", sessionTarget(), "even-vertical"]);
+    restackPanes(desired.map((slot) => slot.tty));
+    runTmux(["select-layout", "-t", sessionTarget(), "even-vertical"]);
+
+    for (const slot of desired) {
+      const pane = resolvePaneByTty(slot.tty);
+      if (!pane) continue;
+      runTmux(["select-pane", "-t", pane.paneId, "-T", `Q${slot.quadrant} - ${slot.projectName}`]);
     }
   }
 
-  arrangeWindows(_slots: Array<{ tty: string; quadrant: number; projectName: string; model: string }>): void {
-    try {
-      execFile("tmux", ["select-layout", "-t", TMUX_SESSION, "tiled"], {
-        encoding: "utf-8",
-        timeout: 5000,
-      }, () => {
-        // Layout changes are best effort.
-      });
-    } catch {
-      // Session may not exist yet.
-    }
-  }
-
-  private async getNextWindowLabel(): Promise<number> {
-    try {
-      const { stdout } = await execFileAsync("tmux", ["list-windows", "-t", TMUX_SESSION, "-F", "#{window_name}"], {
-        encoding: "utf-8",
-        timeout: 3000,
-      });
-      const seen = new Set(
-        (stdout as string)
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean),
-      );
-      let candidate = 1;
-      while (seen.has(`Q${candidate}`)) candidate += 1;
-      return candidate;
-    } catch {
-      return 1;
-    }
+  resetArrangement(): void {
+    lastArrangement = "";
   }
 }

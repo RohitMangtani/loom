@@ -1,14 +1,22 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { ProcessDiscovery } from "../../discovery.js";
-import { arrangeTerminalWindows, closeTerminalWindow, spawnTerminalWindow } from "../../arrange-windows.js";
+import {
+  arrangeTerminalWindows,
+  closeTerminalWindow,
+  detectQuadrantsFromWindowPositions,
+  resetArrangementCache,
+  spawnTerminalWindow,
+} from "../../arrange-windows.js";
 import {
   isSendInFlight,
+  sendEnterToTty,
   sendEnterToTtyAsync,
+  sendInputToTty,
   sendInputToTtyAsync,
   sendSelectionToTty,
 } from "../../tty-input.js";
-import type { DiscoveredProcess, ProcessDiscoverer, TerminalIO, WindowManager } from "../interfaces.js";
+import type { DiscoveredProcess, LoadedPlatform, ProcessDiscoverer, TerminalIO, WindowManager, WindowSlot } from "../interfaces.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -80,16 +88,25 @@ end tell
 class MacOSTerminalIO implements TerminalIO {
   constructor(private readonly discovery: MacDiscoveryShape) {}
 
-  sendText(tty: string, text: string): Promise<{ ok: boolean; error?: string }> {
-    return sendInputToTtyAsync(tty, text);
+  sendText(tty: string, text: string): { ok: boolean; error?: string } {
+    return sendInputToTty(tty, text);
   }
 
-  sendKeystroke(tty: string, key: "enter" | "down" | "up"): Promise<{ ok: boolean; error?: string }> {
+  sendTextAsync(tty: string, text: string, model?: string): Promise<{ ok: boolean; error?: string }> {
+    return sendInputToTtyAsync(tty, text, model);
+  }
+
+  sendKeystroke(tty: string, key: "enter" | "down" | "up"): { ok: boolean; error?: string } {
+    if (key === "enter") return sendEnterToTty(tty);
+    return { ok: false, error: `Synchronous ${key} keystrokes are not supported on macOS` };
+  }
+
+  sendKeystrokeAsync(tty: string, key: "enter" | "down" | "up"): Promise<{ ok: boolean; error?: string }> {
     if (key === "enter") return sendEnterToTtyAsync(tty);
     return sendArrowKeyToTty(tty, key);
   }
 
-  async sendSelection(tty: string, optionIndex: number): Promise<{ ok: boolean; error?: string }> {
+  sendSelection(tty: string, optionIndex: number): { ok: boolean; error?: string } {
     return sendSelectionToTty(tty, optionIndex);
   }
 
@@ -142,27 +159,37 @@ class MacOSProcessDiscoverer implements ProcessDiscoverer {
 }
 
 class MacOSWindowManager implements WindowManager {
-  async spawnTerminal(project: string, model: string, quadrant?: number): Promise<string> {
-    const result = spawnTerminalWindow(project, model, quadrant);
-    if (!result.ok || !result.tty) {
-      throw new Error(result.error || "Failed to spawn Terminal.app window");
-    }
-    return result.tty;
+  spawnTerminal(
+    project: string,
+    model: string,
+    quadrant?: number,
+    initialMessage?: string,
+    currentAgentCount?: number,
+  ): { ok: boolean; tty?: string; error?: string } {
+    return spawnTerminalWindow(project, model, quadrant, initialMessage, currentAgentCount);
   }
 
-  async closeTerminal(tty: string): Promise<void> {
-    const result = closeTerminalWindow(tty);
-    if (!result.ok) {
-      throw new Error(result.error || "Failed to close Terminal.app window");
-    }
+  closeTerminal(tty: string): { ok: boolean; error?: string } {
+    return closeTerminalWindow(tty);
   }
 
-  arrangeWindows(slots: Array<{ tty: string; quadrant: number; projectName: string; model: string }>): void {
-    arrangeTerminalWindows(slots);
+  arrangeWindows(slots: WindowSlot[], totalAgentCount?: number): void {
+    arrangeTerminalWindows(slots, totalAgentCount);
+  }
+
+  detectQuadrants(
+    ttys: string[],
+    callback: (result: Map<string, number>, rawSlots?: Map<string, number>) => void,
+  ): void {
+    detectQuadrantsFromWindowPositions(ttys, callback);
+  }
+
+  resetArrangement(): void {
+    resetArrangementCache();
   }
 }
 
-export function createMacOSPlatform(): { terminal: TerminalIO; discovery: ProcessDiscoverer; windows: WindowManager } {
+export function createMacOSPlatform(): LoadedPlatform {
   const discovery = createDiscoveryAdapter();
   return {
     terminal: new MacOSTerminalIO(discovery),

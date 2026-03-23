@@ -241,6 +241,54 @@ describe("registerApiRoutes", () => {
     expect(harness.receiver.killViaSwarm).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed privileged control-plane inputs before touching the swarm handlers", async () => {
+    const harness = await createHarness();
+    harnesses.push(harness);
+
+    const spawnRes = await fetch(`${harness.baseUrl}/api/spawn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project: "/tmp/demo",
+        model: "claude;rm",
+      }),
+    });
+    const killRes = await fetch(`${harness.baseUrl}/api/kill`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workerId: "../bad-worker" }),
+    });
+    const repairRes = await fetch(`${harness.baseUrl}/api/satellites/repair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        machine: "satellite-1",
+        action: "destroy",
+      }),
+    });
+    const execRes = await fetch(`${harness.baseUrl}/api/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        machine: "satellite-1",
+        command: "x".repeat(5001),
+      }),
+    });
+
+    expect(spawnRes.status).toBe(400);
+    expect(await spawnRes.json()).toEqual({ error: "Invalid model" });
+    expect(killRes.status).toBe(400);
+    expect(await killRes.json()).toEqual({ error: "Invalid workerId" });
+    expect(repairRes.status).toBe(400);
+    expect(await repairRes.json()).toEqual({ error: "Invalid action" });
+    expect(execRes.status).toBe(400);
+    expect(await execRes.json()).toEqual({ error: "Invalid command" });
+    expect(harness.receiver.spawnViaSwarm).not.toHaveBeenCalled();
+    expect(harness.receiver.killViaSwarm).not.toHaveBeenCalled();
+    expect(harness.receiver.maintainSatelliteViaSwarm).not.toHaveBeenCalled();
+    expect(harness.receiver.execViaSwarm).not.toHaveBeenCalled();
+  });
+
   it("maps exec control-plane failures to the correct HTTP statuses", async () => {
     const harness = await createHarness();
     harnesses.push(harness);

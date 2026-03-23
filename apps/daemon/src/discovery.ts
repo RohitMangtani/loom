@@ -5,6 +5,7 @@ import type { TelemetryReceiver } from "./telemetry.js";
 import type { SessionStreamer } from "./session-stream.js";
 import type { WorkerState } from "./types.js";
 import { readTail, describeBashCommand } from "./utils.js";
+import type { ProcessDiscoverer, TerminalIO } from "./platform/interfaces.js";
 
 /** Quadrant Audit — logs every status transition with full decision context */
 interface AuditEntry {
@@ -57,6 +58,8 @@ function extractTurnId(line: string): string | null {
 export class ProcessDiscovery {
   private telemetry: TelemetryReceiver;
   private streamer: SessionStreamer;
+  private readonly platformDiscovery?: ProcessDiscoverer;
+  private readonly terminal?: TerminalIO;
   private discoveredPids = new Set<number>();
   private daemonPid = process.pid;
   private prevStatus = new Map<string, string>();
@@ -137,9 +140,15 @@ export class ProcessDiscovery {
   // because readTerminalContent() is unreliable in the first seconds of a new tab.
   private promptHoldUntil = new Map<string, number>(); // workerId → timestamp
 
-  constructor(telemetry: TelemetryReceiver, streamer: SessionStreamer) {
+  constructor(
+    telemetry: TelemetryReceiver,
+    streamer: SessionStreamer,
+    platform?: { discovery: ProcessDiscoverer; terminal: TerminalIO },
+  ) {
     this.telemetry = telemetry;
     this.streamer = streamer;
+    this.platformDiscovery = platform?.discovery;
+    this.terminal = platform?.terminal;
   }
 
   /**
@@ -147,6 +156,9 @@ export class ProcessDiscovery {
    * Returns the tab contents or null on failure.
    */
   readTerminalContent(tty: string): string | null {
+    if (this.terminal) {
+      return this.terminal.readContent(tty);
+    }
     const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
     // Use "history" instead of "contents" — the contents property returns
     // a tab reference string on modern macOS instead of the visible text.
@@ -1287,6 +1299,11 @@ end tell
   private getCpuForPid(pid: number): number {
     const cached = this.tickCpuCache.get(pid);
     if (cached !== undefined) return cached;
+    if (this.platformDiscovery) {
+      const val = this.platformDiscovery.getCpu(pid);
+      this.tickCpuCache.set(pid, val);
+      return val;
+    }
     try {
       const out = execFileSync("ps", ["-p", String(pid), "-o", "%cpu="], {
         encoding: "utf-8",
@@ -1313,6 +1330,18 @@ end tell
   private getPtyOutputDelta(pid: number): number {
     const cached = this.tickPtyCache.get(pid);
     if (cached !== undefined) return cached;
+    if (this.platformDiscovery) {
+      const offset = this.platformDiscovery.getPtyOffset(pid);
+      if (offset === null) {
+        this.tickPtyCache.set(pid, 0);
+        return 0;
+      }
+      const prev = this.prevPtyOffset.get(pid) ?? offset;
+      this.prevPtyOffset.set(pid, offset);
+      const delta = offset - prev;
+      this.tickPtyCache.set(pid, delta);
+      return delta;
+    }
     try {
       const out = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "1"], {
         encoding: "utf-8",
@@ -1604,6 +1633,23 @@ end tell
   }
 
   private findClaudeProcesses(): ProcessInfo[] {
+    if (this.platformDiscovery) {
+      return this.platformDiscovery.findAgentProcesses().map((proc) => {
+        const { project, projectName } = this.projectIdentityFromCwd(proc.cwd);
+        return {
+          pid: proc.pid,
+          cpuPercent: proc.cpuPercent,
+          startedAt: proc.startedAt,
+          tty: proc.tty,
+          cwd: proc.cwd,
+          project,
+          projectName,
+          sessionIds: proc.sessionIds,
+          jsonlFile: proc.jsonlFile,
+          model: proc.model,
+        };
+      });
+    }
     try {
       const raw = execFileSync("ps", ["-eo", "pid,pcpu,lstart,tty,command"], {
         encoding: "utf-8",

@@ -17,6 +17,17 @@ import { scanLocalProjects } from "./project-discovery.js";
 import { appendControlPlaneAudit, getControlPlaneAuditPath, readControlPlaneAudit } from "./control-plane-audit.js";
 import { normalizeExecTimeout, resolveExecCwd, runShellExec } from "./shell-exec.js";
 import { storeUploadedFile } from "./upload-store.js";
+import type { TerminalIO, WindowManager } from "./platform/interfaces.js";
+import {
+  isSafeFileName,
+  isSafeMachineId,
+  isSafeModelId,
+  isSafePathField,
+  isSafeRequestId,
+  isSafeTaskField,
+  isSafeWorkerId,
+  isValidQuadrant,
+} from "./control-plane-guards.js";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
 function getLocalVersion(): string {
@@ -52,6 +63,8 @@ export class WsServer {
   private port: number;
   private token: string;
   private viewerToken: string;
+  private terminal: TerminalIO | null;
+  private windows: WindowManager | null;
   private clients = new Set<WebSocket>();
   private readOnlyClients = new Set<WebSocket>();
   // Track which worker each client is subscribed to
@@ -97,7 +110,8 @@ export class WsServer {
     streamer: SessionStreamer,
     port: number,
     token: string,
-    viewerToken: string
+    viewerToken: string,
+    platform?: { terminal: TerminalIO; windows: WindowManager },
   ) {
     this.telemetry = telemetry;
     this.procMgr = procMgr;
@@ -105,6 +119,8 @@ export class WsServer {
     this.port = port;
     this.token = token;
     this.viewerToken = viewerToken;
+    this.terminal = platform?.terminal || null;
+    this.windows = platform?.windows || null;
 
     this.telemetry.onUpdate((workerId, worker) => {
       this.broadcast({
@@ -1436,7 +1452,9 @@ export class WsServer {
       : undefined;
     const openQ = requestedQ ?? this.telemetry.getFirstOpenQuadrant();
     const initMessage = request.task?.trim() || undefined;
-    const termResult = spawnTerminalWindow(real, model, openQ, initMessage, this.telemetry.getAll().length);
+    const termResult = this.windows
+      ? this.windows.spawnTerminal(real, model, openQ, initMessage, this.telemetry.getAll().length)
+      : spawnTerminalWindow(real, model, openQ, initMessage, this.telemetry.getAll().length);
     if (!termResult.ok) {
       return { ok: false, error: termResult.error || "Failed to spawn terminal" };
     }
@@ -1544,7 +1562,9 @@ export class WsServer {
       const markerPath = join(homedir(), ".hive", "sessions", ttyName);
       try { unlinkSync(markerPath); } catch { /* already gone */ }
       setTimeout(() => {
-        const result = closeTerminalWindow(killTty);
+        const result = this.windows
+          ? this.windows.closeTerminal(killTty)
+          : closeTerminalWindow(killTty);
         if (!result.ok) {
           console.log(`[kill] Failed to close terminal ${killTty}: ${result.error}`);
         }
@@ -1847,11 +1867,36 @@ export class WsServer {
       return;
     }
 
-    // Reject oversized identifier fields (not content — messages must always send)
-    if ((msg.project && msg.project.length > 1024) ||
-        (msg.workerId && msg.workerId.length > 128) ||
-        (msg.task && msg.task.length > 4096)) {
-      this.send(ws, { type: "error", error: "Field too large" });
+    if (msg.project && !isSafePathField(msg.project)) {
+      this.send(ws, { type: "error", error: "Invalid project path" });
+      return;
+    }
+    if (msg.workerId && !isSafeWorkerId(msg.workerId)) {
+      this.send(ws, { type: "error", error: "Invalid workerId" });
+      return;
+    }
+    if (msg.task && !isSafeTaskField(msg.task)) {
+      this.send(ws, { type: "error", error: "Invalid task" });
+      return;
+    }
+    if (msg.model && !isSafeModelId(msg.model)) {
+      this.send(ws, { type: "error", error: "Invalid model" });
+      return;
+    }
+    if (msg.machine && !isSafeMachineId(msg.machine)) {
+      this.send(ws, { type: "error", error: "Invalid machine" });
+      return;
+    }
+    if (msg.requestId && !isSafeRequestId(msg.requestId)) {
+      this.send(ws, { type: "error", error: "Invalid requestId" });
+      return;
+    }
+    if (msg.fileName && !isSafeFileName(msg.fileName)) {
+      this.send(ws, { type: "error", error: "Invalid fileName" });
+      return;
+    }
+    if (!isValidQuadrant(msg.targetQuadrant)) {
+      this.send(ws, { type: "error", error: "Invalid targetQuadrant" });
       return;
     }
 
@@ -2007,7 +2052,9 @@ export class WsServer {
         const initMessage = msg.task?.trim() || undefined;
 
         // Open a real Terminal window with the CLI, positioned in the target quadrant
-        const termResult = spawnTerminalWindow(real, model, openQ, initMessage, this.telemetry.getAll().length);
+        const termResult = this.windows
+          ? this.windows.spawnTerminal(real, model, openQ, initMessage, this.telemetry.getAll().length)
+          : spawnTerminalWindow(real, model, openQ, initMessage, this.telemetry.getAll().length);
         if (!termResult.ok) {
           this.send(ws, { type: "error", error: termResult.error || "Failed to spawn terminal" });
           return;
@@ -2182,7 +2229,9 @@ export class WsServer {
         // Close the Terminal.app window/tab after process is dead (no dialog)
         if (killTty) {
           setTimeout(() => {
-            const result = closeTerminalWindow(killTty);
+            const result = this.windows
+              ? this.windows.closeTerminal(killTty)
+              : closeTerminalWindow(killTty);
             if (!result.ok) {
               console.log(`[kill] Failed to close terminal ${killTty}: ${result.error}`);
             }
@@ -2293,7 +2342,9 @@ export class WsServer {
         // Allow selection if worker is stuck OR if it was recently stuck
         // (auto-pilot may have changed status to "working" but the prompt
         // is still displayed in the terminal waiting for input)
-        const selResult = sendSelectionToTty(selWorker.tty, msg.optionIndex || 0);
+        const selResult = this.terminal
+          ? this.terminal.sendSelection(selWorker.tty, msg.optionIndex || 0)
+          : sendSelectionToTty(selWorker.tty, msg.optionIndex || 0);
         if (selResult.ok) {
           selWorker.status = "working";
           selWorker.currentAction = "Thinking...";
@@ -2523,7 +2574,10 @@ export class WsServer {
         // with message sends and other approvals — prevents focus races
         // when approving multiple trust prompts rapidly.
         const approveTty = promptWorker.tty;
-        sendEnterToTtyAsync(approveTty).then((approveResult) => {
+        const approvePromise = this.terminal
+          ? this.terminal.sendKeystrokeAsync(approveTty, "enter")
+          : sendEnterToTtyAsync(approveTty);
+        approvePromise.then((approveResult) => {
           if (approveResult.ok) {
             console.log(`Prompt approved for ${approveTty}`);
           } else {
