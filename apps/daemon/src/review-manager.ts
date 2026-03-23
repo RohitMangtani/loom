@@ -3,6 +3,7 @@ import { statSync } from "fs";
 import { ReviewStore } from "./review-store.js";
 import type { ReviewItem } from "./review-store.js";
 import type { WorkerState } from "./types.js";
+import type { RevertHistoryEntry } from "@hive/types";
 
 export type { ReviewItem } from "./review-store.js";
 
@@ -19,6 +20,7 @@ export interface ReviewManagerDeps {
   getQuadrant(workerId: string): number | undefined;
   getRecentArtifacts(workerId: string, limit: number): Array<{ path: string; action: string; ts: number }>;
   onSatelliteUpdate?: () => void;
+  recordRevert?: (payload: Omit<RevertHistoryEntry, "id" | "timestamp">) => void;
 }
 
 export class ReviewManager {
@@ -26,6 +28,8 @@ export class ReviewManager {
   private listeners: Array<(review: ReviewItem) => void> = [];
   private lastReviewByWorker = new Map<string, { type: string; ts: number }>();
   private deps: ReviewManagerDeps;
+  private revertHook?: ReviewManagerDeps["recordRevert"];
+  private commitCooldowns = new Map<string, number>();
 
   constructor(deps: ReviewManagerDeps) {
     this.store = new ReviewStore();
@@ -81,6 +85,10 @@ export class ReviewManager {
     this.deps.onSatelliteUpdate = fn;
   }
 
+  setRevertHook(hook?: ReviewManagerDeps["recordRevert"]): void {
+    this.revertHook = hook;
+  }
+
   /** Called from tick() to expire old reviews. */
   expire(): void {
     this.store.expire();
@@ -118,6 +126,7 @@ export class ReviewManager {
       if (this.isDuplicateReview(workerId, "push")) return;
       const summary = this.buildReviewSummary("committed and pushed", worker, repoName, branch);
       this.addReview(summary, workerId, repoName, { type: "push", url: gitUrl, artifacts });
+      this.recordRevertCandidate(effectiveWorker, summary, command);
       return;
     }
 
@@ -132,6 +141,7 @@ export class ReviewManager {
         console.log(`[satellite-update] Hive repo pushed  --  triggering satellite updates`);
         this.deps.onSatelliteUpdate();
       }
+      this.recordRevertCandidate(effectiveWorker, summary, command);
       return;
     }
 
@@ -195,6 +205,64 @@ export class ReviewManager {
       } catch { /* path doesn't exist, use fallback */ }
     }
     return fallback;
+  }
+
+  private recordRevertCandidate(worker: WorkerState, summary: string, context?: string): void {
+    if (!this.revertHook) return;
+    const commit = this.getCommitHash(worker);
+    if (!commit) return;
+    const key = `${worker.project}:${commit}`;
+    const now = Date.now();
+    const last = this.commitCooldowns.get(key);
+    if (last && now - last < 90_000) return;
+    this.commitCooldowns.set(key, now);
+    const branch = this.resolveGitBranch(worker);
+    const projectName = worker.projectName && worker.projectName !== "unknown"
+      ? worker.projectName
+      : this.resolveGitRepoName(worker);
+    const contextPieces: string[] = [];
+    if (branch) contextPieces.push(`branch ${branch}`);
+    if (context) {
+      const cleaned = context.replace(/\s+/g, " ").trim();
+      if (cleaned) contextPieces.push(cleaned);
+    }
+    const payload: Omit<RevertHistoryEntry, "id" | "timestamp"> = {
+      label: summary,
+      description: this.getCommitMessage(worker) || summary,
+      commit,
+      projectPath: worker.project,
+      projectName,
+      branch,
+      workerId: worker.id,
+      quadrant: worker.quadrant,
+      context: contextPieces.join(" · ") || summary,
+      safeguards: ["confirm-hash"],
+    };
+    this.revertHook(payload);
+  }
+
+  private getCommitHash(worker: WorkerState): string | undefined {
+    try {
+      return execFileSync("/usr/bin/git", ["rev-parse", "--short=8", "HEAD"], {
+        cwd: worker.project,
+        encoding: "utf-8",
+        timeout: 3000,
+      }).trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private getCommitMessage(worker: WorkerState): string | undefined {
+    try {
+      return execFileSync("/usr/bin/git", ["log", "-1", "--pretty=%s"], {
+        cwd: worker.project,
+        encoding: "utf-8",
+        timeout: 3000,
+      }).trim() || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private resolveGitBranch(worker: WorkerState): string | undefined {

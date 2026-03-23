@@ -134,7 +134,9 @@ export class NotificationManager {
   private isCompletionTransition(workerId: string, state: WorkerState, prevStatus?: string): boolean {
     if (prevStatus !== "working" || state.status !== "idle") return false;
     if (state.currentAction) return false;
-    const action = state.lastAction?.trim() || "Task complete";
+    const lastAction = state.lastAction?.trim();
+    if (!lastAction) return false;
+    const action = lastAction;
     const now = Date.now();
     const record = this.completionCache.get(workerId);
     if (record && record.action === action && now - record.ts < 30_000) {

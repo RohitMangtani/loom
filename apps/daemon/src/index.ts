@@ -20,6 +20,7 @@ import { acquireRuntimeSingleton } from "./runtime-singleton.js";
 import { loadPlatform } from "./platform/index.js";
 import { UserRegistry } from "./user-registry.js";
 import { ReplayManager } from "./replay.js";
+import { RevertHistory } from "./revert-history.js";
 
 // ── Satellite mode ──────────────────────────────────────────────────
 // Usage: npx tsx apps/daemon/src/index.ts --satellite wss://URL TOKEN
@@ -122,6 +123,8 @@ if (satFlagIdx !== -1) {
     userRegistry,
     replayManager,
   });
+  const revertHistory = new RevertHistory();
+  telemetry.setRevertHook((payload) => revertHistory.add(payload));
   const procMgr = new ProcessManager(telemetry);
   const streamer = new SessionStreamer();
   const ws = new WsServer(telemetry, procMgr, streamer, 3002, token, viewerToken, userRegistry, replayManager, {
@@ -145,7 +148,7 @@ if (satFlagIdx !== -1) {
 
   telemetry.start();
   telemetry.registerProcessManager(procMgr);
-  telemetry.registerApi(procMgr, discovery);
+  telemetry.registerApi(procMgr, discovery, revertHistory);
   telemetry.registerCollector(collector);
   telemetry.setStreamer(streamer);
   telemetry.onRemoval((workerId) => streamer.clearWorker(workerId));

@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatEntry, ReviewItem, WorkerState } from "@/lib/types";
 import type { ActivitySnapshot } from "@/lib/snapshot-store";
 import { createSnapshotPayload, loadSnapshots, persistSnapshots } from "@/lib/snapshot-store";
+import type { RevertHistoryEntry } from "@hive/types";
 
 interface ReviewDrawerProps {
   open: boolean;
+  isAdmin: boolean | null;
   reviews: ReviewItem[];
   onClose: () => void;
   onDismiss: (id: string) => void;
@@ -255,6 +257,7 @@ function SwipeableItem({
 
 export function ReviewDrawer({
   open,
+  isAdmin,
   reviews,
   onClose,
   onDismiss,
@@ -355,6 +358,68 @@ export function ReviewDrawer({
     }
     scheduleStatusClear();
   }, []);
+
+  const [reverts, setReverts] = useState<RevertHistoryEntry[]>([]);
+  const [loadingReverts, setLoadingReverts] = useState(false);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
+  const [revertStatus, setRevertStatus] = useState<string | null>(null);
+
+  const apiUrlWithToken = useCallback((path: string) => {
+    if (typeof window === "undefined") return path;
+    const token = localStorage.getItem("hive_token");
+    return token ? `${path}?token=${encodeURIComponent(token)}` : path;
+  }, []);
+
+  const loadReverts = useCallback(async () => {
+    setLoadingReverts(true);
+    setRevertStatus(null);
+    try {
+      const res = await fetch(apiUrlWithToken("/api/reverts"), { credentials: "same-origin" });
+      if (!res.ok) throw new Error("Unable to load revert history");
+      const payload = (await res.json()) as RevertHistoryEntry[];
+      setReverts(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      setRevertStatus(error instanceof Error ? error.message : "Unable to load revert history");
+    } finally {
+      setLoadingReverts(false);
+    }
+  }, [apiUrlWithToken]);
+
+  const handleRevert = useCallback(async (entry: RevertHistoryEntry) => {
+    if (isAdmin !== true) {
+      setRevertStatus("Admin token required for reverts.");
+      return;
+    }
+    const confirmation = window.prompt(`Type ${entry.commit} to confirm reverting ${entry.projectName}`)?.trim();
+    if (!confirmation) return;
+    setRevertingId(entry.id);
+    setRevertStatus(null);
+    try {
+      const res = await fetch(apiUrlWithToken("/api/revert"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id, confirmation }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || "Revert failed");
+      }
+      const success = await res.json();
+      setRevertStatus(success.message || "Revert succeeded");
+      loadReverts();
+    } catch (error) {
+      setRevertStatus(error instanceof Error ? error.message : "Revert failed");
+    } finally {
+      setRevertingId(null);
+    }
+  }, [apiUrlWithToken, isAdmin, loadReverts]);
+
+  useEffect(() => {
+    if (open) {
+      loadReverts();
+    }
+  }, [open, loadReverts]);
 
   // Mark items as seen when drawer opens
   useEffect(() => {
@@ -545,6 +610,66 @@ export function ReviewDrawer({
               })}
             </div>
           )}
+
+          <div className="px-4 py-3 border-b border-[var(--border)] space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold text-[var(--text)]">Revert history</p>
+                <p className="text-[10px] text-[var(--text-light)]">
+                  {loadingReverts
+                    ? "Refreshing history…"
+                    : reverts.length
+                      ? `${reverts.length} tracked commit${reverts.length === 1 ? "" : "s"}`
+                      : "No revert entries yet."}
+                </p>
+              </div>
+              {revertStatus && (
+                <p className="text-[10px] text-[var(--accent)]">{revertStatus}</p>
+              )}
+            </div>
+            {reverts.length === 0 && !loadingReverts && (
+              <p className="text-[10px] text-[var(--text-muted)]">
+                Revert entries appear after commits or pushes are auto-detected.
+              </p>
+            )}
+            {reverts.length > 0 && (
+              <div className="space-y-2">
+                {reverts.map((entry) => {
+                  const isFreshRevert = now - entry.timestamp < RECENT_WINDOW;
+                  return (
+                    <article
+                      key={entry.id}
+                      className={`space-y-1 rounded-lg border border-[var(--border)] bg-[var(--bg-alt)] px-3 py-2 ${isFreshRevert ? "activity-flash" : ""}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-[11px] font-semibold text-[var(--text)]">{entry.label}</p>
+                          <p className="text-[9px] text-[var(--text-muted)]">
+                            {entry.projectName} · {entry.branch ?? "branch"}
+                            {entry.quadrant ? ` · Q${entry.quadrant}` : ""} · {formatTime(entry.timestamp)}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRevert(entry)}
+                          disabled={isAdmin !== true || revertingId === entry.id}
+                          className="text-[10px] font-semibold text-[var(--text-light)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+                          title={isAdmin === true ? `Revert to ${entry.commit}` : "Admin token required"}
+                        >
+                          {revertingId === entry.id ? "Reverting…" : "Revert"}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-light)]">{entry.description}</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">Commit {entry.commit}</p>
+                      {entry.context && (
+                        <p className="text-[10px] text-[var(--text-muted)]">Context: {entry.context}</p>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {reviews.length === 0 ? (
             <div className="flex items-center justify-center h-full text-[var(--text-light)] text-xs">

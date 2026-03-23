@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, appendFileSync, readFileSync, readdirSync, statS
 import type { ProcessManager } from "./process-mgr.js";
 import { ProcessDiscovery } from "./discovery.js";
 import type { TelemetryReceiver } from "./telemetry.js";
-import { getControlPlaneAuditPath, readControlPlaneAudit } from "./control-plane-audit.js";
+import { appendControlPlaneAudit, getControlPlaneAuditPath, readControlPlaneAudit } from "./control-plane-audit.js";
 import {
   isSafeCommandField,
   isSafeMachineId,
@@ -20,6 +20,8 @@ import type { HiveUser } from "./user-registry.js";
 import { UserRegistry } from "./user-registry.js";
 import { ReplayManager } from "./replay.js";
 import type { ParsedQs } from "qs";
+import { resolveExecCwd, runShellExec } from "./shell-exec.js";
+import { RevertHistory } from "./revert-history.js";
 
 function normalizeQueryString(
   value: string | string[] | ParsedQs | ParsedQs[] | (string | ParsedQs)[] | undefined,
@@ -44,6 +46,7 @@ export function registerApiRoutes(
   discovery: ProcessDiscovery,
   userRegistry: UserRegistry,
   replayManager: ReplayManager,
+  revertHistory: RevertHistory,
 ): void {
   const requireAdmin = (req: ApiRequest, res: Response, next: NextFunction) => {
     if (req.hiveUser?.role !== "admin") {
@@ -193,6 +196,67 @@ export function registerApiRoutes(
     } else {
       res.status(404).json({ error: `Task ${req.params.id} not found in queue` });
     }
+  });
+
+  // GET /api/reverts
+  app.get("/api/reverts", requireAuth, (_req, res) => {
+    res.json(revertHistory.list());
+  });
+
+  // POST /api/revert
+  app.post("/api/revert", requireAuth, requireAdmin, async (req, res) => {
+    const { id, confirmation } = req.body as { id?: string; confirmation?: string };
+    if (!id) {
+      res.status(400).json({ error: "Missing revert id" });
+      return;
+    }
+    const entry = revertHistory.get(id);
+    if (!entry) {
+      res.status(404).json({ error: "Revert entry not found" });
+      return;
+    }
+    if (!confirmation || confirmation.trim() !== entry.commit) {
+      res.status(400).json({ error: `Type the commit hash ${entry.commit} to confirm` });
+      return;
+    }
+    const cwdResult = resolveExecCwd(entry.projectPath);
+    if (cwdResult.error || !cwdResult.cwd) {
+      res.status(400).json({ error: cwdResult.error || "Working directory not found" });
+      return;
+    }
+    const status = await runShellExec({ command: "git status --short", cwd: cwdResult.cwd, timeoutMs: 15_000 });
+    if (!status.ok) {
+      res.status(500).json({ error: status.stderr || status.error || "Unable to inspect working tree" });
+      return;
+    }
+    if (status.stdout.trim()) {
+      res.status(400).json({ error: `Working tree dirty: ${status.stdout.trim().split("\\n")[0]}` });
+      return;
+    }
+    const reset = await runShellExec({
+      command: `git reset --hard ${entry.commit}`,
+      cwd: cwdResult.cwd,
+      timeoutMs: 300_000,
+    });
+    appendControlPlaneAudit({
+      type: "maintenance",
+      targetMachine: entry.projectName,
+      cwd: cwdResult.cwd,
+      command: reset.command,
+      action: `revert:${entry.commit}`,
+      workerId: entry.workerId,
+      ts: Date.now(),
+      ok: reset.ok,
+      exitCode: reset.exitCode,
+      timedOut: reset.timedOut,
+      durationMs: reset.durationMs,
+      error: reset.error,
+    });
+    if (!reset.ok) {
+      res.status(500).json({ error: reset.stderr || reset.error || "Git reset failed" });
+      return;
+    }
+    res.json({ ok: true, message: `Reverted ${entry.projectName} to ${entry.commit}` });
   });
 
   // GET /api/audit

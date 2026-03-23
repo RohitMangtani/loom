@@ -21,7 +21,7 @@ import { updateTerminalTitles, arrangeTerminalWindows, detectQuadrantsFromWindow
 import type { Collector } from "./collector.js";
 import { SuggestionEngine } from "./suggestion-engine.js";
 import { ReviewManager } from "./review-manager.js";
-import type { ReviewItem } from "./review-manager.js";
+import type { ReviewItem, ReviewManagerDeps } from "./review-manager.js";
 import { SwarmController } from "./swarm-controller.js";
 import type { SwarmSpawnRequest, SwarmExecRequest, SwarmExecResult, SwarmProjectEntry } from "./swarm-controller.js";
 import { scanLocalProjects } from "./project-discovery.js";
@@ -29,6 +29,7 @@ import type { TerminalIO, WindowManager } from "./platform/interfaces.js";
 import type { HiveUser } from "./user-registry.js";
 import { UserRegistry } from "./user-registry.js";
 import { ReplayManager } from "./replay.js";
+import type { RevertHistory } from "./revert-history.js";
 
 const IDLE_THRESHOLD = 30_000;
 const HOME = process.env.HOME || `/Users/${process.env.USER}`;
@@ -362,11 +363,20 @@ export class TelemetryReceiver {
   }
 
   /** Register REST API routes (dispatch API). */
-  registerApi(procMgr: ProcessManager, discovery: ProcessDiscovery): void {
+  registerApi(procMgr: ProcessManager, discovery: ProcessDiscovery, revertHistory: RevertHistory): void {
     if (!this.app || !this.requireAuth) {
       throw new Error("registerApi() called before start()");
     }
-    registerApiRoutes(this.app, this.requireAuth, this, procMgr, discovery, this.userRegistry || new UserRegistry(), this.replayManager || new ReplayManager());
+    registerApiRoutes(
+      this.app,
+      this.requireAuth,
+      this,
+      procMgr,
+      discovery,
+      this.userRegistry || new UserRegistry(),
+      this.replayManager || new ReplayManager(),
+      revertHistory,
+    );
   }
 
   registerCollector(collector: Collector): void {
@@ -997,6 +1007,10 @@ export class TelemetryReceiver {
     this.satelliteUpdateFn = updateAll || null;
     // Wire satellite update to ReviewManager so auto-detected hive pushes trigger updates
     this.reviewManager.setSatelliteUpdateFn(updateAll ? () => updateAll() : undefined);
+  }
+
+  setRevertHook(hook?: ReviewManagerDeps["recordRevert"]): void {
+    this.reviewManager.setRevertHook(hook);
   }
 
   /** Register capability-based routing functions from ws-server. */

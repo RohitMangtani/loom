@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { buildSummary } from "@/lib/insights-summary";
+import { buildSummary, buildHeadlineSummary } from "@/lib/insights-summary";
 import type { ReviewItem, WorkerState } from "@/lib/types";
 
 interface InsightsPanelProps {
@@ -37,6 +37,7 @@ export function InsightsPanel({ workers, reviews, activity, onClose }: InsightsP
 
   const allWorkers = useMemo(() => Array.from(workers.values()), [workers]);
   const summary = useMemo(() => buildSummary(allWorkers, reviews, activity), [allWorkers, reviews, activity]);
+  const headline = useMemo(() => buildHeadlineSummary(allWorkers, reviews, activity), [allWorkers, reviews, activity]);
   const total = allWorkers.length;
   const working = allWorkers.filter((w) => w.status === "working");
   const idle = allWorkers.filter((w) => w.status === "idle");
@@ -67,9 +68,12 @@ export function InsightsPanel({ workers, reviews, activity, onClose }: InsightsP
         <div className="px-6 py-5 space-y-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.4em] text-[var(--text-light)]">Portfolio tab</p>
+              <p className="text-[10px] uppercase tracking-[0.4em] text-[var(--text-light)]">Hive pulse</p>
               <h3 className="text-2xl font-semibold text-[var(--text)]">Hive overview</h3>
-              <p className="text-[11px] text-[var(--text-light)] uppercase tracking-[0.3em]">
+              <p className="text-[12px] text-[var(--text)] mt-1 leading-relaxed">
+                {headline}
+              </p>
+              <p className="text-[10px] text-[var(--text-light)] mt-1">
                 {activity?.text ?? "No recent actions captured yet"}
               </p>
             </div>

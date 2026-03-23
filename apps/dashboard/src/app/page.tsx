@@ -6,9 +6,9 @@ import { getAuthMode, unlockAdmin, lockAdmin } from "@/components/SitePasswordGa
 import { AgentCard } from "@/components/AgentCard";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
+import { InsightsPanel } from "@/components/InsightsPanel";
 import { SpawnDialog } from "@/components/SpawnDialog";
 import { InviteDialog } from "@/components/InviteDialog";
-import { InsightsPanel } from "@/components/InsightsPanel";
 import type { WorkerState } from "@/lib/types";
 import type { ActivitySnapshot } from "@/lib/snapshot-store";
 import { usePushSubscription } from "@/components/ServiceWorker";
@@ -594,6 +594,7 @@ export default function Home() {
         onMarkSeen={markReviewSeen}
         onMarkAllSeen={markAllReviewsSeen}
         onClearAll={clearAllReviews}
+        isAdmin={isAdmin}
       />
 
       {showSpawnDialog && (

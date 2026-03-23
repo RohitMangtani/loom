@@ -197,6 +197,21 @@ export interface ReviewItem {
   artifacts?: Array<{ path: string; action: string }>;
 }
 
+export interface RevertHistoryEntry {
+  id: string;
+  label: string;
+  description: string;
+  commit: string;
+  projectPath: string;
+  projectName: string;
+  branch?: string;
+  workerId?: string;
+  quadrant?: number;
+  timestamp: number;
+  context?: string;
+  safeguards?: string[];
+}
+
 export interface DaemonResponse {
   type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result" | "presence" | "activity" | "user_list" | "user_created" | "user_removed";
   workers?: WorkerState[];
