@@ -11,6 +11,7 @@ import { InviteDialog } from "@/components/InviteDialog";
 import { InsightsPanel } from "@/components/InsightsPanel";
 import type { WorkerState } from "@/lib/types";
 import { usePushSubscription } from "@/components/ServiceWorker";
+import { buildHeadlineSummary } from "@/lib/insights-summary";
 
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 const MAX_SLOTS = 8;
@@ -140,6 +141,11 @@ export default function Home() {
   const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines, presence, activity, uploadToWorker } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
+  const workerList = useMemo(() => Array.from(workers.values()), [workers]);
+  const headlineSummary = useMemo(
+    () => buildHeadlineSummary(workerList, reviews, activity),
+    [workerList, reviews, activity],
+  );
 
   useEffect(() => {
     if (isAdmin === true && mode === "viewer") {
@@ -255,13 +261,19 @@ export default function Home() {
           <h1
             className="text-sm font-bold tracking-[0.18em] uppercase text-[var(--text)] cursor-pointer hover:opacity-70 transition-opacity"
             onClick={(e) => { e.stopPropagation(); setShowInsights(true); }}
-          >Hive</h1>
+            title="Open the portfolio summary"
+          >
+            Portfolio Snapshot
+          </h1>
           <div className="flex items-center justify-center gap-1.5 mt-1">
             <span className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-[var(--dot-active)]" : "bg-[var(--dot-offline)]"}`} />
             <span className="text-[10px] text-[var(--text-light)]">
               {connected ? (isViewer ? "Viewing" : "Connected") : "Reconnecting..."}
             </span>
           </div>
+          <p className="text-[10px] text-[var(--text-light)] mt-1 max-w-[24rem] mx-auto px-2 leading-snug">
+            {headlineSummary}
+          </p>
           {isViewer ? (
             <button
               type="button"

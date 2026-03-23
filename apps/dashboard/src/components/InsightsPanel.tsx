@@ -2,95 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import type { WorkerState, ReviewItem } from "@/lib/types";
+import { buildSummary } from "@/lib/insights-summary";
+import type { ReviewItem, WorkerState } from "@/lib/types";
 
 interface InsightsPanelProps {
   workers: Map<string, WorkerState>;
   reviews: ReviewItem[];
   activity: { text: string; timestamp: number } | null;
   onClose: () => void;
-}
-
-function timeAgo(ts: number): string {
-  const diff = Date.now() - ts;
-  if (diff < 60_000) return "just now";
-  if (diff < 3600_000) return `${Math.round(diff / 60_000)}m ago`;
-  if (diff < 86400_000) return `${Math.round(diff / 3600_000)}h ago`;
-  return `${Math.round(diff / 86400_000)}d ago`;
-}
-
-function buildSummary(
-  allWorkers: WorkerState[],
-  reviews: ReviewItem[],
-  activity: { text: string; timestamp: number } | null,
-): string {
-  const working = allWorkers.filter(w => w.status === "working");
-  const idle = allWorkers.filter(w => w.status === "idle");
-  const stuck = allWorkers.filter(w => w.status === "stuck");
-  const total = allWorkers.length;
-  const models = [...new Set(allWorkers.map(w => w.model || "claude"))];
-  const projects = [...new Set(allWorkers.map(w => w.projectName).filter(p => p && p !== "unknown" && p !== "home"))];
-
-  const lines: string[] = [];
-
-  // Opening line
-  if (working.length === 0 && total > 0) {
-    lines.push(`All ${total} agents are idle. Nothing is running.`);
-  } else if (working.length === total) {
-    lines.push(`All ${total} agents are working. Full fleet active.`);
-  } else if (total === 0) {
-    lines.push("No agents connected.");
-  } else {
-    lines.push(`${working.length} of ${total} agents working. ${idle.length} idle${stuck.length > 0 ? `, ${stuck.length} stuck` : ""}.`);
-  }
-
-  // What is actively happening
-  if (working.length > 0) {
-    lines.push("");
-    for (const w of working) {
-      const model = w.model && w.model !== "claude" ? ` (${w.model})` : "";
-      const action = w.currentAction || w.lastAction || "working";
-      lines.push(`Q${w.quadrant}${model} on ${w.projectName}: ${action}`);
-    }
-  }
-
-  // What just finished
-  const todayReviews = reviews.filter(r => Date.now() - r.createdAt < 86400_000);
-  if (todayReviews.length > 0) {
-    lines.push("");
-    lines.push(`${todayReviews.length} thing${todayReviews.length !== 1 ? "s" : ""} shipped today:`);
-    for (const r of todayReviews.slice(0, 3)) {
-      lines.push(`  ${r.summary} (${timeAgo(r.createdAt)})`);
-    }
-    if (todayReviews.length > 3) {
-      lines.push(`  ...and ${todayReviews.length - 3} more`);
-    }
-  }
-
-  // Available agents
-  if (idle.length > 0 && working.length > 0) {
-    lines.push("");
-    const idleNames = idle.map(w => {
-      const model = w.model && w.model !== "claude" ? ` ${w.model}` : "";
-      return `Q${w.quadrant}${model}`;
-    });
-    lines.push(`Available: ${idleNames.join(", ")}`);
-  }
-
-  // Models and projects
-  if (models.length > 1 || projects.length > 1) {
-    lines.push("");
-    if (models.length > 1) lines.push(`Models: ${models.join(", ")}`);
-    if (projects.length > 0) lines.push(`Projects: ${projects.join(", ")}`);
-  }
-
-  // Latest human action
-  if (activity) {
-    lines.push("");
-    lines.push(`Last action: ${activity.text} (${timeAgo(activity.timestamp)})`);
-  }
-
-  return lines.join("\n");
 }
 
 export function InsightsPanel({ workers, reviews, activity, onClose }: InsightsPanelProps) {
