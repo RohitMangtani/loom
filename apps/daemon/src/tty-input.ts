@@ -292,6 +292,14 @@ end tell
 // wrong terminal.
 let sendMutex: Promise<void> = Promise.resolve();
 
+// Flag: true while any send (message, Enter, selection) is in progress.
+// Window arrangement scripts must skip when this is set to avoid stealing
+// Terminal focus mid-send.
+let sendInFlight = false;
+
+/** Check whether a TTY send operation is currently in progress. */
+export function isSendInFlight(): boolean { return sendInFlight; }
+
 /**
  * Async version of sendInputToTty — same two-step approach (do script + send-return)
  * but does NOT block the Node.js event loop. WebSocket messages, status updates,
@@ -325,6 +333,15 @@ export function sendInputToTtyAsync(tty: string, text: string, model?: string): 
  * instead of shell-injected text from `do script`.
  */
 async function doSendKeystrokeAsync(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
+  sendInFlight = true;
+  try {
+    return await doSendKeystrokeAsyncInner(tty, cleaned);
+  } finally {
+    sendInFlight = false;
+  }
+}
+
+async function doSendKeystrokeAsyncInner(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
   const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
 
   // Save frontmost app so we can restore focus after sending
@@ -378,6 +395,15 @@ end tell
 }
 
 async function doSendAsync(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
+  sendInFlight = true;
+  try {
+    return await doSendAsyncInner(tty, cleaned);
+  } finally {
+    sendInFlight = false;
+  }
+}
+
+async function doSendAsyncInner(tty: string, cleaned: string): Promise<{ ok: boolean; error?: string }> {
   const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
 
   // Save frontmost app so we can restore focus after sending
@@ -589,6 +615,99 @@ end try
   if (previousApp) restoreFrontmostApp(previousApp);
 
   return { ok: true };
+}
+
+/**
+ * Async version of sendEnterToTty — routed through the same sendMutex
+ * so it never races with message sends or other Enter presses.
+ *
+ * Adds a 500ms post-send cooldown so consecutive trust approvals
+ * give Terminal.app time to process each dialog dismissal.
+ */
+export function sendEnterToTtyAsync(tty: string): Promise<{ ok: boolean; error?: string }> {
+  const resultPromise = sendMutex.then(() => doSendEnterAsync(tty));
+  sendMutex = resultPromise.then(() => {}, () => {});
+  return resultPromise;
+}
+
+async function doSendEnterAsync(tty: string): Promise<{ ok: boolean; error?: string }> {
+  sendInFlight = true;
+  try {
+    const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+    const previousApp = await getFrontmostAppAsync();
+
+    const script = `
+tell application "Terminal"
+  set targetTTY to "${device}"
+  set targetTab to missing value
+  set targetWin to missing value
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is targetTTY then
+        set targetTab to t
+        set targetWin to w
+        exit repeat
+      end if
+    end repeat
+    if targetTab is not missing value then exit repeat
+  end repeat
+  if targetTab is missing value then error "TTY not found in Terminal.app"
+  set selected of targetTab to true
+  set index of targetWin to 1
+  activate
+end tell
+delay 0.5
+try
+  tell application "System Events"
+    tell process "Terminal"
+      key code 36
+    end tell
+  end tell
+  return "system_events"
+on error
+  return "need_cgevent"
+end try
+`;
+
+    let needCGEvent = false;
+    try {
+      const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", script], {
+        timeout: 8000,
+        encoding: "utf-8",
+      });
+      needCGEvent = (stdout as string).trim() === "need_cgevent";
+    } catch (err: unknown) {
+      if (previousApp) restoreFrontmostAppAsync(previousApp);
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: `Activate tab failed: ${msg.slice(0, 180)}` };
+    }
+
+    if (needCGEvent) {
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        await execFileAsync(SEND_RETURN_BIN, [], { timeout: 3000, encoding: "utf-8" });
+      } catch (err: unknown) {
+        if (previousApp) restoreFrontmostAppAsync(previousApp);
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `Enter failed: ${msg.slice(0, 180)}` };
+      }
+      await new Promise(r => setTimeout(r, 300));
+      try {
+        await execFileAsync(SEND_RETURN_BIN, [], { timeout: 3000, encoding: "utf-8" });
+      } catch { /* best effort */ }
+    }
+
+    if (previousApp) restoreFrontmostAppAsync(previousApp);
+
+    // Cooldown: give Terminal time to process the dialog dismissal
+    // before the next send fires. Critical when approving multiple
+    // trust prompts in rapid succession.
+    await new Promise(r => setTimeout(r, 500));
+
+    return { ok: true };
+  } finally {
+    sendInFlight = false;
+  }
 }
 
 function cleanup(path: string): void {

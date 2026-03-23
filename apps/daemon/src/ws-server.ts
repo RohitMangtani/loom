@@ -6,7 +6,7 @@ import { join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { ProcessManager } from "./process-mgr.js";
 import type { SessionStreamer } from "./session-stream.js";
-import { sendSelectionToTty, sendEnterToTty } from "./tty-input.js";
+import { sendSelectionToTty, sendEnterToTty, sendEnterToTtyAsync } from "./tty-input.js";
 import { spawnTerminalWindow, closeTerminalWindow } from "./arrange-windows.js";
 import { validateToken } from "./auth.js";
 import { ProcessDiscovery } from "./discovery.js";
@@ -2505,26 +2505,31 @@ export class WsServer {
           return;
         }
 
-        // Send Enter keystroke to approve the prompt (default option is pre-selected)
-        const approveResult = sendEnterToTty(promptWorker.tty);
-        if (approveResult.ok) {
-          promptWorker.promptType = null;
-          promptWorker.promptMessage = undefined;
-          promptWorker.status = "idle";
-          promptWorker.currentAction = null;
-          promptWorker.lastAction = "Prompt approved from dashboard";
-          promptWorker.lastActionAt = Date.now();
-          if (this.discovery) {
-            this.discovery.clearPromptCache(promptWorker.tty);
-            // Suppress prompt re-detection for 20s so discovery doesn't
-            // re-report the stale prompt text before the terminal advances.
-            this.discovery.suppressPrompt(promptWorker.tty);
-          }
-          this.telemetry.notifyExternal(promptWorker);
-          console.log(`Prompt approved for ${promptWorker.tty}`);
-        } else {
-          this.send(ws, { type: "error", error: approveResult.error || "Failed to approve prompt" });
+        // Optimistically update state so the dashboard reflects the
+        // approval immediately, before the async AppleScript finishes.
+        promptWorker.promptType = null;
+        promptWorker.promptMessage = undefined;
+        promptWorker.status = "idle";
+        promptWorker.currentAction = null;
+        promptWorker.lastAction = "Prompt approved from dashboard";
+        promptWorker.lastActionAt = Date.now();
+        if (this.discovery) {
+          this.discovery.clearPromptCache(promptWorker.tty);
+          this.discovery.suppressPrompt(promptWorker.tty);
         }
+        this.telemetry.notifyExternal(promptWorker);
+
+        // Send Enter keystroke through the async mutex so it serializes
+        // with message sends and other approvals — prevents focus races
+        // when approving multiple trust prompts rapidly.
+        const approveTty = promptWorker.tty;
+        sendEnterToTtyAsync(approveTty).then((approveResult) => {
+          if (approveResult.ok) {
+            console.log(`Prompt approved for ${approveTty}`);
+          } else {
+            console.log(`Prompt approve failed for ${approveTty}: ${approveResult.error}`);
+          }
+        });
         break;
       }
 

@@ -1,6 +1,6 @@
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { SessionStreamer } from "./session-stream.js";
-import { sendInputToTty, sendSelectionToTty } from "./tty-input.js";
+import { sendInputToTty, sendSelectionToTty, isSendInFlight } from "./tty-input.js";
 import { readTail } from "./utils.js";
 
 /**
@@ -46,6 +46,10 @@ export class AutoPilot {
       // Cooldown: max one auto-send per COOLDOWN_MS per worker
       const lastSend = this.lastAutoSend.get(worker.id) || 0;
       if (now - lastSend < COOLDOWN_MS) continue;
+
+      // Skip while another TTY send is in progress — sync auto-pilot sends
+      // would race with async message/approval sends for Terminal focus.
+      if (isSendInFlight()) continue;
 
       // Unique key for this stuck instance (so we don't re-respond to the same prompt)
       const stuckKey = `${worker.id}_${worker.lastActionAt}`;
@@ -199,6 +203,7 @@ export class AutoPilot {
 
       const lastSend = this.lastAutoSend.get(worker.id) || 0;
       if (now - lastSend < COOLDOWN_MS) continue;
+      if (isSendInFlight()) continue;
 
       const sessionFile = this.streamer.getSessionFile(worker.id);
       if (!sessionFile) continue;

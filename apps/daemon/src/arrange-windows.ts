@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from "child_process";
+import { isSendInFlight } from "./tty-input.js";
 import { ProcessDiscovery } from "./discovery.js";
 
 interface QuadrantSlot {
@@ -72,6 +73,7 @@ export function detectQuadrantsFromWindowPositions(
 ): void {
   if (ttys.length === 0) return;
   if (detectInFlight) return;
+  if (isSendInFlight()) return; // skip during TTY sends to avoid focus interference
   detectInFlight = true;
 
   const ttyChecks = ttys.map(tty => {
@@ -189,6 +191,9 @@ return "SCREEN:" & midX & "," & midY & linefeed & output
  */
 export function arrangeTerminalWindows(slots: QuadrantSlot[], totalAgentCount?: number): void {
   if (slots.length === 0) return;
+  // Skip arrangement while a TTY send is in progress — running another
+  // osascript that touches Terminal windows can steal focus mid-keystroke.
+  if (isSendInFlight()) return;
 
   // totalAgentCount: use when only a subset of agents are on this machine
   // but the formation should match the global count (e.g., satellite with 1
@@ -278,6 +283,7 @@ let titleInFlight = false;
 export function updateTerminalTitles(slots: QuadrantSlot[]): void {
   if (slots.length === 0) return;
   if (titleInFlight) return; // skip if previous call still running
+  if (isSendInFlight()) return; // skip during TTY sends to avoid focus theft
 
   const fingerprint = slots
     .map(s => `${s.quadrant}:${s.tty}:${s.projectName}`)
