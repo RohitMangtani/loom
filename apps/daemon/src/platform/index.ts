@@ -3,8 +3,16 @@ import { createLinuxPlatform } from "./linux/index.js";
 import { createMacOSPlatform } from "./macos/index.js";
 import type { LoadedPlatform } from "./interfaces.js";
 
-export function loadPlatform(): LoadedPlatform {
+function createPlatform(): LoadedPlatform {
   return platform() === "linux"
     ? createLinuxPlatform()
     : createMacOSPlatform();
 }
+
+const platformInstance = createPlatform();
+
+export function loadPlatform(): LoadedPlatform {
+  return platformInstance;
+}
+
+export { platformInstance };
