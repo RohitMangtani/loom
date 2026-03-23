@@ -34,6 +34,7 @@ export class NotificationManager {
   private lastNotified = new Map<string, number>();
   private lastPushed = new Map<string, number>();
   private previousStatus = new Map<string, string>();
+  private completionCache = new Map<string, { action: string; ts: number }>();
   private pushMgr: WebPushManager | null = null;
 
   constructor() {
@@ -54,6 +55,7 @@ export class NotificationManager {
       this.lastNotified.delete(workerId);
       this.lastPushed.delete(workerId);
       this.previousStatus.delete(workerId);
+      this.completionCache.delete(workerId);
     });
 
     console.log(`  Notifications: ${this.config.enabled ? "enabled" : "disabled"} (config: ${CONFIG_PATH})`);
@@ -75,12 +77,7 @@ export class NotificationManager {
       return;
     }
 
-    // Working → Idle (green → red) → push notification
-    if (
-      this.config.pushOnComplete &&
-      prevStatus === "working" &&
-      state.status === "idle"
-    ) {
+    if (this.config.pushOnComplete && this.isCompletionTransition(workerId, state, prevStatus)) {
       this.pushComplete(workerId, state);
     }
   }
@@ -102,11 +99,7 @@ export class NotificationManager {
     }
 
     // Working → Idle (green → red) → push notification
-    if (
-      this.config.pushOnComplete &&
-      prev === "working" &&
-      state.status === "idle"
-    ) {
+    if (this.config.pushOnComplete && this.isCompletionTransition(workerId, state, prev)) {
       this.pushComplete(workerId, state);
     }
   }
@@ -136,6 +129,19 @@ export class NotificationManager {
     } catch {
       // Non-critical
     }
+  }
+
+  private isCompletionTransition(workerId: string, state: WorkerState, prevStatus?: string): boolean {
+    if (prevStatus !== "working" || state.status !== "idle") return false;
+    if (state.currentAction) return false;
+    const action = state.lastAction?.trim() || "Task complete";
+    const now = Date.now();
+    const record = this.completionCache.get(workerId);
+    if (record && record.action === action && now - record.ts < 30_000) {
+      return false;
+    }
+    this.completionCache.set(workerId, { action, ts: now });
+    return true;
   }
 
   /** Web Push notification when an agent finishes (green → red) */
