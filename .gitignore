@@ -14,6 +14,7 @@ HANDOFF-*.md
 docs/plans/
 .env*.local
 firebase-debug.log
+hive_backups/
 
 # Local research scratch files
 medium-*.md

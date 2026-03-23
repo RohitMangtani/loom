@@ -237,6 +237,61 @@ describe("WsServer pushState", () => {
     });
   });
 
+  it("ignores heartbeats from a superseded satellite connection", () => {
+    const harness = createServer([]);
+    const server = harness.server as unknown as {
+      registerSatelliteSocket: (ws: WebSocket, machineId: string) => void;
+      handleSatelliteMessage: (ws: WebSocket, machineId: string, msg: Record<string, unknown>) => void;
+    };
+    const satelliteWs1 = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+      close: vi.fn(),
+    } as unknown as WebSocket;
+    const satelliteWs2 = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+      close: vi.fn(),
+    } as unknown as WebSocket;
+
+    server.registerSatelliteSocket(satelliteWs1, "remote-mac");
+    server.handleSatelliteMessage(satelliteWs1, "remote-mac", {
+      type: "satellite_hello",
+      hostname: "Remote-Mac.local",
+      version: "test",
+    });
+
+    server.registerSatelliteSocket(satelliteWs2, "remote-mac");
+    server.handleSatelliteMessage(satelliteWs2, "remote-mac", {
+      type: "satellite_hello",
+      hostname: "Remote-Mac.local",
+      version: "test",
+    });
+
+    server.handleSatelliteMessage(satelliteWs1, "remote-mac", {
+      type: "satellite_heartbeat",
+      ts: 111,
+    });
+    server.handleSatelliteMessage(satelliteWs2, "remote-mac", {
+      type: "satellite_heartbeat",
+      ts: 222,
+    });
+
+    const staleSent = (satelliteWs1.send as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([raw]) => JSON.parse(raw) as Record<string, unknown>);
+    const activeSent = (satelliteWs2.send as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([raw]) => JSON.parse(raw) as Record<string, unknown>);
+
+    expect(staleSent).not.toContainEqual({
+      type: "satellite_heartbeat_ack",
+      ts: 111,
+    });
+    expect(activeSent).toContainEqual({
+      type: "satellite_heartbeat_ack",
+      ts: 222,
+    });
+  });
+
   it("ignores close from a superseded satellite connection", () => {
     const harness = createServer([]);
     const client = harness.addClient();
