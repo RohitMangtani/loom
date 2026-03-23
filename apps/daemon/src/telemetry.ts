@@ -1757,6 +1757,11 @@ export class TelemetryReceiver {
     if (!worker) {
       return { ok: false, error: `Worker ${workerId} not found` };
     }
+    // Block messages to workers waiting at a trust/sandbox prompt — typing
+    // text into the terminal would corrupt the prompt selection.
+    if (worker.promptType) {
+      return { ok: false, error: `Worker ${workerId} is waiting for ${worker.promptType} approval — approve the prompt first` };
+    }
     const remoteWorker = this.isRemoteWorker(workerId, worker) && !this.workers.has(workerId);
 
     const contentWithContext = this.composeMessageWithContext(workerId, content, {
@@ -1915,6 +1920,10 @@ export class TelemetryReceiver {
     const worker = this.getWorkerSnapshot(workerId);
     if (!worker) {
       return { ok: false, error: `Worker ${workerId} not found` };
+    }
+    // Block messages to workers waiting at a trust/sandbox prompt
+    if (worker.promptType) {
+      return { ok: false, error: `Worker ${workerId} is waiting for ${worker.promptType} approval — approve the prompt first` };
     }
     const remoteWorker = this.isRemoteWorker(workerId, worker) && !this.workers.has(workerId);
 

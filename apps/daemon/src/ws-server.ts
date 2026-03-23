@@ -1445,13 +1445,14 @@ export class WsServer {
       const spawnTty = termResult.tty;
       const projectName = real.split("/").pop() || real;
       const placeholderId = `spawning_${spawnTty.replace("/dev/", "").replace(/\//g, "_")}`;
+      const isClaude = model === "claude";
       this.telemetry.registerDiscovered(placeholderId, {
         id: placeholderId,
         pid: 0,
         project: real,
         projectName,
         status: "waiting" as const,
-        currentAction: "Starting...",
+        currentAction: isClaude ? "Trust this project folder?" : "Starting...",
         lastAction: "Spawning terminal",
         lastActionAt: Date.now(),
         errorCount: 0,
@@ -1461,6 +1462,8 @@ export class WsServer {
         tty: spawnTty,
         model,
         terminalPreview: undefined,
+        promptType: isClaude ? "trust" : null,
+        promptMessage: isClaude ? "Trust this project folder?" : undefined,
       });
     }
     console.log(`Spawned ${model} terminal for ${real} (tty=${termResult.tty})`);
@@ -2023,13 +2026,17 @@ export class WsServer {
           const normalizedTty = spawnTty.replace("/dev/", "");
           const projectName = real.split("/").pop() || real;
           const placeholderId = `spawning_${normalizedTty.replace(/\//g, "_")}`;
-          const placeholder = {
+          // Claude agents always show a trust prompt on first launch in a folder.
+          // Pre-set promptType so the dashboard shows the blue "Trust folder"
+          // button immediately instead of a blank "Starting..." tile.
+          const isClaude = model === "claude";
+          const placeholder: WorkerState = {
             id: placeholderId,
             pid: 0,
             project: real,
             projectName,
             status: "waiting" as const,
-            currentAction: "Starting...",
+            currentAction: isClaude ? "Trust this project folder?" : "Starting...",
             lastAction: "Spawning terminal",
             lastActionAt: Date.now(),
             errorCount: 0,
@@ -2039,6 +2046,8 @@ export class WsServer {
             tty: spawnTty,
             model,
             terminalPreview: undefined,
+            promptType: isClaude ? "trust" : null,
+            promptMessage: isClaude ? "Trust this project folder?" : undefined,
           };
           this.telemetry.registerDiscovered(placeholderId, placeholder);
 
@@ -2089,6 +2098,15 @@ export class WsServer {
                 current.promptMessage = prompt.message;
                 current.currentAction = prompt.message;
                 current.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
+                this.telemetry.notifyExternal(current);
+              } else if (current.promptType && polls >= 2) {
+                // Pre-set promptType (e.g. trust for Claude) but no prompt detected
+                // after 2+ polls (~3s) — folder was already trusted. Clear the prompt
+                // so the dashboard doesn't show a stale "Trust folder" button.
+                current.promptType = null;
+                current.promptMessage = undefined;
+                current.status = "idle";
+                current.currentAction = null;
                 this.telemetry.notifyExternal(current);
               }
             }
