@@ -207,13 +207,13 @@ export function InviteDialog({ send, onClose }: InviteDialogProps) {
                         </button>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteId(user.id)}
-                        className="text-xs text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-400"
-                      >
-                        Revoke
-                      </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(user.id)}
+                      className="text-xs text-[var(--text-muted)] hover:text-red-400 transition-colors"
+                    >
+                      Revoke
+                    </button>
                     )}
                   </div>
                 ))}
