@@ -10,6 +10,7 @@ import { SpawnDialog } from "@/components/SpawnDialog";
 import { InviteDialog } from "@/components/InviteDialog";
 import { InsightsPanel } from "@/components/InsightsPanel";
 import type { WorkerState } from "@/lib/types";
+import type { ActivitySnapshot } from "@/lib/snapshot-store";
 import { usePushSubscription } from "@/components/ServiceWorker";
 import { buildHeadlineSummary } from "@/lib/insights-summary";
 
@@ -146,6 +147,24 @@ export default function Home() {
     () => buildHeadlineSummary(workerList, reviews, activity),
     [workerList, reviews, activity],
   );
+  const handleSnapshotUndo = useCallback((snapshot: ActivitySnapshot) => {
+    if (!snapshot.workerId) {
+      if (typeof window !== "undefined") {
+        window.alert("Snapshot needs an agent context before it can be reverted.");
+      }
+      return;
+    }
+    const content = [
+      `Undo snapshot: ${snapshot.label}`,
+      `Context: ${snapshot.context}`,
+      snapshot.notes ? `Notes: ${snapshot.notes}` : "Notes: none",
+    ].join("\n");
+    if (!send({ type: "message", workerId: snapshot.workerId, content })) {
+      if (typeof window !== "undefined") {
+        window.alert("Unable to reach Hive daemon. Try again when connected.");
+      }
+    }
+  }, [send]);
 
   useEffect(() => {
     if (isAdmin === true && mode === "viewer") {
@@ -574,6 +593,10 @@ export default function Home() {
       <ReviewDrawer
         open={showReviews}
         reviews={reviews}
+        workers={workers}
+        chatEntries={chatEntries}
+        activity={activity}
+        onRequestSnapshotUndo={handleSnapshotUndo}
         onClose={() => setShowReviews(false)}
         onDismiss={dismissReview}
         onMarkSeen={markReviewSeen}
