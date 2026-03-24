@@ -12,15 +12,16 @@ One person or a team. Multiple models. Multiple machines. The output of a compan
 
 ### One person built five projects in 25 days
 
-Before Hive, one person running one AI agent ships about 8 commits a day and works on one project at a time. With Hive managing four agents in parallel, the same person shipped 38 commits a day across four projects simultaneously.
+Measured over 60 days across five repositories. The first 36 days used a single AI agent with manual terminal management. The last 25 days used Hive.
 
-| | Before (single agent) | With Hive (four agents) |
-|---|---|---|
-| **Daily output** | ~8 commits | ~38 commits |
-| **Projects at once** | 1 | 4 |
-| **Days with zero output** | 11 | 0 |
+| | Before Hive | With Hive | Change |
+|---|---|---|---|
+| **Output** | 275 commits in 36 days | 961 commits in 25 days | **5x throughput** |
+| **Parallelism** | 1 project at a time (77% of days) | 4+ projects simultaneously (60% of days) | **Sequential → parallel** |
+| **Utilization** | 39% of days produced output | 100% of days produced output | **Zero idle days** |
+| **Coordination** | Manual terminal switching | 48,372 tool calls tracked, 51 conflicts caught | **Automated** |
 
-The five projects: two websites (25 published articles), a multi-agent orchestration system, a video pipeline, and a web crawler. All built in parallel by one person watching colored dots on a phone. Full data in [architecture.md](docs/architecture.md#measured-performance).
+The five projects: two websites with 25 published articles, this orchestration system, a YouTube pipeline, and a web crawler. Full methodology in [architecture.md](docs/architecture.md#measured-performance).
 
 **Multiplayer**: Invite collaborators to the same dashboard. Named users with roles (admin, operator, viewer), live presence (see who is watching), message attribution (see who sent what), and an activity feed. Like Google Docs for AI agents.
 
