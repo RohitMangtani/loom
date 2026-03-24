@@ -14,7 +14,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: "Hive",
-  description: "Hive — Multi-agent orchestration layer. Visual workflow for AI agents.",
+  description: "Multi-agent orchestration dashboard",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

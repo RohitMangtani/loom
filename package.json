@@ -1,14 +1,6 @@
 {
-  "name": "@rohitmangtani/hive",
-  "version": "1.0.0",
-  "description": "Multi-agent orchestration layer. Visual workflow for AI agents.",
+  "name": "hive",
   "private": true,
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/RohitMangtani/hive"
-  },
-  "keywords": ["ai-agents", "orchestration", "terminal", "claude", "codex", "multi-agent", "swarm"],
   "packageManager": "npm@11.7.0",
   "workspaces": [
     "apps/*",
