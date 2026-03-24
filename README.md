@@ -18,7 +18,7 @@ Before Hive, one person running one AI agent ships about 8 commits a day and wor
 |---|---|---|
 | **Daily output** | ~8 commits | ~38 commits |
 | **Projects at once** | 1 | 4 |
-| **Days active out of 25** | 14 | 25 |
+| **Days with zero output** | 11 | 0 |
 
 The five projects: two websites (25 published articles), a multi-agent orchestration system, a video pipeline, and a web crawler. All built in parallel by one person watching colored dots on a phone. Full data in [architecture.md](docs/architecture.md#measured-performance).
 
