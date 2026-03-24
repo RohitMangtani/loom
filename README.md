@@ -274,6 +274,7 @@ The system solves four problems at once:
 - **State persistence** -daemon snapshots every 30 seconds. Survives restarts. Satellites run as launchd services and survive sleep and reboot.
 - **Push notifications** -macOS native alerts when agents get stuck. Web Push to your phone when agents finish. PWA installable on iOS and Android.
 - **Review queue** -auto-detects git pushes, deploys, and PRs across all agents. Slide-out drawer on the dashboard.
+- **Device protocol** -plug any physical device into the network. Cameras, sensors, actuators, compute nodes. Register with one HTTP call, push data, receive events. Agents process device data the same way they process code tasks.
 
 ## Using the Tiles
 
@@ -484,6 +485,41 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   -d '{"task":"Write tests for the payment module","project":"/path/to/project"}' \
   http://localhost:3001/api/queue
 ```
+
+### Devices
+Any device that can make an HTTP request can join the Hive network. Cameras, temperature sensors, Raspberry Pis, old phones, USB webcams, smart plugs. The protocol is the same for all of them: register, push data, receive events.
+
+```bash
+TOKEN=$(cat ~/.hive/token)
+
+# Register a device
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"pi-basement-temp","type":"sensor","capabilities":["temperature","humidity"],"location":"basement"}' \
+  http://localhost:3001/api/devices/register
+
+# Push sensor data
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"deviceId":"pi-basement-temp","type":"metric","payload":{"temperature":72.1,"humidity":45}}' \
+  http://localhost:3001/api/devices/data
+
+# Push a camera frame (base64 JPEG)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"deviceId":"moto-window","type":"image","payload":{"base64":"'$(base64 -i frame.jpg)'"}}' \
+  http://localhost:3001/api/devices/data
+
+# List devices
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/devices
+
+# Get events for a device
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/devices/pi-basement-temp/events
+```
+
+Device types: `camera`, `sensor`, `compute`, `actuator`. Data types: `image`, `metric`, `event`, `audio`. The daemon stores raw data to `~/hive-data/devices/`, runs change detection on camera frames, logs events to JSONL, and can bridge significant events into the task queue for agent analysis. Devices push to all connected dashboards over WebSocket in real-time.
+
+Camera devices support hitboxes: named regions in the frame with priority levels. Configure them via `POST /api/devices/:id/hitboxes` so agents only spend tokens analyzing zones that actually changed.
 
 ## How Agents Use Hive
 
