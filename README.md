@@ -20,6 +20,8 @@ Measured over 60 days across five repositories. The first 36 days used a single 
 | **Parallelism** | 1 project at a time (77% of days) | 4+ projects simultaneously (60% of days) | **Sequential → parallel** |
 | **Scope** | 2 repos touched in 36 days | 5 repos shipped in 25 days | **More in less time** |
 | **Coordination** | Alt-tab between terminals, copy-paste context, check if each agent is working or stuck | Glance at phone — green means working, red means done, yellow means it needs you | **Automated** |
+| **Visibility** | Each commit is the only thing you see. The 50 tool calls behind it are invisible. | Every read, edit, search, and retry is a status signal on the dashboard. | **50 agent decisions per commit, all visible** |
+| **Handoffs** | Copy output from one terminal, paste into another, explain what it means | Tap a tile, type "take what Q2 found and write tests for it" | **214 handoffs routed in plain English** |
 
 The five projects: two websites with 25 published articles, this orchestration system, a YouTube pipeline, and a web crawler. Full methodology in [architecture.md](docs/architecture.md#measured-performance).
 
