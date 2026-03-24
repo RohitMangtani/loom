@@ -225,3 +225,30 @@ The platform interfaces and Linux implementation are live in the daemon now. The
 4. Expand end-to-end coverage beyond the unit-tested tmux pane manager
 
 See [GitHub issue #4](https://github.com/RohitMangtani/hive/issues/4).
+
+## Measured Performance
+
+Data from a 60-day period (Jan 23 - Mar 24, 2026) comparing single-agent workflows to Hive-managed multi-agent sessions across five repositories.
+
+### Output
+
+| | Pre-Hive (36 days) | With Hive (25 days) |
+|---|---|---|
+| Commits/day | 7.6 | 38.4 |
+| Active coding days | 14 of 36 (39%) | 25 of 25 (100%) |
+| Repos active per day | 1 | 4 |
+| Total commits | 275 | 961 |
+
+### Parallelism
+
+Pre-Hive, 77% of active days had a single repository receiving commits. With Hive, 60% of active days had four or more repositories receiving commits simultaneously.
+
+| Concurrent repos | Pre-Hive | With Hive |
+|---|---|---|
+| 1 (sequential) | 10 days | 1 day |
+| 2-3 | 2 days | 9 days |
+| 4+ (parallel) | 1 day | 15 days |
+
+### What the system tracked
+
+Over the Hive period, the daemon logged 48,372 tool call events, 7,298 status transitions, caught 51 cross-agent file conflicts, and recorded 451 hourly coordination snapshots. The 7-layer detection pipeline described above produced these signals without any manual instrumentation from the user.
