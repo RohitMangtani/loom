@@ -10,6 +10,7 @@ import { SpawnDialog } from "@/components/SpawnDialog";
 import { InviteDialog } from "@/components/InviteDialog";
 import type { WorkerState } from "@/lib/types";
 import { usePushSubscription } from "@/components/ServiceWorker";
+import { useVoiceRecording } from "@/lib/useVoiceRecording";
 
 const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 const MAX_SLOTS = 8;
@@ -117,7 +118,6 @@ export default function Home() {
       }
     } catch { /* start fresh */ }
   }, []);
-  const isViewer = mode === "viewer";
 
   const toggleFlag = useCallback((id: string) => {
     setFlaggedIds((prev) => {
@@ -140,6 +140,38 @@ export default function Home() {
   const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, role, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines, presence, activity, uploadToWorker } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
+
+  // Voice mode — active when role is "voice"
+  const isVoice = role === "voice";
+  const isViewer = mode === "viewer" && !isVoice;
+  const voice = useVoiceRecording();
+  const [voiceTargetId, setVoiceTargetId] = useState<string | null>(null);
+  const [voiceUnsupported, setVoiceUnsupported] = useState(false);
+  const [voiceSentFlash, setVoiceSentFlash] = useState<string | null>(null);
+
+  const handleVoiceTap = useCallback((workerId: string) => {
+    if (voice.recording && voiceTargetId === workerId) {
+      // Stop and send
+      const text = voice.stop();
+      if (text) {
+        send({ type: "message", workerId, content: text });
+        setVoiceSentFlash(workerId);
+        setTimeout(() => setVoiceSentFlash(null), 1200);
+      }
+      setVoiceTargetId(null);
+    } else {
+      // Stop any existing recording first
+      if (voice.recording) voice.stop();
+      // Start recording for this worker
+      const ok = voice.start();
+      if (ok) {
+        setVoiceTargetId(workerId);
+      } else {
+        setVoiceUnsupported(true);
+        setTimeout(() => setVoiceUnsupported(false), 3000);
+      }
+    }
+  }, [voice, voiceTargetId, send]);
   const workerList = useMemo(() => Array.from(workers.values()), [workers]);
 
   useEffect(() => {
@@ -147,7 +179,7 @@ export default function Home() {
       setMode("admin");
     } else if (isAdmin === false && mode === "admin") {
       // Valid non-admin role (operator/viewer) — downgrade UI mode but keep token
-      if (role === "operator" || role === "viewer") {
+      if (role === "operator" || role === "viewer" || role === "voice") {
         setMode("viewer");
       } else {
         // Truly invalid token — wipe it
@@ -405,7 +437,7 @@ export default function Home() {
           {activeCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-active)]" />{activeCount} active</span>}
           {stuckCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-needs)]" />{stuckCount} waiting</span>}
           {idleCount > 0 && <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--dot-offline)]" />{idleCount} idle</span>}
-          {!isViewer && managing ? (
+          {!isViewer && !isVoice && managing ? (
             <button
               type="button"
               onClick={() => setManaging(false)}
@@ -413,7 +445,7 @@ export default function Home() {
             >
               Done
             </button>
-          ) : !isViewer && (
+          ) : !isViewer && !isVoice && (
             <>
               {numbered.length < MAX_SLOTS && (
                 <button
@@ -473,18 +505,18 @@ export default function Home() {
                   <AgentCard
                     worker={w}
                     num={num}
-                    selected={!isViewer && selectedId === w.id}
+                    selected={!isViewer && !isVoice && selectedId === w.id}
                     flagged={flaggedIds.has(w.id)}
                     managing={managing}
-                    fill={isViewer || !selectedEntry}
-                    onClick={isViewer ? () => {} : () => toggleSelect(w.id)}
-                    onPointerDown={isViewer ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
+                    fill={isViewer || isVoice || !selectedEntry}
+                    onClick={isVoice ? () => handleVoiceTap(w.id) : isViewer ? () => {} : () => toggleSelect(w.id)}
+                    onPointerDown={isViewer || isVoice ? undefined : () => { if (selectedId !== w.id) subscribeTo(w.id); }}
                     onSend={isViewer ? () => {} : (msg) => send({ type: "message", workerId: w.id, content: msg })}
                     onSelect={isViewer ? undefined : (index) => send({ type: "selection", workerId: w.id, optionIndex: index })}
-                    onFlag={isViewer ? undefined : () => toggleFlag(w.id)}
+                    onFlag={isViewer || isVoice ? undefined : () => toggleFlag(w.id)}
                     onSuggestionApply={isViewer ? undefined : (appliedLabel, shownLabels) => send({ type: "suggestion_feedback", workerId: w.id, appliedLabel, shownLabels })}
-                    onApprovePrompt={isViewer ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
-                    onContextDrop={isViewer ? undefined : (sourceId) => {
+                    onApprovePrompt={isViewer || isVoice ? undefined : () => send({ type: "approve_prompt", workerId: w.id })}
+                    onContextDrop={isViewer || isVoice ? undefined : (sourceId) => {
                       setSelectedId(w.id);
                       subscribeTo(w.id);
                       const prev = contextAttachmentsRef.current.get(w.id) || [];
@@ -493,10 +525,12 @@ export default function Home() {
                       }
                       setDraftTick((k) => k + 1);
                     }}
-                    onKill={!isViewer && managing ? () => {
+                    onKill={!isViewer && !isVoice && managing ? () => {
                       send({ type: "kill", workerId: w.id });
                       if (selectedId === w.id) { setSelectedId(null); subscribeTo(null); }
                     } : undefined}
+                    voiceActive={isVoice && voice.recording && voiceTargetId === w.id}
+                    voiceTranscript={isVoice && voice.recording && voiceTargetId === w.id ? voice.transcript : undefined}
                   />
                 </div>
               ))}
@@ -520,8 +554,23 @@ export default function Home() {
       )}
 
 
-      {/* Inline chat panel  --  admin only */}
-      {!isViewer && selectedEntry && (
+      {/* Voice mode status bar */}
+      {isVoice && (
+        <div className="shrink-0 px-4 py-2 text-center">
+          {voiceUnsupported ? (
+            <p className="text-[11px] text-[#f87171]">Voice not supported on this browser. Use Chrome.</p>
+          ) : voiceSentFlash ? (
+            <p className="text-[11px] text-[var(--dot-active)]">Sent</p>
+          ) : voice.recording ? (
+            <p className="text-[11px] text-[#f97316] animate-pulse">Recording — tap tile to send</p>
+          ) : (
+            <p className="text-[11px] text-[var(--text-muted)]">Tap a tile to talk</p>
+          )}
+        </div>
+      )}
+
+      {/* Inline chat panel  --  admin only, hidden for voice mode */}
+      {!isViewer && !isVoice && selectedEntry && (
         <ChatPanel
           key={selectedEntry.worker.id}
           worker={selectedEntry.worker}

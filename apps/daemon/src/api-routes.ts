@@ -299,7 +299,7 @@ export function registerApiRoutes(
 
   app.post("/api/users", requireAuth, requireAdmin, (req, res) => {
     const { name, role } = req.body as { name?: string; role?: string };
-    const validRoles = ["admin", "operator", "viewer"] as const;
+    const validRoles = ["admin", "operator", "viewer", "voice"] as const;
     if (!name || !role || !validRoles.includes(role as typeof validRoles[number])) {
       res.status(400).json({ error: "Missing or invalid name/role" });
       return;

@@ -81,6 +81,12 @@
     animation: card-finish-pulse 1.4s ease-out;
   }
 
+  .card-voice-recording {
+    border-color: rgba(249, 115, 22, 0.7) !important;
+    background: rgba(249, 115, 22, 0.06) !important;
+    animation: voice-pulse 1.5s ease-in-out infinite;
+  }
+
   .completion-flash {
     position: absolute;
     inset: -1px;
@@ -491,6 +497,17 @@
 
   .chat-input::placeholder {
     color: var(--text-light);
+  }
+}
+
+@keyframes voice-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.35);
+    border-color: rgba(249, 115, 22, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(249, 115, 22, 0);
+    border-color: rgba(249, 115, 22, 1);
   }
 }
 

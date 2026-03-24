@@ -19,7 +19,7 @@ const LEGACY_TOKEN_PATH = join(HIVE_DIR, "token");
 export interface HiveUser {
   id: string;
   name: string;
-  role: "admin" | "operator" | "viewer";
+  role: "admin" | "operator" | "viewer" | "voice";
   token: string;
   createdAt: number;
 }
@@ -28,7 +28,7 @@ export interface HiveUser {
 export interface HiveUserInfo {
   id: string;
   name: string;
-  role: "admin" | "operator" | "viewer";
+  role: "admin" | "operator" | "viewer" | "voice";
   createdAt: number;
 }
 
@@ -95,7 +95,7 @@ export class UserRegistry {
   }
 
   /** Create a new user with a generated token. */
-  createUser(name: string, role: "admin" | "operator" | "viewer"): HiveUser {
+  createUser(name: string, role: "admin" | "operator" | "viewer" | "voice"): HiveUser {
     const user: HiveUser = {
       id: `u_${randomBytes(6).toString("hex")}`,
       name,

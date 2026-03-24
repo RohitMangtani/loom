@@ -220,9 +220,9 @@ export type { DotColor };
 const FLAG_COLOR = "#f97316";
 
 export function AgentCard({
-  worker, num, selected, flagged, managing, fill, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill, onContextDrop,
+  worker, num, selected, flagged, managing, fill, onClick, onPointerDown, onSend, onSelect, onFlag, onSuggestionApply, onApprovePrompt, onKill, onContextDrop, voiceActive, voiceTranscript,
 }: {
-  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; fill?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void; onContextDrop?: (sourceId: string) => void;
+  worker: WorkerState; num: number; selected: boolean; flagged?: boolean; managing?: boolean; fill?: boolean; onClick: () => void; onPointerDown?: () => void; onSend: (msg: string) => void; onSelect?: (index: number) => void; onFlag?: () => void; onSuggestionApply?: (appliedLabel: string, shownLabels: string[]) => void; onApprovePrompt?: () => void; onKill?: () => void; onContextDrop?: (sourceId: string) => void; voiceActive?: boolean; voiceTranscript?: string;
 }) {
   const [finishedPulse, setFinishedPulse] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -255,8 +255,8 @@ export function AgentCard({
       onDragEnter={onContextDrop ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
       onDragLeave={onContextDrop ? (e) => { if (e.currentTarget.contains(e.relatedTarget as Node)) return; setDragOver(false); } : undefined}
       onDrop={onContextDrop ? (e) => { e.preventDefault(); setDragOver(false); const srcId = e.dataTransfer.getData("text/plain"); if (srcId && srcId !== worker.id) onContextDrop(srcId); } : undefined}
-      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""} ${fill ? "h-full" : ""} ${dragOver ? "card-drop-target" : ""}`}
-      style={{ borderLeftColor: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
+      className={`card relative ${stuck ? "card-stuck" : ""} ${selected && !managing ? "card-selected" : ""} ${hasPrompt ? "card-stuck" : ""} ${finishedPulse ? "card-finished" : ""} ${fill ? "h-full" : ""} ${dragOver ? "card-drop-target" : ""} ${voiceActive ? "card-voice-recording" : ""}`}
+      style={{ borderLeftColor: voiceActive ? "#f97316" : hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
     >
       {finishedPulse && (
         <>
@@ -311,8 +311,8 @@ export function AgentCard({
           </span>
         )}
         <span
-          className={`w-2 h-2 rounded-full shrink-0 ${hasPrompt ? "animate-pulse" : stuck ? "animate-pulse" : ""}`}
-          style={{ background: hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
+          className={`w-2 h-2 rounded-full shrink-0 ${voiceActive ? "animate-pulse" : hasPrompt ? "animate-pulse" : stuck ? "animate-pulse" : ""}`}
+          style={{ background: voiceActive ? "#f97316" : hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
         />
         {color === "green" && !hasPrompt && (
           <span className="shrink-0 opacity-60" title="Active chat">
@@ -330,7 +330,20 @@ export function AgentCard({
 
       {/* Project name omitted  --  tiles show only agent + description */}
 
-      {hasPrompt ? (
+      {voiceActive ? (
+        <div className="flex items-center gap-2 mt-1">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 animate-pulse">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="8" y1="23" x2="16" y2="23" />
+          </svg>
+          <p className="text-[11px] leading-tight text-[#fb923c] font-medium truncate">
+            {voiceTranscript || "Listening..."}
+          </p>
+          <span className="text-[9px] text-[#f97316] opacity-60 ml-auto shrink-0">Tap to send</span>
+        </div>
+      ) : hasPrompt ? (
         <>
           {onApprovePrompt && (
             <div className="flex items-center gap-1 mt-1.5" onClick={(e) => e.stopPropagation()}>

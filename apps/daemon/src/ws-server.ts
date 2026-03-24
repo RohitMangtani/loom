@@ -2798,11 +2798,11 @@ export class WsServer {
         }
         const userName = typeof msg.userName === "string" ? msg.userName.trim() : "";
         const userRole = msg.userRole as string;
-        if (!userName || !["admin", "operator", "viewer"].includes(userRole)) {
+        if (!userName || !["admin", "operator", "viewer", "voice"].includes(userRole)) {
           this.send(ws, { type: "error", error: "Missing userName or invalid userRole" });
           break;
         }
-        const created = this.userRegistry.createUser(userName, userRole as "admin" | "operator" | "viewer");
+        const created = this.userRegistry.createUser(userName, userRole as "admin" | "operator" | "viewer" | "voice");
         this.send(ws, { type: "user_created", user: created });
         break;
       }

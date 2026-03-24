@@ -7,7 +7,7 @@ export interface Suggestion {
 export interface HiveUser {
   id: string;
   name: string;
-  role: "admin" | "operator" | "viewer";
+  role: "admin" | "operator" | "viewer" | "voice";
   createdAt: number;
 }
 
@@ -233,7 +233,7 @@ export interface DaemonResponse {
   error?: string;
   position?: number;
   admin?: boolean;
-  role?: "admin" | "operator" | "viewer";
+  role?: "admin" | "operator" | "viewer" | "voice";
   reviews?: ReviewItem[];
   review?: ReviewItem;
   /** VAPID public key for Web Push subscription */

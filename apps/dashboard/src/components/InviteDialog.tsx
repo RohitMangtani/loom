@@ -8,7 +8,7 @@ interface InviteDialogProps {
   onClose: () => void;
 }
 
-type Role = "admin" | "operator" | "viewer";
+type Role = "admin" | "operator" | "viewer" | "voice";
 type View = "members" | "invite" | "invite-ready";
 
 interface UserInfo {
@@ -21,12 +21,14 @@ interface UserInfo {
 const ROLE_DESCRIPTIONS: Record<Role, string> = {
   admin: "Full control",
   operator: "Message and manage tasks",
+  voice: "Tap tiles to talk — no keyboard",
   viewer: "Read-only",
 };
 
 const ROLE_COLORS: Record<Role, string> = {
   admin: "#a78bfa",
   operator: "#4ade80",
+  voice: "#f97316",
   viewer: "#94a3b8",
 };
 
@@ -192,7 +194,7 @@ export function InviteDialog({ send, onClose }: InviteDialogProps) {
             <div className="mb-4">
               <label className="block text-xs text-[var(--text-muted)] mb-1.5">Role</label>
               <div className="space-y-2">
-                {(["operator", "viewer", "admin"] as Role[]).map((r) => (
+                {(["operator", "voice", "viewer", "admin"] as Role[]).map((r) => (
                   <button key={r} type="button" onClick={() => setInviteRole(r)} className={`w-full text-left px-3 py-2 text-sm rounded-md border transition-colors ${inviteRole === r ? "border-[var(--accent)] bg-[var(--accent)]/10" : "border-[var(--border)] hover:border-zinc-600"}`}>
                     <span className="font-medium capitalize">{r}</span>
                     <span className="block text-xs text-[var(--text-muted)] mt-0.5">{ROLE_DESCRIPTIONS[r]}</span>

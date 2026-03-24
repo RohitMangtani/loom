@@ -23,7 +23,7 @@ export function useHive(daemonUrl: string) {
   const [chatEntries, setChatEntries] = useState<Map<string, ChatEntry[]>>(new Map());
   const [workerContexts, setWorkerContexts] = useState<Map<string, WorkerContextSnapshot>>(new Map());
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [role, setRole] = useState<"admin" | "operator" | "viewer" | null>(null);
+  const [role, setRole] = useState<"admin" | "operator" | "viewer" | "voice" | null>(null);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [models, setModels] = useState<AgentModel[]>([
     { id: "claude", label: "Claude" },
@@ -375,7 +375,7 @@ export function useHive(daemonUrl: string) {
 
           case "auth": {
             setIsAdmin(data.admin ?? false);
-            setRole((data.role as "admin" | "operator" | "viewer") || (data.admin ? "admin" : "viewer"));
+            setRole((data.role as "admin" | "operator" | "viewer" | "voice") || (data.admin ? "admin" : "viewer"));
             break;
           }
 
