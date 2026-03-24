@@ -504,13 +504,24 @@ export default function Home() {
       ) : (
         <div className="flex-1 flex items-center justify-center">
           {isViewer ? (
-            <span className="text-sm text-[var(--text-muted)]">No agents running</span>
+            <div className="text-center">
+              <p className="text-sm text-[var(--text-muted)]">No agents running</p>
+              <p className="mt-1 text-[10px] text-[var(--text-light)]">Agents appear here automatically when detected</p>
+            </div>
           ) : (
-            <div className="mx-6 w-full max-w-xl rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(59,130,246,0.08),rgba(20,20,22,0.98))] p-6 text-center shadow-[0_24px_90px_rgba(0,0,0,0.4)]">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--accent)]">Dashboard Ready</p>
-              <h2 className="mt-3 text-2xl font-semibold text-[var(--text)]">Start your first agent</h2>
+            <div className="mx-6 w-full max-w-xl rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(59,130,246,0.08),rgba(20,20,22,0.98))] p-8 text-center shadow-[0_24px_90px_rgba(0,0,0,0.4)]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--accent)]">Agent Orchestration Layer</p>
+              <h2 className="mt-3 text-2xl font-semibold text-[var(--text)]">No agents detected</h2>
               <p className="mt-3 text-sm leading-6 text-[var(--text-muted)]">
-                Launch a terminal-backed worker, then manage prompts, approvals, uploads, and chat from the same grid.
+                Open a terminal and run <span className="font-mono text-[var(--text-light)]">claude</span>, <span className="font-mono text-[var(--text-light)]">codex</span>, or <span className="font-mono text-[var(--text-light)]">openclaw</span>. Hive discovers agents automatically and surfaces them here as tiles.
+              </p>
+              <div className="mt-5 flex items-center justify-center gap-6 text-[10px] text-[var(--text-muted)]">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--dot-active)]" />Working</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--dot-needs)]" />Waiting</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[var(--dot-offline)]" />Idle</span>
+              </div>
+              <p className="mt-4 text-[10px] text-[var(--text-muted)]">
+                Or click <span className="font-semibold text-[var(--text-light)]">+ Agent</span> above to spawn one from here.
               </p>
             </div>
           )}

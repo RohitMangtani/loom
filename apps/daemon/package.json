@@ -1,5 +1,7 @@
 {
   "name": "@hive/daemon",
+  "version": "1.0.0",
+  "description": "Multi-agent terminal orchestration daemon — auto-discovers agents, manages status, routes messages",
   "private": true,
   "type": "module",
   "scripts": {
