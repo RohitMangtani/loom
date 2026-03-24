@@ -19,10 +19,7 @@ Measured over 60 days across five repositories. The first 36 days used a single 
 | **Output** | 275 commits in 36 days | 961 commits in 25 days | **5x throughput** |
 | **Parallelism** | 1 project at a time (77% of days) | 4+ projects simultaneously (60% of days) | **Sequential → parallel** |
 | **Scope** | 2 repos touched in 36 days | 5 repos shipped in 25 days | **More in less time** |
-| **Coordination** | Manual terminal switching | 48,372 tool calls tracked, 51 file conflicts caught | **Automated** |
-| **Awareness** | Read terminal output to check if agent is working, stuck, or done | Colored dot on your phone. Green/yellow/red. | **7,298 status checks you never had to do** |
-| **Stuck agents** | Agent waits silently until you notice (minutes to hours) | Detected in 3 seconds, notification sent to phone | **160 stuck situations caught automatically** |
-| **Agent collisions** | Two agents edit the same file, last write wins, work lost | Conflict detection flags it before damage | **51 collisions caught, zero work lost** |
+| **Coordination** | Alt-tab between terminals, copy-paste context, check if each agent is working or stuck | Glance at phone — green means working, red means done, yellow means it needs you | **Automated** |
 
 The five projects: two websites with 25 published articles, this orchestration system, a YouTube pipeline, and a web crawler. Full methodology in [architecture.md](docs/architecture.md#measured-performance).
 
