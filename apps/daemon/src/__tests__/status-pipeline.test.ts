@@ -24,7 +24,7 @@ import type { SessionStreamer } from "../session-stream.js";
 
 // ── Test fixture helpers ──────────────────────────────────────────────
 
-const TEST_DIR = join(process.env.TMPDIR || "/private/tmp/claude-501", "hive-status-tests");
+const TEST_DIR = join(process.env.TMPDIR || require("os").tmpdir(), "hive-status-tests");
 
 function jsonlLine(obj: Record<string, unknown>): string {
   return JSON.stringify(obj);
