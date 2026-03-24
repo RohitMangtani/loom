@@ -1,6 +1,10 @@
 # Hive
 
+[![CI](https://github.com/RohitMangtani/hive/actions/workflows/ci.yml/badge.svg)](https://github.com/RohitMangtani/hive/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Multi-agent orchestration layer for LLM-based development workflows. One dashboard across multiple models, multiple machines, multiple people, and every handoff in plain English. macOS native, Linux via tmux in progress.
+
+![Hive dashboard demo](docs/hive-demo.gif)
 
 ![Hive stacked dashboard diagram](docs/hive-stack.svg)
 
@@ -15,6 +19,15 @@ One person or a team. Multiple models. Multiple machines. The output of a compan
 **How it works**: [A Visual Workflow for AI Agents](https://rohitmangtani.com/writing/a-visual-workflow-for-ai-agents) covers the design thinking behind Hive, from cognitive science to the feedback loops that make visual coordination faster than reading terminal output.
 
 **Architecture**: See [docs/architecture.md](docs/architecture.md) for the technical deep dive, including the 7-layer status detection pipeline, multi-machine federation protocol, and module map.
+
+## Quick Start
+
+| Your situation | What to do |
+|---|---|
+| **New to Hive** | `bash scripts/install.sh --fresh` (localhost + Vercel dashboard) |
+| **Want the desktop app** | `npm install && npm run desktop:prepare && npm run desktop:dev` |
+| **Joining an existing Hive** | `bash scripts/install.sh --connect <URL> <TOKEN>` |
+| **Just want to see it** | `npm install && npm run launch:local` (no Vercel, localhost only) |
 
 ## Install
 
