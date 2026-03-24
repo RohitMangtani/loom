@@ -940,7 +940,13 @@ end tell
       const activeCount = cpuActive ? (this.consecutiveActiveChecks.get(id) || 0) + 1 : 0;
       if (cpuActive) this.consecutiveActiveChecks.set(id, activeCount);
       else this.consecutiveActiveChecks.set(id, 0);
-      const cpuOverride = cpuActive && activeCount >= 2;
+      // For Claude workers with hooks, CPU alone must NOT override idleConfirmed.
+      // Claude Code idles at 30-40% CPU (Node.js event loop, MCP servers, file
+      // watchers), indistinguishable from real work. UserPromptSubmit clears
+      // idleConfirmed immediately when the user types, so CPU override is
+      // redundant. Only allow CPU override for non-hook models (Codex, etc.)
+      // where there's no hook to signal wakeup.
+      const cpuOverride = cpuActive && activeCount >= 2 && neverHadHooks;
       const noiseWriteActive = ctx.fileAgeIsFromNoise && ctx.fileAgeMs < 120_000 && ptyDelta > 300;
       const recentInputOverride = recentInput && !stickyIdle;
       if (!recentInputOverride && !jsonlOverride && !cpuOverride && !noiseWriteActive) {

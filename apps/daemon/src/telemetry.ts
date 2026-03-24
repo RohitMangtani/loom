@@ -2643,6 +2643,12 @@ export class TelemetryReceiver {
       }
 
       case "SessionStart": {
+        // During spawn grace period, SessionStart is just CLI initialization
+        // noise (system prompt, context loading) — not real user work.
+        // Without this guard, the agent flashes green immediately after spawn.
+        if (worker.tty && this.isRecentSpawn(worker.tty)) {
+          break;
+        }
         worker.status = "working";
         worker.stuckMessage = undefined;
         this.idleConfirmed.set(workerId, false);
@@ -2736,6 +2742,7 @@ export class TelemetryReceiver {
 
     switch (event.event) {
       case "SessionStart":
+        if (worker.tty && this.isRecentSpawn(worker.tty)) break;
         worker.status = "working";
         worker.errorCount = 0;
         worker.lastAction = "session started";
