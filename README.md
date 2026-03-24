@@ -10,6 +10,17 @@ Hive is a lightweight visual coordination layer that mirrors active agent sessio
 
 One person or a team. Multiple models. Multiple machines. The output of a company.
 
+### Measured over 60 days across five repositories
+
+| | Without Hive | With Hive |
+|---|---|---|
+| **Commits/day** | 7.6 | 38.4 (5x) |
+| **Projects in parallel** | 1 | 4 |
+| **Active coding days** | 14 of 36 (39%) | 25 of 25 (100%) |
+| **Total output** | 275 commits | 961 commits |
+
+48,372 tool calls tracked. 7,298 status transitions. 51 cross-agent conflicts caught. See [architecture.md](docs/architecture.md#measured-performance) for methodology.
+
 **Multiplayer**: Invite collaborators to the same dashboard. Named users with roles (admin, operator, viewer), live presence (see who is watching), message attribution (see who sent what), and an activity feed. Like Google Docs for AI agents.
 
 **How it works**: [A Visual Workflow for AI Agents](https://rohitmangtani.com/writing/a-visual-workflow-for-ai-agents) covers the design thinking behind Hive, from cognitive science to the feedback loops that make visual coordination faster than reading terminal output.
