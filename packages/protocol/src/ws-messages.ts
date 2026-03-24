@@ -49,7 +49,7 @@ export type DaemonBroadcast =
   | { type: "worker_removed"; workerId: string }
   | { type: "chat"; workerId: string; content: string }
   | { type: "chat_history"; workerId: string; messages: ChatEntry[]; full?: boolean }
-  | { type: "auth"; admin: boolean }
+  | { type: "auth"; admin: boolean; role?: "admin" | "operator" | "viewer" }
   | { type: "reviews"; reviews: ReviewItem[] }
   | { type: "review_added"; review: ReviewItem }
   | { type: "models"; models: AgentModel[] }

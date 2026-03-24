@@ -23,6 +23,7 @@ export function useHive(daemonUrl: string) {
   const [chatEntries, setChatEntries] = useState<Map<string, ChatEntry[]>>(new Map());
   const [workerContexts, setWorkerContexts] = useState<Map<string, WorkerContextSnapshot>>(new Map());
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [role, setRole] = useState<"admin" | "operator" | "viewer" | null>(null);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [models, setModels] = useState<AgentModel[]>([
     { id: "claude", label: "Claude" },
@@ -374,6 +375,7 @@ export function useHive(daemonUrl: string) {
 
           case "auth": {
             setIsAdmin(data.admin ?? false);
+            setRole((data.role as "admin" | "operator" | "viewer") || (data.admin ? "admin" : "viewer"));
             break;
           }
 
@@ -483,6 +485,7 @@ export function useHive(daemonUrl: string) {
       wsRef.current = null;
     }
     setIsAdmin(null);
+    setRole(null);
     setConnected(false);
     setConnectEpoch((e) => e + 1);
   }, []);
@@ -566,7 +569,7 @@ export function useHive(daemonUrl: string) {
   );
 
   return {
-    connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect,
+    connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, role, reconnect,
     requestWorkerContext, uploadToWorker,
     reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines,
     presence, activity,

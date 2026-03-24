@@ -233,6 +233,7 @@ export interface DaemonResponse {
   error?: string;
   position?: number;
   admin?: boolean;
+  role?: "admin" | "operator" | "viewer";
   reviews?: ReviewItem[];
   review?: ReviewItem;
   /** VAPID public key for Web Push subscription */

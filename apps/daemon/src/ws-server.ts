@@ -1845,7 +1845,7 @@ export class WsServer {
       const workers = this.getAllWorkers();
       this.lastWorkersSnapshot = JSON.stringify(workers);
       this.send(ws, { type: "workers", workers });
-      this.send(ws, { type: "auth", admin: isAdmin });
+      this.send(ws, { type: "auth", admin: isAdmin, role: user.role });
       // Send full review list on connect (hosted dashboard can't reach REST on port 3001)
       this.send(ws, { type: "reviews", reviews: this.telemetry.getReviews() });
       // Send available agent models for spawn dialog

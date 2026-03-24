@@ -137,7 +137,7 @@ export default function Home() {
     if (savedAgent) setSelectedId(savedAgent);
   }, []);
 
-  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines, presence, activity, uploadToWorker } = useHive(daemonUrl);
+  const { connected, workers, chatEntries, send, subscribeTo, addOptimisticEntry, isAdmin, role, reconnect, reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines, presence, activity, uploadToWorker } = useHive(daemonUrl);
   const { pushState, requestPush } = usePushSubscription(send, vapidKey);
   const [authError, setAuthError] = useState(false);
   const workerList = useMemo(() => Array.from(workers.values()), [workers]);
@@ -146,16 +146,18 @@ export default function Home() {
     if (isAdmin === true && mode === "viewer") {
       setMode("admin");
     } else if (isAdmin === false && mode === "admin") {
-      lockAdmin();
-      setMode("viewer");
-      setAuthError(true);
-      setTimeout(() => setAuthError(false), 3000);
-    } else if (isAdmin === false && localStorage.getItem("hive_token")) {
-      lockAdmin();
-      setAuthError(true);
-      setTimeout(() => setAuthError(false), 3000);
+      // Valid non-admin role (operator/viewer) — downgrade UI mode but keep token
+      if (role === "operator" || role === "viewer") {
+        setMode("viewer");
+      } else {
+        // Truly invalid token — wipe it
+        lockAdmin();
+        setMode("viewer");
+        setAuthError(true);
+        setTimeout(() => setAuthError(false), 3000);
+      }
     }
-  }, [isAdmin, mode]);
+  }, [isAdmin, mode, role]);
 
   const restoredRef = useRef(false);
   useEffect(() => {
