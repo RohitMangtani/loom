@@ -10,16 +10,17 @@ Hive is a lightweight visual coordination layer that mirrors active agent sessio
 
 One person or a team. Multiple models. Multiple machines. The output of a company.
 
-### Measured over 60 days across five repositories
+### One person built five projects in 25 days
 
-| | Without Hive | With Hive |
+Before Hive, one person running one AI agent ships about 8 commits a day and works on one project at a time. With Hive managing four agents in parallel, the same person shipped 38 commits a day across four projects simultaneously.
+
+| | Before (single agent) | With Hive (four agents) |
 |---|---|---|
-| **Commits/day** | 7.6 | 38.4 (5x) |
-| **Projects in parallel** | 1 | 4 |
-| **Active coding days** | 14 of 36 (39%) | 25 of 25 (100%) |
-| **Total output** | 275 commits | 961 commits |
+| **Daily output** | ~8 commits | ~38 commits |
+| **Projects at once** | 1 | 4 |
+| **Days active out of 25** | 14 | 25 |
 
-48,372 tool calls tracked. 7,298 status transitions. 51 cross-agent conflicts caught. See [architecture.md](docs/architecture.md#measured-performance) for methodology.
+The five projects: two websites (25 published articles), a multi-agent orchestration system, a video pipeline, and a web crawler. All built in parallel by one person watching colored dots on a phone. Full data in [architecture.md](docs/architecture.md#measured-performance).
 
 **Multiplayer**: Invite collaborators to the same dashboard. Named users with roles (admin, operator, viewer), live presence (see who is watching), message attribution (see who sent what), and an activity feed. Like Google Docs for AI agents.
 
