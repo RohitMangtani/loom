@@ -51,7 +51,14 @@ export function SitePasswordGate({ children }: SitePasswordGateProps) {
     if (tokenParam && tokenParam.length >= 32) {
       localStorage.setItem(TOKEN_KEY, tokenParam);
       localStorage.setItem(MODE_KEY, 'admin');
-      // Clean URL so the token isn't visible in the address bar
+    }
+    // Auto-save daemon WS URL from ?ws= parameter (invite links)
+    const wsParam = params.get('ws');
+    if (wsParam && (wsParam.startsWith('ws://') || wsParam.startsWith('wss://'))) {
+      localStorage.setItem('hive_daemon_url', wsParam);
+    }
+    // Clean URL so tokens aren't visible in the address bar
+    if (tokenParam || wsParam) {
       window.history.replaceState({}, '', window.location.pathname);
     }
     // Clean ?viewer= from URL if present (backward compat with old share links)

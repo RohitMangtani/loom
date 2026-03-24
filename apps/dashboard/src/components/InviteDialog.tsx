@@ -109,14 +109,19 @@ export function InviteDialog({ send, onClose }: InviteDialogProps) {
   const handleCopy = () => {
     if (!inviteResult) return;
     // Always use the production URL, not the current preview URL.
-    // Preview URLs change on every push; production URL is stable.
     const currentOrigin = typeof window !== "undefined" ? window.location.origin : "";
     const isPreview = currentOrigin.includes("-rohits-projects-") || currentOrigin.includes("vercel.app/");
     const stableUrl = isPreview
       ? (process.env.NEXT_PUBLIC_DASHBOARD_URL || currentOrigin)
       : currentOrigin;
-    // Include token in the URL so the invite link auto-authenticates
-    const inviteUrl = `${stableUrl}?token=${inviteResult.token}`;
+    // Include token AND WS URL so the invite link auto-authenticates and connects
+    const wsUrl = typeof window !== "undefined"
+      ? (localStorage.getItem("hive_daemon_url") || process.env.NEXT_PUBLIC_WS_URL || "")
+      : "";
+    const params = new URLSearchParams();
+    params.set("token", inviteResult.token);
+    if (wsUrl) params.set("ws", wsUrl);
+    const inviteUrl = `${stableUrl}?${params.toString()}`;
     const text = `Join my Hive dashboard:\n${inviteUrl}\n\nRole: ${inviteResult.role}\n\nOpen the link above. Your access is built into the URL.`;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
