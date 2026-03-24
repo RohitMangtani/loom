@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, HiveUser, ReviewItem, UploadedFileRef, WorkerContextSnapshot, WorkerState } from "@/lib/types";
+import type { AgentModel, ChatEntry, ConnectedMachine, DaemonMessage, DaemonResponse, DeviceEvent, HiveUser, RegisteredDevice, ReviewItem, UploadedFileRef, WorkerContextSnapshot, WorkerState } from "@/lib/types";
 
 /** Extended response type for message types beyond the base DaemonResponse union */
 type ExtendedResponse = DaemonResponse
@@ -32,6 +32,8 @@ export function useHive(daemonUrl: string) {
   ]);
   const [vapidKey, setVapidKey] = useState<string | null>(null);
   const [machines, setMachines] = useState<ConnectedMachine[]>([]);
+  const [devices, setDevices] = useState<RegisteredDevice[]>([]);
+  const [deviceEvents, setDeviceEvents] = useState<DeviceEvent[]>([]);
   const [presence, setPresence] = useState<HiveUser[]>([]);
   const [activity, setActivity] = useState<{ text: string; timestamp: number } | null>(null);
 
@@ -373,6 +375,23 @@ export function useHive(daemonUrl: string) {
             break;
           }
 
+          case "devices": {
+            if (data.devices && Array.isArray(data.devices)) {
+              setDevices(data.devices);
+            }
+            break;
+          }
+
+          case "device_event": {
+            if (data.deviceEvent) {
+              setDeviceEvents((prev) => {
+                const next = [data.deviceEvent as DeviceEvent, ...prev];
+                return next.length > 200 ? next.slice(0, 200) : next;
+              });
+            }
+            break;
+          }
+
           case "auth": {
             setIsAdmin(data.admin ?? false);
             setRole((data.role as "admin" | "operator" | "viewer" | "voice") || (data.admin ? "admin" : "viewer"));
@@ -572,6 +591,6 @@ export function useHive(daemonUrl: string) {
     connected, workers, chatEntries, workerContexts, send, subscribeTo, addOptimisticEntry, isAdmin, role, reconnect,
     requestWorkerContext, uploadToWorker,
     reviews, markReviewSeen, dismissReview, markAllReviewsSeen, clearAllReviews, models, vapidKey, machines,
-    presence, activity,
+    presence, activity, devices, deviceEvents,
   };
 }

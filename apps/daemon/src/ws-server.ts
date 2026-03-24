@@ -282,6 +282,14 @@ export class WsServer {
     this.revertHistory = rh;
   }
 
+  private deviceLayer: import("./devices/index.js").DeviceLayer | null = null;
+
+  /** Set the DeviceLayer (for WS-based device queries) */
+  setDeviceLayer(dl: import("./devices/index.js").DeviceLayer): void {
+    this.deviceLayer = dl;
+    dl.setBroadcast((msg) => this.publicBroadcast(msg));
+  }
+
   /** Register a listener for satellite worker status changes.
    *  Fires when a satellite worker transitions between states (e.g., working→idle).
    *  Used by NotificationManager to send push notifications for remote workers. */
@@ -1854,6 +1862,10 @@ export class WsServer {
       }
       // Send connected satellite machines for spawn dialog machine picker
       this.send(ws, { type: "machines", machines: this.getConnectedMachines() });
+      // Send registered devices
+      if (this.deviceLayer) {
+        this.send(ws, { type: "devices", devices: this.deviceLayer.registry.getAll() });
+      }
       // Send VAPID public key for Web Push subscription
       if (this.pushMgr) {
         this.send(ws, { type: "vapid_key", vapidKey: this.pushMgr.getPublicKey() });
@@ -2519,6 +2531,12 @@ export class WsServer {
         break;
       }
 
+      case "list_devices": {
+        const devices = this.deviceLayer?.registry.getAll() ?? [];
+        this.send(ws, { type: "devices", devices });
+        break;
+      }
+
       case "list_reverts": {
         if (!this.revertHistory) {
           this.send(ws, { type: "reverts", reverts: [] });
@@ -2841,6 +2859,11 @@ export class WsServer {
         client.send(data);
       }
     }
+  }
+
+  /** Public broadcast for external subsystems (device layer, etc.). */
+  publicBroadcast(response: Record<string, unknown>): void {
+    this.broadcast(response as unknown as DaemonResponse);
   }
 
   private getPresenceSnapshot(): HiveUserInfo[] {

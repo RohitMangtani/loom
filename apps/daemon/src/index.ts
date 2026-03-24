@@ -21,6 +21,7 @@ import { loadPlatform } from "./platform/index.js";
 import { UserRegistry } from "./user-registry.js";
 import { ReplayManager } from "./replay.js";
 import { RevertHistory } from "./revert-history.js";
+import { DeviceLayer } from "./devices/index.js";
 
 // ── Satellite mode ──────────────────────────────────────────────────
 // Usage: npx tsx apps/daemon/src/index.ts --satellite wss://URL TOKEN
@@ -147,12 +148,29 @@ if (satFlagIdx !== -1) {
   const outbox = new OutboxScanner(telemetry);
   const stateStore = new StateStore();
 
+  // Device layer (sensors, cameras, actuators — parallel to workers)
+  const devices = new DeviceLayer();
+  ws.setDeviceLayer(devices);
+
   telemetry.start();
   telemetry.registerProcessManager(procMgr);
   telemetry.registerApi(procMgr, discovery, revertHistory);
   telemetry.registerCollector(collector);
   telemetry.setStreamer(streamer);
   telemetry.onRemoval((workerId) => streamer.clearWorker(workerId));
+
+  // Mount device routes on the Express app
+  const expressApp = telemetry.getApp();
+  const authMiddleware = telemetry.getAuthMiddleware();
+  if (expressApp && authMiddleware) {
+    devices.registerRoutes(expressApp, authMiddleware);
+  }
+
+  // Bridge device events → agent task queue (when events warrant analysis)
+  devices.setTaskBridge((event) => {
+    console.log(`[devices] Event from ${event.deviceId}: ${event.summary}`);
+  });
+
   ws.start();
 
   // Restore state from previous daemon run (if fresh enough)
@@ -188,6 +206,7 @@ if (satFlagIdx !== -1) {
     watchdog.tick();
     collector.tick();
     outbox.tick();
+    devices.tick();
   }, 3_000);
 
   // Write initial workers file immediately after first scan

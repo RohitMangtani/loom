@@ -9,6 +9,10 @@ export type {
   ConnectedMachine,
   UploadedFileRef,
   HiveUser,
+  RegisteredDevice,
+  DeviceEvent,
+  DeviceType,
+  DeviceHitbox,
 } from "@hive/types";
 
 /** Available agent type for the spawn dialog (sent by daemon over WS). */

@@ -129,8 +129,44 @@ export interface ConnectedMachine {
   capabilities?: MachineCapabilities;
 }
 
+// ── Device types (sensors, cameras, actuators — pluggable physical devices) ──
+
+export type DeviceType = "camera" | "sensor" | "compute" | "actuator";
+
+export interface DeviceHitbox {
+  name: string;
+  /** [x, y, width, height] in pixels relative to the device's frame size */
+  rect: [number, number, number, number];
+  priority: "high" | "medium" | "low";
+}
+
+export interface RegisteredDevice {
+  id: string;
+  type: DeviceType;
+  capabilities: string[];
+  location?: string;
+  pushIntervalMs?: number;
+  hitboxes?: DeviceHitbox[];
+  meta?: Record<string, unknown>;
+  registeredAt: number;
+  lastSeenAt: number;
+  online: boolean;
+}
+
+export interface DeviceEvent {
+  id: string;
+  deviceId: string;
+  timestamp: number;
+  type: "change" | "motion" | "anomaly" | "threshold" | "custom";
+  summary: string;
+  confidence?: number;
+  region?: string;
+  framePath?: string;
+  metrics?: Record<string, number>;
+}
+
 export interface DaemonMessage {
-  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file" | "user_list" | "user_create" | "user_remove" | "context_transfer" | "list_reverts" | "revert";
+  type: "spawn" | "kill" | "message" | "selection" | "list" | "orchestrator" | "subscribe" | "unsubscribe" | "suggestion_feedback" | "review_seen" | "review_dismiss" | "review_seen_all" | "review_clear_all" | "approve_prompt" | "push_subscribe" | "push_unsubscribe" | "worker_context" | "upload_file" | "user_list" | "user_create" | "user_remove" | "context_transfer" | "list_reverts" | "revert" | "list_devices";
   workerId?: string;
   project?: string;
   task?: string;
@@ -221,7 +257,7 @@ export interface RevertHistoryEntry {
 }
 
 export interface DaemonResponse {
-  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result" | "presence" | "activity" | "user_list" | "user_created" | "user_removed" | "reverts" | "revert_result";
+  type: "workers" | "worker_update" | "worker_removed" | "chat" | "chat_history" | "orchestrator" | "error" | "queued" | "auth" | "reviews" | "review_added" | "vapid_key" | "push_status" | "machines" | "worker_context" | "upload_result" | "presence" | "activity" | "user_list" | "user_created" | "user_removed" | "reverts" | "revert_result" | "devices" | "device_event";
   workers?: WorkerState[];
   worker?: WorkerState;
   /** Connected satellite machines (for spawn dialog machine picker). */
@@ -258,4 +294,8 @@ export interface DaemonResponse {
   reverts?: RevertHistoryEntry[];
   /** Revert result message. */
   message?: string;
+  /** Device layer: full device list. */
+  devices?: RegisteredDevice[];
+  /** Device layer: a single device event (real-time push). */
+  deviceEvent?: DeviceEvent;
 }
