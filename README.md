@@ -18,7 +18,7 @@ Measured over 60 days across five repositories. The first 36 days used a single 
 |---|---|---|---|
 | **Output** | 275 commits in 36 days | 961 commits in 25 days | **5x throughput** |
 | **Parallelism** | 1 project at a time (77% of days) | 4+ projects simultaneously (60% of days) | **Sequential → parallel** |
-| **Utilization** | 39% of days produced output | 100% of days produced output | **Zero idle days** |
+| **Scope** | 2 repos touched in 36 days | 5 repos shipped in 25 days | **More in less time** |
 | **Coordination** | Manual terminal switching | 48,372 tool calls tracked, 51 conflicts caught | **Automated** |
 
 The five projects: two websites with 25 published articles, this orchestration system, a YouTube pipeline, and a web crawler. Full methodology in [architecture.md](docs/architecture.md#measured-performance).
