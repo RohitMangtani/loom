@@ -13,8 +13,24 @@ set -euo pipefail
 HIVE_DIR="$HOME/.hive"
 TUNNEL_FILE="$HIVE_DIR/tunnel-url.txt"
 TUNNEL_PID_FILE="$HIVE_DIR/tunnel.pid"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 mkdir -p "$HIVE_DIR"
+
+# ── Satellite guard ──────────────────────────────────────────────────
+# If this machine is configured as a satellite, start the satellite
+# daemon instead of the primary. Prevents conflicting daemons.
+if [ -f "$HIVE_DIR/primary-url" ]; then
+  PRIMARY_URL="$(cat "$HIVE_DIR/primary-url" 2>/dev/null | tr -d '\n')"
+  if [ -n "$PRIMARY_URL" ]; then
+    echo ""
+    echo "  This machine is a satellite (primary: $PRIMARY_URL)."
+    echo "  Starting satellite daemon instead of primary..."
+    echo ""
+    cd "$ROOT/../.."
+    exec npx tsx apps/daemon/src/index.ts --satellite
+  fi
+fi
 
 # ── Tunnel: reuse existing or start new ──────────────────────────────
 

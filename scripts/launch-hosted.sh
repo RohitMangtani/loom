@@ -1,5 +1,7 @@
 #!/bin/bash
 # Start Hive with the hosted dashboard path: daemon + tunnel + Vercel deploy.
+# Satellite-aware: if this machine is a satellite, starts the satellite daemon
+# instead of the primary flow.
 
 set -euo pipefail
 
@@ -31,6 +33,67 @@ if [ ! -f "$HOME/.hive/token" ]; then
   echo "First run detected — running setup..."
   bash "$ROOT/setup.sh"
 fi
+
+# ── Satellite guard ──────────────────────────────────────────────────
+# If this machine is configured as a satellite, start the satellite
+# daemon instead of the primary + tunnel + dashboard deploy flow.
+if [ -f "$HIVE_DIR/primary-url" ]; then
+  PRIMARY_URL="$(cat "$HIVE_DIR/primary-url" 2>/dev/null | tr -d '\n')"
+  if [ -n "$PRIMARY_URL" ]; then
+    echo ""
+    echo "  This machine is a satellite."
+    echo "  Primary: $PRIMARY_URL"
+    echo ""
+
+    if is_listening "$DAEMON_PORT"; then
+      echo "  Satellite daemon already running on :$DAEMON_PORT"
+      echo ""
+      echo "  Your agents are visible on the primary's dashboard."
+      echo "  Open Terminal windows and run 'claude', 'codex', or any agent."
+      echo ""
+      # Keep the script alive so "npm run launch" doesn't exit immediately
+      echo "  Press Ctrl+C to stop."
+      tail -f /dev/null &
+      STACK_PID=$!
+      STARTED_STACK=1
+      wait "$STACK_PID"
+    else
+      echo "  Starting satellite daemon..."
+      npx tsx apps/daemon/src/index.ts --satellite &
+      STACK_PID=$!
+      STARTED_STACK=1
+
+      # Wait for satellite to start
+      SAT_OK=0
+      for _ in $(seq 1 15); do
+        if is_listening "$DAEMON_PORT"; then
+          SAT_OK=1
+          break
+        fi
+        sleep 1
+      done
+
+      echo ""
+      if [ "$SAT_OK" -eq 1 ]; then
+        echo "  Satellite daemon running on :$DAEMON_PORT"
+        echo ""
+        echo "  Your agents are visible on the primary's dashboard."
+        echo "  Open Terminal windows and run 'claude', 'codex', or any agent."
+        echo ""
+        echo "  Press Ctrl+C to stop."
+        wait "$STACK_PID"
+      else
+        echo "  Satellite daemon failed to start."
+        echo "  Log: cat ~/.hive/logs/satellite.stderr.log"
+        tail -10 "$HOME/.hive/logs/satellite.stderr.log" 2>/dev/null | sed 's/^/    /'
+        exit 1
+      fi
+    fi
+    exit 0
+  fi
+fi
+
+# ── Primary mode ─────────────────────────────────────────────────────
 
 if ! npx vercel whoami >/dev/null 2>&1; then
   echo "Vercel login required for the hosted launch path."
