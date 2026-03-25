@@ -28,17 +28,34 @@ install_dependencies() {
   exit 1
 }
 
-cleanup_hive_satellite_runtime() {
-  mkdir -p "$HOME/.hive/runtime" "$HOME/Library/LaunchAgents"
+IS_LINUX=0
+IS_WSL=0
+if [ "$(uname)" = "Linux" ]; then
+  IS_LINUX=1
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    IS_WSL=1
+  fi
+fi
 
-  for plist in "$HOME/Library/LaunchAgents"/com.hive.satellite*.plist; do
-    [ -e "$plist" ] || continue
-    label="$(basename "$plist" .plist)"
-    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || launchctl unload "$plist" 2>/dev/null || true
-    if [ "$plist" != "$HOME/Library/LaunchAgents/com.hive.satellite.plist" ]; then
-      rm -f "$plist"
-    fi
-  done
+cleanup_hive_satellite_runtime() {
+  mkdir -p "$HOME/.hive/runtime"
+
+  if [ "$IS_LINUX" -eq 1 ]; then
+    # systemd cleanup
+    systemctl --user stop hive-satellite.service 2>/dev/null || true
+    systemctl --user disable hive-satellite.service 2>/dev/null || true
+  else
+    # macOS launchd cleanup
+    mkdir -p "$HOME/Library/LaunchAgents"
+    for plist in "$HOME/Library/LaunchAgents"/com.hive.satellite*.plist; do
+      [ -e "$plist" ] || continue
+      label="$(basename "$plist" .plist)"
+      launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || launchctl unload "$plist" 2>/dev/null || true
+      if [ "$plist" != "$HOME/Library/LaunchAgents/com.hive.satellite.plist" ]; then
+        rm -f "$plist"
+      fi
+    done
+  fi
 
   pkill -f 'apps/daemon/src/index.ts --satellite|dist/index.js --satellite' 2>/dev/null || true
   rm -f "$HOME/.hive/runtime/satellite.json"
@@ -203,25 +220,102 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   cleanup_hive_satellite_runtime
 
   # Stop any existing daemon on port 3001
-  if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
+  check_port_3001() {
+    if [ "$IS_LINUX" -eq 1 ]; then
+      ss -tlnp 2>/dev/null | grep -q ':3001 ' || return 1
+    else
+      lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1 || return 1
+    fi
+  }
+
+  if check_port_3001; then
     echo "  Stopping existing daemon on :3001..."
-    kill "$(lsof -tiTCP:3001 -sTCP:LISTEN)" 2>/dev/null || true
+    if [ "$IS_LINUX" -eq 1 ]; then
+      fuser -k 3001/tcp 2>/dev/null || true
+    else
+      kill "$(lsof -tiTCP:3001 -sTCP:LISTEN)" 2>/dev/null || true
+    fi
     sleep 2
   fi
 
-  # Unload old satellite plist if present (in case of re-install)
-  launchctl bootout "gui/$(id -u)/com.hive.satellite" 2>/dev/null || true
+  # Find npx/node paths for the service
+  NPX_PATH="$(which npx 2>/dev/null || echo '/usr/local/bin/npx')"
+  NODE_DIR="$(dirname "$(which node 2>/dev/null || echo '/usr/local/bin/node')")"
+  mkdir -p "$HOME/.hive/logs"
 
-  # Find npx/node paths for the plist. Capture the full PATH so launchd
-  # can find node even when installed via nvm, volta, or homebrew.
-  NPX_PATH="$(which npx 2>/dev/null || echo '/opt/homebrew/bin/npx')"
-  NODE_DIR="$(dirname "$(which node 2>/dev/null || echo '/opt/homebrew/bin/node')")"
-  CURRENT_PATH="$NODE_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+  if [ "$IS_LINUX" -eq 1 ]; then
+    # ── Linux / WSL: systemd user service ────────────────────────────
+    CURRENT_PATH="$NODE_DIR:/usr/local/bin:/usr/bin:/bin"
 
-  # Install launchd plist — survives sleep, reboot, terminal close.
-  # Auto-restarts on crash. Reads primary URL/token from stored files.
-  mkdir -p "$HOME/.hive/logs" "$HOME/Library/LaunchAgents"
-  cat > "$HOME/Library/LaunchAgents/com.hive.satellite.plist" <<PLIST
+    # Ensure tmux is installed (Linux platform uses tmux for terminal IO)
+    if ! command -v tmux &>/dev/null; then
+      echo "  Installing tmux (required for terminal management on Linux)..."
+      if command -v apt-get &>/dev/null; then
+        sudo apt-get install -y tmux 2>/dev/null || true
+      elif command -v yum &>/dev/null; then
+        sudo yum install -y tmux 2>/dev/null || true
+      fi
+    fi
+    if command -v tmux &>/dev/null; then
+      echo "  ✓ tmux"
+    else
+      echo "  ⚠ tmux not found — install manually for terminal management"
+    fi
+
+    # Check if systemd is available (real Linux or WSL2 with systemd)
+    HAS_SYSTEMD=0
+    if command -v systemctl &>/dev/null && systemctl --user status 2>/dev/null | head -1 | grep -q "State:"; then
+      HAS_SYSTEMD=1
+    fi
+
+    if [ "$HAS_SYSTEMD" -eq 1 ]; then
+      mkdir -p "$HOME/.config/systemd/user"
+      cat > "$HOME/.config/systemd/user/hive-satellite.service" <<UNIT
+[Unit]
+Description=Hive Satellite Daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$ROOT
+Environment=PATH=$CURRENT_PATH
+Environment=HOME=$HOME
+ExecStart=$NPX_PATH tsx apps/daemon/src/index.ts --satellite
+Restart=always
+RestartSec=5
+StandardOutput=append:$HOME/.hive/logs/satellite.stdout.log
+StandardError=append:$HOME/.hive/logs/satellite.stderr.log
+
+[Install]
+WantedBy=default.target
+UNIT
+      systemctl --user daemon-reload
+      systemctl --user enable hive-satellite.service
+      systemctl --user restart hive-satellite.service
+      echo "  ✓ Satellite service installed (systemd user service)"
+
+      # Enable lingering so the service runs even when not logged in
+      loginctl enable-linger "$(whoami)" 2>/dev/null || true
+    else
+      # No systemd (WSL1 or minimal container) — use nohup fallback
+      echo "  No systemd available — starting satellite in background..."
+      nohup "$NPX_PATH" tsx apps/daemon/src/index.ts --satellite \
+        > "$HOME/.hive/logs/satellite.stdout.log" \
+        2> "$HOME/.hive/logs/satellite.stderr.log" &
+      echo $! > "$HOME/.hive/runtime/satellite.pid"
+      disown "$!" 2>/dev/null || true
+      echo "  ✓ Satellite started (PID $(cat "$HOME/.hive/runtime/satellite.pid"))"
+      echo "  ⚠ No systemd — satellite won't auto-start on reboot."
+      echo "    Add to ~/.bashrc or crontab:"
+      echo "    @reboot cd $ROOT && $NPX_PATH tsx apps/daemon/src/index.ts --satellite"
+    fi
+  else
+    # ── macOS: launchd plist ─────────────────────────────────────────
+    launchctl bootout "gui/$(id -u)/com.hive.satellite" 2>/dev/null || true
+    CURRENT_PATH="$NODE_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+    mkdir -p "$HOME/Library/LaunchAgents"
+    cat > "$HOME/Library/LaunchAgents/com.hive.satellite.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -254,17 +348,18 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
 </dict>
 </plist>
 PLIST
-  echo "  ✓ Satellite service installed (com.hive.satellite)"
+    echo "  ✓ Satellite service installed (com.hive.satellite)"
 
-  # Start the service (try modern API first, fall back to legacy)
-  if ! launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null; then
-    launchctl load "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null
+    # Start the service (try modern API first, fall back to legacy)
+    if ! launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null; then
+      launchctl load "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null
+    fi
   fi
 
-  # Wait for satellite to start
+  # Wait for satellite to start (platform-agnostic)
   SAT_OK=0
   for _ in $(seq 1 15); do
-    if lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then
+    if check_port_3001; then
       SAT_OK=1
       break
     fi
@@ -281,6 +376,16 @@ PLIST
     exit 1
   fi
 
+  # GPU detection report (useful for routing tasks to GPU machines)
+  if command -v nvidia-smi &>/dev/null; then
+    GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "")"
+    GPU_VRAM="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || echo "")"
+    if [ -n "$GPU_NAME" ]; then
+      echo "  ✓ GPU detected: $GPU_NAME (${GPU_VRAM}MB)"
+      echo "    Tasks with \"requires\":[\"gpu\"] will route here."
+    fi
+  fi
+
   echo ""
   echo "  ────────────────────────────────────────────────"
   echo ""
@@ -291,21 +396,33 @@ PLIST
   echo "  Your terminals will appear on the primary's"
   echo "  dashboard within a few seconds."
   echo ""
-  echo "  Open Terminal windows and run 'claude', 'codex',"
-  echo "  or any agent — the primary dashboard sees them."
+  if [ "$IS_LINUX" -eq 1 ]; then
+    echo "  Open tmux panes and run 'claude', 'codex',"
+    echo "  or any agent — the primary dashboard sees them."
+    echo "  (Hive uses tmux for terminal management on Linux.)"
+  else
+    echo "  Open Terminal windows and run 'claude', 'codex',"
+    echo "  or any agent — the primary dashboard sees them."
+  fi
   echo ""
   echo "  The satellite runs as a background service."
   echo "  It survives sleep, reboot, and terminal close."
   echo "  Agents disappear from the dashboard when this"
   echo "  computer is off and reappear when it wakes."
   echo ""
-  echo "  ⚠  If macOS asks you to approve Node.js in"
-  echo "     System Settings → Privacy & Security,"
-  echo "     click Allow. This is a one-time approval"
-  echo "     so the background service can run."
-  echo ""
+  if [ "$IS_LINUX" -eq 0 ]; then
+    echo "  ⚠  If macOS asks you to approve Node.js in"
+    echo "     System Settings → Privacy & Security,"
+    echo "     click Allow. This is a one-time approval"
+    echo "     so the background service can run."
+    echo ""
+  fi
   echo "  Log:   cat ~/.hive/logs/satellite.stderr.log"
-  echo "  Stop:  launchctl bootout gui/$(id -u)/com.hive.satellite"
+  if [ "$IS_LINUX" -eq 1 ] && [ "$HAS_SYSTEMD" -eq 1 ]; then
+    echo "  Stop:  systemctl --user stop hive-satellite"
+  elif [ "$IS_LINUX" -eq 0 ]; then
+    echo "  Stop:  launchctl bootout gui/$(id -u)/com.hive.satellite"
+  fi
   echo ""
   echo "  ────────────────────────────────────────────────"
   echo ""

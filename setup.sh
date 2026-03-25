@@ -74,13 +74,26 @@ if [ "$HAS_OPENCLAW" -eq 1 ]; then
   echo "  ✓ OpenClaw"
 fi
 
-if command -v swiftc &>/dev/null; then
-  echo "  ✓ Swift compiler"
-  HAS_SWIFT=1
+HAS_SWIFT=0
+if [ "$(uname)" = "Darwin" ]; then
+  if command -v swiftc &>/dev/null; then
+    echo "  ✓ Swift compiler"
+    HAS_SWIFT=1
+  else
+    echo "  • swiftc not found — auto-pilot (auto-approve prompts) will be disabled"
+    echo "    To enable later: xcode-select --install && bash setup.sh"
+  fi
 else
-  echo "  • swiftc not found — auto-pilot (auto-approve prompts) will be disabled"
-  echo "    To enable later: xcode-select --install && bash setup.sh"
-  HAS_SWIFT=0
+  echo "  • Linux detected — auto-pilot uses tmux (no swiftc needed)"
+  if command -v tmux &>/dev/null; then
+    echo "  ✓ tmux"
+  else
+    echo "  • tmux not found — install for terminal management: sudo apt install tmux"
+  fi
+  if command -v nvidia-smi &>/dev/null; then
+    GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "unknown")"
+    echo "  ✓ GPU: $GPU_NAME"
+  fi
 fi
 
 # ── Install dependencies ─────────────────────────────────────────────
@@ -92,7 +105,7 @@ echo "  ✓ Dependencies installed"
 
 # ── Compile send-return binary (auto-pilot needs this — optional) ────
 
-if [ "$HAS_SWIFT" -eq 1 ]; then
+if [ "$HAS_SWIFT" -eq 1 ] && [ "$(uname)" = "Darwin" ]; then
   if [ ! -f "$HOME/send-return" ]; then
     echo ""
     echo "  Compiling send-return binary..."

@@ -116,9 +116,35 @@ The tunnel URL and token are printed at the end of the primary install. You can 
 
 Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the active public tunnel, so the machines don't need to be on the same network. The satellite runs as a background service (launchd) and survives sleep, reboot, and terminal close. If macOS asks you to approve Node.js in System Settings → Privacy & Security, click Allow once.
 
-The connect install is idempotent. Re-running it on the same Mac updates the stored primary URL/token, cleans out stale satellite processes and duplicate launch agents, and re-installs the background service cleanly.
+The connect install is idempotent. Re-running it on the same machine updates the stored primary URL/token, cleans out stale satellite processes, and re-installs the background service cleanly.
 
-If a satellite gets into a reconnect loop or stale launchd state, Hive now self-heals on the remote machine. A connected primary can trigger `update`, `repair`, or `reinstall`, and a disconnected satellite escalates from local repair to local reinstall automatically using the stored `~/.hive/primary-url` and `~/.hive/primary-token`.
+If a satellite gets into a reconnect loop or stale state, Hive self-heals on the remote machine. A connected primary can trigger `update`, `repair`, or `reinstall`, and a disconnected satellite escalates from local repair to local reinstall automatically using the stored `~/.hive/primary-url` and `~/.hive/primary-token`.
+
+### Connect a Windows PC (via WSL)
+
+Hive runs on Windows through WSL2. Agents run inside WSL, and the satellite has full access to your GPU via WSL2's native GPU passthrough. If your Windows machine has an NVIDIA GPU, Hive auto-detects it and tasks with `"requires":["gpu"]` route there automatically.
+
+**One-time WSL setup:**
+
+1. Open PowerShell as Administrator and install WSL2:
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+2. After reboot, open Ubuntu from the Start menu and install Node.js:
+   ```bash
+   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+   sudo apt install -y nodejs tmux git
+   ```
+3. Clone and connect (paste the command from `npm run invite` on the primary):
+   ```bash
+   git clone https://github.com/RohitMangtani/hive.git
+   cd hive
+   bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
+   ```
+
+The satellite installs as a systemd user service inside WSL. It auto-starts when WSL boots and survives terminal close. Your Windows machine's GPU, CPU, RAM, and installed software all show up as capabilities on the primary dashboard.
+
+**GPU routing:** If `nvidia-smi` is available inside WSL (it is by default on WSL2 with NVIDIA drivers installed on Windows), Hive reports GPU name and VRAM. Queue tasks with `"requires":["gpu"]` and they route to the GPU machine.
 
 ### Local-only install (no Vercel needed)
 
@@ -132,9 +158,9 @@ npm run launch:local
 
 ## Prerequisites
 
-- **macOS** (uses AppleScript + CGEvent for terminal interaction)
+- **macOS** (primary, uses AppleScript + CGEvent for terminal interaction) or **Linux / WSL2** (satellite, uses tmux)
 - **Node.js 20+** - [nodejs.org](https://nodejs.org)
-- **Homebrew** - [brew.sh](https://brew.sh) (for installing Cloudflare tunnel and other optional dependencies)
+- **Homebrew** - [brew.sh](https://brew.sh) (macOS, for installing Cloudflare tunnel and other optional dependencies)
 
 That's it. Everything else is optional and the setup script handles it gracefully:
 
