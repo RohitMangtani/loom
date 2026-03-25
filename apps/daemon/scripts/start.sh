@@ -88,9 +88,22 @@ fi
 # 2. Start a new tunnel if none exists
 if [ -z "$TUNNEL_PID" ] || [ -z "$TUNNEL_URL" ]; then
   # Prefer ngrok (stable URLs) over cloudflared (random URLs)
+  # If a stable domain is configured in ~/.hive/ngrok-domain, use it so the
+  # tunnel URL never changes across restarts. Free ngrok accounts get one
+  # static domain — claim it at https://dashboard.ngrok.com/domains
+  NGROK_DOMAIN=""
+  if [ -f "$HIVE_DIR/ngrok-domain" ]; then
+    NGROK_DOMAIN="$(cat "$HIVE_DIR/ngrok-domain" 2>/dev/null | tr -d '\n')"
+  fi
+
   if command -v ngrok &>/dev/null; then
-    echo "  Starting ngrok tunnel..."
-    ngrok http 3002 --log=stdout > "$HIVE_DIR/ngrok.log" 2>&1 &
+    if [ -n "$NGROK_DOMAIN" ]; then
+      echo "  Starting ngrok tunnel (stable domain: $NGROK_DOMAIN)..."
+      ngrok http 3002 --url "$NGROK_DOMAIN" --log=stdout > "$HIVE_DIR/ngrok.log" 2>&1 &
+    else
+      echo "  Starting ngrok tunnel..."
+      ngrok http 3002 --log=stdout > "$HIVE_DIR/ngrok.log" 2>&1 &
+    fi
     TUNNEL_PID=$!
     echo "$TUNNEL_PID" > "$TUNNEL_PID_FILE"
     sleep 5
@@ -169,6 +182,8 @@ if [ -n "$TUNNEL_URL" ]; then
   echo ""
   echo "  Connect another Mac:"
   echo "  bash scripts/install.sh --connect $WS_URL $(cat "$HIVE_DIR/token" 2>/dev/null || echo 'TOKEN')"
+  echo ""
+  echo "  Or anytime later: npm run invite"
 else
   echo "  No tunnel — localhost only."
   echo "  Run: npm run launch:local"

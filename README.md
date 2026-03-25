@@ -92,11 +92,25 @@ Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They app
 
 You can connect multiple Macs to the same Hive dashboard. Terminals on the second machine appear alongside your local ones. Chat, close, and manage them all from one screen.
 
-On the second computer, use the same agent-assisted install or clone and run:
+On the primary machine, run:
 
 ```bash
+npm run invite
+```
+
+This prints the full connect command with your tunnel URL and token. Copy it.
+
+On the second computer, clone and paste:
+
+```bash
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
 bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
 ```
+
+Or paste the one-liner into Claude Code / Codex on the other machine and it handles everything.
+
+**Connection is permanent.** The satellite installs as a macOS background service (launchd). It survives sleep, reboot, and terminal close. Agents appear on the dashboard when the machine is awake and disappear when it sleeps. The only way to disconnect is to explicitly remove the service (`launchctl bootout`).
 
 The tunnel URL and token are printed at the end of the primary install. You can also find them at `~/.hive/tunnel-url.txt` and `~/.hive/token` on the primary machine. The connect command also appears in the install output.
 
