@@ -131,16 +131,25 @@ function detectCapabilities(): MachineCapabilities {
       const nv = execFileSync("nvidia-smi", ["--query-gpu=name", "--format=csv,noheader"], { timeout: 5000, encoding: "utf-8" });
       caps.gpu = true;
       caps.gpuName = nv.trim().split("\n")[0] || "NVIDIA GPU";
+      // VRAM detection (NVIDIA only)
+      try {
+        const vram = execFileSync("nvidia-smi", ["--query-gpu=memory.total", "--format=csv,noheader,nounits"], { timeout: 5000, encoding: "utf-8" });
+        const mb = parseInt(vram.trim().split("\n")[0], 10);
+        if (mb > 0) caps.gpuVramGb = Math.round(mb / 1024);
+      } catch { /* skip */ }
     }
   } catch {
     caps.gpu = false;
   }
 
-  // Disk free space
+  // Disk free space (macOS: df -g, Linux/WSL: df --block-size=G)
   try {
-    const df = execFileSync("/bin/df", ["-g", homedir()], { timeout: 3000, encoding: "utf-8" });
+    const dfArgs = platform() === "darwin" ? ["-g", homedir()] : ["--block-size=G", homedir()];
+    const dfCmd = platform() === "darwin" ? "/bin/df" : "df";
+    const df = execFileSync(dfCmd, dfArgs, { timeout: 3000, encoding: "utf-8" });
     const parts = df.split("\n")[1]?.split(/\s+/);
-    if (parts?.[3]) caps.diskFreeGb = parseInt(parts[3], 10);
+    const col = platform() === "darwin" ? 3 : 3; // Available column
+    if (parts?.[col]) caps.diskFreeGb = parseInt(parts[col], 10);
   } catch { /* skip */ }
 
   // Software detection  --  check if commands exist

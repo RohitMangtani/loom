@@ -96,6 +96,7 @@ export interface MachineCapabilities {
   /** Hardware */
   gpu?: boolean;
   gpuName?: string;
+  gpuVramGb?: number;
   ramGb?: number;
   cpuCores?: number;
   diskFreeGb?: number;
