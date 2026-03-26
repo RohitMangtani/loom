@@ -446,11 +446,14 @@ export function useHive(daemonUrl: string) {
       ws.onclose = () => {
         setConnected(false);
         wsRef.current = null;
+        // Clear pending uploads
         for (const pending of pendingUploadsRef.current.values()) {
           clearTimeout(pending.timer);
           pending.reject(new Error("Disconnected"));
         }
         pendingUploadsRef.current.clear();
+        // Clear pending messages — they may contain stale subscriptions or tokens
+        pendingMessagesRef.current.length = 0;
         reconnectTimerRef.current = setTimeout(connect, reconnectDelayRef.current);
         reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 8000);
       };

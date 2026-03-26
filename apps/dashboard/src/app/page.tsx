@@ -105,11 +105,11 @@ export default function Home() {
         }
         setDraftTick((k) => k + 1);
       }
-    } catch { /* corrupted storage, start fresh */ }
+    } catch (e) { console.warn("[hive] Failed to load drafts from localStorage:", e); }
     try {
       const savedFlags = localStorage.getItem("hive_flags");
       if (savedFlags) setFlaggedIds(new Set(JSON.parse(savedFlags)));
-    } catch { /* start fresh */ }
+    } catch (e) { console.warn("[hive] Failed to load flags from localStorage:", e); }
     try {
       const savedPreviews = localStorage.getItem("hive_preview_urls");
       if (savedPreviews) {
@@ -118,7 +118,7 @@ export default function Home() {
           if (v) previewUrlsRef.current.set(k, v);
         }
       }
-    } catch { /* start fresh */ }
+    } catch (e) { console.warn("[hive] Failed to load previews from localStorage:", e); }
   }, []);
 
   const toggleFlag = useCallback((id: string) => {
