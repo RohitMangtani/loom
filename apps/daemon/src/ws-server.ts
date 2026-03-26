@@ -1942,9 +1942,15 @@ export class WsServer {
     this.readOnlyClients.delete(ws);
   }
 
+  private nextClientId = 0;
+  private clientIdMap = new WeakMap<WebSocket, string>();
   private clientId(ws: WebSocket): string {
-    // Use object identity as a simple unique key
-    return String((ws as unknown as { _socket?: { remotePort?: number } })._socket?.remotePort || Math.random());
+    let id = this.clientIdMap.get(ws);
+    if (!id) {
+      id = `c${++this.nextClientId}`;
+      this.clientIdMap.set(ws, id);
+    }
+    return id;
   }
 
   private handleMessage(ws: WebSocket, msg: DaemonMessage): void {
