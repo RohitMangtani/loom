@@ -253,42 +253,48 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   mkdir -p "$HOME/.hive/logs"
 
   if [ "$IS_GITBASH" -eq 1 ]; then
-    # ── Git Bash / MSYS2 on Windows: use Task Scheduler via PowerShell ──
-    echo "  Windows (Git Bash) detected — using Task Scheduler..."
+    # ── Git Bash / MSYS2 on Windows ─────────────────────────────────
+    echo "  Windows (Git Bash) detected..."
 
-    # Convert MSYS paths to Windows paths for Task Scheduler
+    # Convert MSYS paths to Windows paths
     WIN_ROOT="$(cygpath -w "$ROOT" 2>/dev/null || echo "$ROOT")"
-    WIN_NODE_DIR="$(cygpath -w "$NODE_DIR" 2>/dev/null || echo "$NODE_DIR")"
-    WIN_LOGS="$(cygpath -w "$HOME/.hive/logs" 2>/dev/null || echo "$HOME/.hive/logs")"
+    WIN_HIVE_DIR="$(cygpath -w "$HOME/.hive" 2>/dev/null || echo "$HOME/.hive")"
+    WIN_NPX="$(cygpath -w "$(which npx 2>/dev/null)" 2>/dev/null || echo "npx")"
 
-    # Task Scheduler can't run .cmd files (npx.cmd) directly.
-    # Use cmd.exe /c which resolves .cmd extensions and inherits system PATH.
-    # Redirect output to log files for debugging.
-    powershell.exe -NoProfile -Command "
-      \$action = New-ScheduledTaskAction \`
-        -Execute 'cmd.exe' \`
-        -Argument '/c cd /d \"$WIN_ROOT\" && npx tsx apps/daemon/src/index.ts --satellite > \"$WIN_LOGS\\satellite.stdout.log\" 2> \"$WIN_LOGS\\satellite.stderr.log\"' \`
-        -WorkingDirectory '$WIN_ROOT'
+    # Write a batch file that Task Scheduler can run cleanly.
+    # This avoids all bash→PowerShell→cmd.exe escaping issues.
+    BAT_FILE="$HOME/.hive/satellite.bat"
+    WIN_BAT="$(cygpath -w "$BAT_FILE" 2>/dev/null || echo "$BAT_FILE")"
+    cat > "$BAT_FILE" <<BATEOF
+@echo off
+cd /d "$WIN_ROOT"
+"$WIN_NPX" tsx apps/daemon/src/index.ts --satellite > "$WIN_HIVE_DIR\\logs\\satellite.stdout.log" 2> "$WIN_HIVE_DIR\\logs\\satellite.stderr.log"
+BATEOF
+
+    # Register and start via Task Scheduler
+    SCHTASK_OK=0
+    if powershell.exe -NoProfile -Command "
+      \$action = New-ScheduledTaskAction -Execute '$WIN_BAT' -WorkingDirectory '$WIN_ROOT'
       \$trigger = New-ScheduledTaskTrigger -AtLogOn -User \$env:USERNAME
-      \$settings = New-ScheduledTaskSettingsSet \`
-        -AllowStartIfOnBatteries \`
-        -DontStopIfGoingOnBatteries \`
-        -RestartCount 999 \`
-        -RestartInterval (New-TimeSpan -Seconds 10) \`
-        -ExecutionTimeLimit (New-TimeSpan -Days 365)
+      \$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Seconds 10) -ExecutionTimeLimit (New-TimeSpan -Days 365)
       Register-ScheduledTask -TaskName 'HiveSatellite' -Action \$action -Trigger \$trigger -Settings \$settings -Description 'Hive Satellite Daemon' -Force | Out-Null
       Start-ScheduledTask -TaskName 'HiveSatellite'
       Write-Output 'ok'
-    " 2>/dev/null && echo "  ✓ Satellite service installed (Windows Task Scheduler)" || {
-      # Fallback: start directly in Git Bash background
-      echo "  Task Scheduler failed — starting in background..."
-      nohup "$NPX_PATH" tsx apps/daemon/src/index.ts --satellite \
+    " 2>/dev/null | grep -q "ok"; then
+      SCHTASK_OK=1
+      echo "  ✓ Satellite service installed (Windows Task Scheduler)"
+    fi
+
+    # If Task Scheduler failed, start directly in background
+    if [ "$SCHTASK_OK" -eq 0 ]; then
+      echo "  Task Scheduler unavailable — starting in background..."
+      "$NPX_PATH" tsx apps/daemon/src/index.ts --satellite \
         > "$HOME/.hive/logs/satellite.stdout.log" \
         2> "$HOME/.hive/logs/satellite.stderr.log" &
       echo $! > "$HOME/.hive/runtime/satellite.pid"
       disown "$!" 2>/dev/null || true
       echo "  ✓ Satellite started (PID $(cat "$HOME/.hive/runtime/satellite.pid"))"
-    }
+    fi
 
   elif [ "$IS_LINUX" -eq 1 ]; then
     # ── Linux / WSL: systemd user service ────────────────────────────
