@@ -13,8 +13,10 @@ interface AgentPattern {
 
 function loadAgentPatterns(): AgentPattern[] {
   const builtin: AgentPattern[] = [
-    { regex: /claude(?:\.exe)?(?:\s|$)/, model: "claude" },
-    { regex: /(?:^|[/\\])codex(?:\.exe)?(?:\s+(?!app-server)|$)/, model: "codex" },
+    // Match: "claude", "claude.exe", and npm paths like "@anthropic-ai\claude-code\cli.js"
+    { regex: /(?:claude(?:\.exe)?(?:\s|$)|claude-code[/\\](?:cli|dist))/, model: "claude" },
+    // Match: "codex", "codex.exe", and npm paths like "@openai\codex\..."
+    { regex: /(?:(?:^|[/\\])codex(?:\.exe)?(?:\s+(?!app-server)|$)|@openai[/\\]codex[/\\])/, model: "codex" },
     { regex: /openclaw(?:\.exe)?(?:\s+tui)?(?:\s|$)/, model: "openclaw" },
     { regex: /(?:^|[/\\])gemini(?:\.exe)?(?:\s|$)/, model: "gemini" },
   ];
@@ -202,11 +204,9 @@ export class WindowsProcessDiscoverer implements ProcessDiscoverer {
         if (!pid || pid === process.pid || seenPids.has(pid)) continue;
         if (!commandLine) continue;
 
-        // Filter out node internals
-        if (/\bnode(?:\.exe)?\s+/.test(commandLine) && !commandLine.endsWith("claude") && !/(?:^|[/\\])gemini(?:\s|$)/.test(commandLine)) {
-          continue;
-        }
-
+        // Let the pattern matching handle agent detection — don't pre-filter
+        // node.exe processes because on Windows, all agents run as node.exe
+        // with their package path in the command line (e.g. node.exe ...claude-code\cli.js)
         const matched = this.patterns.find((p) => p.regex.test(commandLine));
         if (!matched) continue;
 
