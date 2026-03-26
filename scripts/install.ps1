@@ -1,4 +1,4 @@
-# Hive install for Windows (PowerShell)
+# Hive install for Windows (PowerShell 5.1+)
 #
 # Fresh instance:   .\scripts\install.ps1
 # Join existing:    .\scripts\install.ps1 -Connect -Url wss://URL -Token TOKEN
@@ -41,9 +41,9 @@ function Stop-HiveSatellite {
   }
 
   # Kill any running satellite processes
-  Get-Process -Name "node" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -match "--satellite" } |
-    Stop-Process -Force -ErrorAction SilentlyContinue
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match '--satellite' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
   $runtimeDir = Join-Path $HiveDir "runtime"
   New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
@@ -61,7 +61,7 @@ function Test-Port3001 {
   }
 }
 
-# ── Parse mode ──────────────────────────────────────────────────────
+# -- Parse mode --
 
 $SatelliteMode = $false
 
@@ -117,7 +117,7 @@ if ($SatelliteMode) {
 }
 Write-Host ""
 
-# ── 1. Setup ──────────────────────────────────────────────────────────
+# -- 1. Setup --
 
 $tokenFile = Join-Path $HiveDir "token"
 if (-not (Test-Path $tokenFile)) {
@@ -127,7 +127,7 @@ if (-not (Test-Path $tokenFile)) {
     & bash (Join-Path $Root "setup.sh") 2>$null
   }
   if (-not $hasBash -or $LASTEXITCODE -ne 0) {
-    # setup.sh may fail on Windows — run essential steps manually
+    # setup.sh may fail on Windows - run essential steps manually
     Write-Host "  Running Windows setup..."
 
     # Check Node.js
@@ -187,7 +187,7 @@ if (-not (Test-Path $tokenFile)) {
   Write-Host "  OK Dependencies up to date"
 }
 
-# ── Satellite mode ─────────────────────────────────────────────────
+# -- Satellite mode --
 
 if ($SatelliteMode) {
   # Store primary connection
@@ -229,10 +229,14 @@ if ($SatelliteMode) {
   $logsDir = Join-Path $HiveDir "logs"
   New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
+  # Write a batch file for the satellite (reliable across PS versions)
+  $batFile = Join-Path $HiveDir "satellite.bat"
+  $batContent = "@echo off`r`ncd /d `"$Root`"`r`n`"$npxPath`" tsx apps/daemon/src/index.ts --satellite > `"$logsDir\satellite.stdout.log`" 2> `"$logsDir\satellite.stderr.log`""
+  [System.IO.File]::WriteAllText($batFile, $batContent, [System.Text.Encoding]::ASCII)
+
   # Install as Windows Task Scheduler task (runs at logon, restarts on failure)
   $action = New-ScheduledTaskAction `
-    -Execute $npxPath `
-    -Argument "tsx apps/daemon/src/index.ts --satellite" `
+    -Execute $batFile `
     -WorkingDirectory $Root
 
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
@@ -241,24 +245,24 @@ if ($SatelliteMode) {
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -RestartCount 999 `
-    -RestartInterval (New-TimeSpan -Seconds 10) `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit (New-TimeSpan -Days 365)
 
   Register-ScheduledTask `
-    -TaskName "HiveSatellite" `
+    -TaskName 'HiveSatellite' `
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Description "Hive Satellite Daemon — connects to primary Hive network" `
+    -Description 'Hive Satellite Daemon - connects to primary Hive network' `
     -Force | Out-Null
 
   # Start the task now
-  Start-ScheduledTask -TaskName "HiveSatellite"
+  Start-ScheduledTask -TaskName 'HiveSatellite'
   Write-Host "  OK Satellite service installed (Windows Task Scheduler)"
 
   # Wait for satellite to start
   $satOk = $false
-  for ($i = 0; $i -lt 15; $i++) {
+  for ($i = 0; $i -lt 20; $i++) {
     if (Test-Port3001) {
       $satOk = $true
       break
@@ -269,13 +273,25 @@ if ($SatelliteMode) {
   if ($satOk) {
     Write-Host "  OK Satellite daemon running"
   } else {
-    Write-Host "  X Satellite daemon failed to start."
-    Write-Host "    Log: Get-Content $logsDir\satellite.stderr.log"
-    $stderrLog = Join-Path $logsDir "satellite.stderr.log"
-    if (Test-Path $stderrLog) {
-      Get-Content $stderrLog -Tail 10 | ForEach-Object { Write-Host "    $_" }
+    Write-Host "  X Satellite daemon failed to start via Task Scheduler."
+    Write-Host "    Falling back to direct start..."
+    # Fallback: start directly (works reliably, just no auto-restart)
+    Start-Process -FilePath $npxPath -ArgumentList "tsx apps/daemon/src/index.ts --satellite" `
+      -WorkingDirectory $Root -WindowStyle Hidden `
+      -RedirectStandardOutput (Join-Path $logsDir "satellite.stdout.log") `
+      -RedirectStandardError (Join-Path $logsDir "satellite.stderr.log")
+    Start-Sleep -Seconds 5
+    if (Test-Port3001) {
+      Write-Host "  OK Satellite daemon running (direct start)"
+    } else {
+      Write-Host "  X Satellite still failed. Check logs:"
+      Write-Host "    Get-Content $logsDir\satellite.stderr.log"
+      $stderrLog = Join-Path $logsDir "satellite.stderr.log"
+      if (Test-Path $stderrLog) {
+        Get-Content $stderrLog -Tail 10 | ForEach-Object { Write-Host "    $_" }
+      }
+      exit 1
     }
-    exit 1
   }
 
   # GPU detection
@@ -284,8 +300,8 @@ if ($SatelliteMode) {
     $gpuName = & nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1
     $gpuVram = & nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null | Select-Object -First 1
     if ($gpuName) {
-      Write-Host "  OK GPU detected: $gpuName (${gpuVram}MB)"
-      Write-Host "    Tasks with `"requires`":[`"gpu`"] will route here."
+      $vramDisplay = "$gpuVram" + "MB"
+      Write-Host "  OK GPU detected: $gpuName ($vramDisplay)"
     }
   }
 
@@ -312,11 +328,11 @@ if ($SatelliteMode) {
   exit 0
 }
 
-# ══════════════════════════════════════════════════════════════════════
-# Primary mode — start daemon + tunnel
-# ══════════════════════════════════════════════════════════════════════
+# ==================================================================
+# Primary mode - start daemon + tunnel
+# ==================================================================
 
-# ── Check tunnel tools ──────────────────────────────────────────────
+# -- Check tunnel tools --
 
 $hasNgrok = $null -ne (Get-Command ngrok -ErrorAction SilentlyContinue)
 $hasCloudflared = $null -ne (Get-Command cloudflared -ErrorAction SilentlyContinue)
@@ -341,7 +357,7 @@ if (-not $hasNgrok -and -not $hasCloudflared) {
   }
 }
 
-# ── Start daemon ────────────────────────────────────────────────────
+# -- Start daemon --
 
 if (Test-Port3001) {
   Write-Host "  OK Daemon already running on :3001"
@@ -352,7 +368,7 @@ if (Test-Port3001) {
   Write-Host "  OK Daemon started in a new window"
 }
 
-# ── Wait for tunnel URL ─────────────────────────────────────────────
+# -- Wait for tunnel URL --
 
 Write-Host "  Waiting for tunnel..."
 $tunnelFile = Join-Path $HiveDir "tunnel-url.txt"
@@ -377,13 +393,13 @@ if (-not $tunnelUrl) {
 }
 Write-Host "  OK Tunnel ready"
 
-# ── Deploy dashboard ────────────────────────────────────────────────
+# -- Deploy dashboard --
 
 Write-Host ""
 Write-Host "  Deploying dashboard to Vercel..."
 & npm run deploy:dashboard
 
-# ── Done ────────────────────────────────────────────────────────────
+# -- Done --
 
 $hiveToken = Get-Content $tokenFile -Raw
 $dashboardFile = Join-Path $HiveDir "dashboard-url.txt"
