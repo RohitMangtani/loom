@@ -274,29 +274,50 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
     WIN_HIVE_DIR="$(cygpath -w "$HOME/.hive" 2>/dev/null || echo "$HOME/.hive")"
     WIN_NPX="$(cygpath -w "$(which npx 2>/dev/null)" 2>/dev/null || echo "npx")"
 
-    # Write a batch file for the satellite (used by Startup shortcut)
+    # Write a batch file for the satellite with an infinite restart loop.
+    # This ensures the process always comes back regardless of exit code.
     BAT_FILE="$HOME/.hive/satellite.bat"
     cat > "$BAT_FILE" <<BATEOF
 @echo off
 cd /d "${WIN_ROOT}"
-"${WIN_NPX}" tsx apps/daemon/src/index.ts --satellite > "${WIN_HIVE_DIR}\\logs\\satellite.stdout.log" 2> "${WIN_HIVE_DIR}\\logs\\satellite.stderr.log"
+:loop
+"${WIN_NPX}" tsx apps/daemon/src/index.ts --satellite >> "${WIN_HIVE_DIR}\\logs\\satellite.stdout.log" 2>> "${WIN_HIVE_DIR}\\logs\\satellite.stderr.log"
+echo [%date% %time%] Satellite exited with code %ERRORLEVEL%, restarting in 5s... >> "${WIN_HIVE_DIR}\\logs\\satellite.stderr.log"
+timeout /t 5 /nobreak >nul
+goto loop
 BATEOF
 
-    # Add to Windows Startup folder for auto-start on login
-    STARTUP_DIR="$(cygpath "$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup" 2>/dev/null || echo "")"
-    if [ -n "$STARTUP_DIR" ] && [ -d "$STARTUP_DIR" ]; then
-      cp "$BAT_FILE" "$STARTUP_DIR/hive-satellite.bat"
-      echo "  ✓ Auto-start on login (Windows Startup folder)"
-    fi
+    # Register Task Scheduler task via PowerShell for permanent auto-restart.
+    # Two triggers: AtStartup (survives reboot) + AtLogOn (covers user sessions).
+    WIN_BAT="$(cygpath -w "$BAT_FILE" 2>/dev/null || echo "$BAT_FILE")"
+    echo "  Registering Windows Task Scheduler task..."
+    powershell.exe -NoProfile -Command "
+      \$action = New-ScheduledTaskAction -Execute '$WIN_BAT' -WorkingDirectory '$WIN_ROOT'
+      \$t1 = New-ScheduledTaskTrigger -AtLogOn -User \$env:USERNAME
+      \$t2 = New-ScheduledTaskTrigger -AtStartup
+      \$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -DontStopOnIdleEnd -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 365) -StartWhenAvailable
+      Register-ScheduledTask -TaskName 'HiveSatellite' -Action \$action -Trigger @(\$t1, \$t2) -Settings \$settings -Description 'Hive Satellite Daemon' -RunLevel Highest -Force | Out-Null
+      Start-ScheduledTask -TaskName 'HiveSatellite'
+    " 2>/dev/null
 
-    # Start the satellite now as a background process
-    echo "  Starting satellite..."
-    "$NPX_PATH" tsx apps/daemon/src/index.ts --satellite \
-      > "$HOME/.hive/logs/satellite.stdout.log" \
-      2> "$HOME/.hive/logs/satellite.stderr.log" &
-    BGPID=$!
-    echo "$BGPID" > "$HOME/.hive/runtime/satellite.pid"
-    disown "$BGPID" 2>/dev/null || true
+    if powershell.exe -NoProfile -Command "Get-ScheduledTask -TaskName 'HiveSatellite' -ErrorAction SilentlyContinue" 2>/dev/null | grep -q "HiveSatellite"; then
+      echo "  ✓ Satellite service installed (Windows Task Scheduler)"
+    else
+      # Fallback: Startup folder + background process
+      STARTUP_DIR="$(cygpath "$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup" 2>/dev/null || echo "")"
+      if [ -n "$STARTUP_DIR" ] && [ -d "$STARTUP_DIR" ]; then
+        cp "$BAT_FILE" "$STARTUP_DIR/hive-satellite.bat"
+        echo "  ✓ Auto-start on login (Windows Startup folder fallback)"
+      fi
+
+      echo "  Starting satellite..."
+      "$NPX_PATH" tsx apps/daemon/src/index.ts --satellite \
+        > "$HOME/.hive/logs/satellite.stdout.log" \
+        2> "$HOME/.hive/logs/satellite.stderr.log" &
+      BGPID=$!
+      echo "$BGPID" > "$HOME/.hive/runtime/satellite.pid"
+      disown "$BGPID" 2>/dev/null || true
+    fi
 
   elif [ "$IS_LINUX" -eq 1 ]; then
     # ── Linux / WSL: systemd user service ────────────────────────────

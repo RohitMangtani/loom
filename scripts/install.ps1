@@ -229,31 +229,47 @@ if ($SatelliteMode) {
   $logsDir = Join-Path $HiveDir "logs"
   New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
-  # Write a batch file for the satellite (reliable across PS versions)
+  # Write a batch file for the satellite with an infinite restart loop.
+  # Task Scheduler's RestartOnFailure only fires on non-zero exit codes,
+  # but satellite may exit cleanly during self-heal. The loop ensures the
+  # process always comes back regardless of exit code.
   $batFile = Join-Path $HiveDir "satellite.bat"
-  $batContent = "@echo off`r`ncd /d `"$Root`"`r`n`"$npxPath`" tsx apps/daemon/src/index.ts --satellite > `"$logsDir\satellite.stdout.log`" 2> `"$logsDir\satellite.stderr.log`""
+  $batContent = @"
+@echo off
+cd /d "$Root"
+:loop
+"$npxPath" tsx apps/daemon/src/index.ts --satellite >> "$logsDir\satellite.stdout.log" 2>> "$logsDir\satellite.stderr.log"
+echo [%date% %time%] Satellite exited with code %ERRORLEVEL%, restarting in 5s... >> "$logsDir\satellite.stderr.log"
+timeout /t 5 /nobreak >nul
+goto loop
+"@
   [System.IO.File]::WriteAllText($batFile, $batContent, [System.Text.Encoding]::ASCII)
 
-  # Install as Windows Task Scheduler task (runs at logon, restarts on failure)
+  # Install as Windows Task Scheduler task
+  # Two triggers: AtStartup (survives reboot even without login) + AtLogOn (covers user sessions)
   $action = New-ScheduledTaskAction `
     -Execute $batFile `
     -WorkingDirectory $Root
 
-  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+  $triggerLogon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+  $triggerStartup = New-ScheduledTaskTrigger -AtStartup
 
   $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
+    -DontStopOnIdleEnd `
     -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit (New-TimeSpan -Days 365)
+    -ExecutionTimeLimit (New-TimeSpan -Days 365) `
+    -StartWhenAvailable
 
   Register-ScheduledTask `
     -TaskName 'HiveSatellite' `
     -Action $action `
-    -Trigger $trigger `
+    -Trigger @($triggerLogon, $triggerStartup) `
     -Settings $settings `
     -Description 'Hive Satellite Daemon - connects to primary Hive network' `
+    -RunLevel Highest `
     -Force | Out-Null
 
   # Start the task now
