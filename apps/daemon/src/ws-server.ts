@@ -115,8 +115,8 @@ export class WsServer {
   private satelliteAutoApproved = new Set<string>();
   private satelliteStuckFirstSeen = new Map<string, number>();
   // Pending satellite context requests: requestId → resolver
-  private pendingSatelliteRequests = new Map<string, { resolve: (data: unknown) => void; timer: ReturnType<typeof setTimeout> }>();
-  private pendingSatelliteCommands = new Map<string, { resolve: (data: Record<string, unknown>) => void; timer: ReturnType<typeof setTimeout> }>();
+  private pendingSatelliteRequests = new Map<string, { resolve: (data: unknown) => void; timer: ReturnType<typeof setTimeout>; machineId: string }>();
+  private pendingSatelliteCommands = new Map<string, { resolve: (data: Record<string, unknown>) => void; timer: ReturnType<typeof setTimeout>; machineId: string }>();
   // Satellite handshake race: buffer worker snapshots that arrive before hello.
   private pendingSatelliteWorkers = new Map<string, WorkerState[]>();
 
@@ -529,7 +529,7 @@ export class WsServer {
         this.pendingSatelliteRequests.delete(requestId);
         resolve(null);
       }, 10_000);
-      this.pendingSatelliteRequests.set(requestId, { resolve, timer });
+      this.pendingSatelliteRequests.set(requestId, { resolve, timer, machineId: sat.machineId });
       this.sendToSatellite(sat, {
         type: "satellite_context",
         requestId,
@@ -557,7 +557,7 @@ export class WsServer {
           timedOut: true,
         });
       }, timeoutMs);
-      this.pendingSatelliteCommands.set(requestId, { resolve, timer });
+      this.pendingSatelliteCommands.set(requestId, { resolve, timer, machineId: sat.machineId });
       this.sendToSatellite(sat, msg);
     });
   }
@@ -1021,6 +1021,24 @@ export class WsServer {
 
     this.satellites.delete(machineId);
     this.pendingSatelliteWorkers.delete(machineId);
+
+    // Clean up pending requests/commands targeted at this satellite.
+    // Without this, entries accumulate indefinitely (memory leak).
+    for (const [id, entry] of this.pendingSatelliteRequests) {
+      if (entry.machineId === machineId) {
+        clearTimeout(entry.timer);
+        entry.resolve(null);
+        this.pendingSatelliteRequests.delete(id);
+      }
+    }
+    for (const [id, entry] of this.pendingSatelliteCommands) {
+      if (entry.machineId === machineId) {
+        clearTimeout(entry.timer);
+        entry.resolve({ ok: false, error: "Satellite disconnected" });
+        this.pendingSatelliteCommands.delete(id);
+      }
+    }
+
     this.lastWorkersSnapshot = null;
     this.pushState();
     this.broadcastMachines();

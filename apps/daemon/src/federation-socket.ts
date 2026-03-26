@@ -269,7 +269,9 @@ export class FederationSocketClient<TIncoming extends { type?: string }, TOutgoi
       if (this.socket !== socket) return;
       this.socket = null;
       this.clearHeartbeatTimer();
-      void this.handleDisconnect(this.pendingDisconnectReason);
+      this.handleDisconnect(this.pendingDisconnectReason).catch((err) => {
+        console.log(`[federation] Disconnect handler error: ${err instanceof Error ? err.message : String(err)}`);
+      });
       this.pendingDisconnectReason = "closed";
     });
 

@@ -1272,7 +1272,17 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
   }
 
   stop(): void {
-    if (this.tickInterval) clearInterval(this.tickInterval);
+    if (this.tickInterval) {
+      clearInterval(this.tickInterval);
+      this.tickInterval = null;
+    }
     this.federation.stop();
+
+    // Clean up pending API requests to prevent memory leaks and phantom rejections.
+    for (const [id, entry] of this.pendingApiRequests) {
+      clearTimeout(entry.timer);
+      entry.resolve(null);
+      this.pendingApiRequests.delete(id);
+    }
   }
 }
