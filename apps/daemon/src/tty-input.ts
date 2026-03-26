@@ -316,14 +316,18 @@ export function sendInputToTtyAsync(tty: string, text: string, model?: string): 
   // not do-script text injection. Use System Events keystroke instead.
   if (model === "gemini") {
     const resultPromise = sendMutex.then(() => doSendKeystrokeAsync(tty, cleaned));
-    sendMutex = resultPromise.then(() => {}, () => {});
+    sendMutex = resultPromise.then(() => {}, (err) => {
+      console.log(`[tty-input] Send mutex error (gemini keystroke, ${tty}): ${err instanceof Error ? err.message : String(err)}`);
+    });
     return resultPromise;
   }
 
   // Chain onto the mutex  --  each send waits for the previous to finish
   const resultPromise = sendMutex.then(() => doSendAsync(tty, cleaned));
-  // Update the mutex to wait for this send (swallow errors so chain continues)
-  sendMutex = resultPromise.then(() => {}, () => {});
+  // Update the mutex to wait for this send (log errors so chain continues without silent loss)
+  sendMutex = resultPromise.then(() => {}, (err) => {
+    console.log(`[tty-input] Send mutex error (${tty}): ${err instanceof Error ? err.message : String(err)}`);
+  });
   return resultPromise;
 }
 

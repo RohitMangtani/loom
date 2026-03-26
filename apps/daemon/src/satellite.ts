@@ -435,7 +435,9 @@ export class SatelliteClient {
     });
 
     if (action !== "none") {
-      void this.triggerSelfHeal(action);
+      this.triggerSelfHeal(action).catch((err) => {
+        console.log(`[satellite] Self-heal error: ${err instanceof Error ? err.message : String(err)}`);
+      });
       return "handled";
     }
     return "reconnect";

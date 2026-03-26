@@ -2785,6 +2785,8 @@ export class WsServer {
           } else {
             console.log(`Prompt approve failed for ${approveTty}: ${approveResult.error}`);
           }
+        }).catch((err) => {
+          console.log(`Prompt approve error for ${approveTty}: ${err instanceof Error ? err.message : String(err)}`);
         });
         if (activeUser) {
           this.broadcastActivity(activeUser, `Approved prompt for ${msg.workerId}`);
