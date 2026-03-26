@@ -220,8 +220,12 @@ export default function Home() {
       groups.push({ machine: undefined, agents: byMachine.get(undefined)! });
       byMachine.delete(undefined);
     }
-    // Then satellites sorted by hostname
-    for (const [machine, agents] of [...byMachine.entries()].sort((a, b) => (a[0] || "").localeCompare(b[0] || ""))) {
+    // Then satellites sorted by lowest quadrant number (order they were added to network)
+    for (const [machine, agents] of [...byMachine.entries()].sort((a, b) => {
+      const minA = Math.min(...a[1].map(e => e.num));
+      const minB = Math.min(...b[1].map(e => e.num));
+      return minA - minB;
+    })) {
       groups.push({ machine, agents });
     }
     return groups;
@@ -492,11 +496,15 @@ export default function Home() {
           className={`min-h-0 flex flex-col overflow-y-auto ${!isViewer && selectedEntry ? "gap-1.5 p-2 sm:p-3 shrink-0" : "gap-3 p-4 sm:p-6 flex-1"} transition-all duration-300 ease-[cubic-bezier(0.25,0.46,0.45,0.94)]`}
           style={!isViewer && selectedEntry ? { maxHeight: chatExpanded ? "0px" : "40vh", overflow: chatExpanded ? "hidden" : "auto", padding: chatExpanded ? "0px" : undefined, gap: chatExpanded ? "0px" : undefined } : undefined}
         >
-          {(() => {
-            // Render all workers in one flat sequential grid by quadrant number.
-            // Machine badges on each card show which computer the agent is on.
-            const flat = numbered;
-            return flat.map(({ worker: w, num }) => (
+          {machineGroups.map(({ machine, agents }) => (
+            <div key={machine || "__local"} className={`flex flex-col ${!isViewer && selectedEntry ? "shrink-0 gap-1.5" : "flex-1 min-h-0 gap-3"}`}>
+              {machine && (
+                <div className="flex items-center gap-2 px-1 shrink-0">
+                  <span className="text-[9px] font-mono uppercase tracking-wider text-[var(--text-muted)]">{machine}</span>
+                  <span className="flex-1 h-px bg-[var(--border)]" />
+                </div>
+              )}
+              {agents.map(({ worker: w, num }) => (
                 <div key={w.id} className={!isViewer && selectedEntry ? "shrink-0" : "flex-1 min-h-0"}>
                   <AgentCard
                     worker={w}
@@ -529,8 +537,9 @@ export default function Home() {
                     voiceTranscript={isVoice && voice.recording && voiceTargetId === w.id ? voice.transcript : undefined}
                   />
                 </div>
-              ));
-          })()}
+              ))}
+            </div>
+          ))}
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center">

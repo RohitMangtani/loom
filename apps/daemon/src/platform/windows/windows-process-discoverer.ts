@@ -204,9 +204,12 @@ export class WindowsProcessDiscoverer implements ProcessDiscoverer {
         if (!pid || pid === process.pid || seenPids.has(pid)) continue;
         if (!commandLine) continue;
 
-        // Let the pattern matching handle agent detection — don't pre-filter
-        // node.exe processes because on Windows, all agents run as node.exe
-        // with their package path in the command line (e.g. node.exe ...claude-code\cli.js)
+        // Skip wrapper processes that launch agents but aren't the agent itself.
+        // On Windows, "cmd /k claude" creates: cmd.exe -> node.exe ...claude-code\cli.js
+        // Both match "claude" in their CommandLine, but we only want the leaf node.
+        // The agent is always node.exe (or the bare CLI binary), never a shell.
+        if (/^"?(?:[A-Z]:\\.*\\)?(?:cmd|wt|conhost|powershell|pwsh)(?:\.exe)?/i.test(commandLine)) continue;
+
         const matched = this.patterns.find((p) => p.regex.test(commandLine));
         if (!matched) continue;
 
