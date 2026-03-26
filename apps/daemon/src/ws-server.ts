@@ -1836,7 +1836,9 @@ export class WsServer {
       const isAdmin = user.role === "admin";
       const isViewer = user.role === "viewer";
 
-      console.log(`[ws] New connection: satellite=${satelliteId || "none"} user=${user.name} role=${user.role} admin=${isAdmin} url=${req.url?.slice(0, 80)}`);
+      // Redact token from log to avoid leaking credentials in log files
+      const safeUrl = (req.url || "").replace(/token=[^&]+/, "token=***");
+      console.log(`[ws] New connection: satellite=${satelliteId || "none"} user=${user.name} role=${user.role} admin=${isAdmin} url=${safeUrl.slice(0, 80)}`);
 
       // ── Satellite connection ──────────────────────────────────
       if (satelliteId) {

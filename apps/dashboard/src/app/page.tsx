@@ -12,7 +12,9 @@ import type { WorkerState } from "@/lib/types";
 import { usePushSubscription } from "@/components/ServiceWorker";
 import { useVoiceRecording } from "@/lib/useVoiceRecording";
 
-const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
+// Require NEXT_PUBLIC_WS_URL in production; only fall back to localhost in dev.
+const DEFAULT_URL = process.env.NEXT_PUBLIC_WS_URL
+  || (process.env.NODE_ENV === "development" ? "ws://localhost:3002" : "");
 const MAX_SLOTS = 8;
 
 

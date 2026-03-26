@@ -6,6 +6,26 @@ const TOKEN_KEY = 'hive_token';
 const MODE_KEY = 'hive_mode'; // "admin" | "viewer"
 const DAEMON_URL_KEY = 'hive_daemon_url';
 
+/** Validate token is a 64-char hex string (admin) or 64-char hex (viewer SHA256). */
+function isValidTokenFormat(token: string): boolean {
+  return /^[0-9a-f]{64}$/i.test(token);
+}
+
+/** Validate WS URL against expected patterns (wss:// with known TLD or localhost). */
+function isValidWsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return false;
+    const host = parsed.hostname;
+    // Allow localhost, 127.0.0.1, *.ngrok-free.dev, *.trycloudflare.com, *.vercel.app
+    return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0"
+      || host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")
+      || host.endsWith(".trycloudflare.com") || host.endsWith(".vercel.app");
+  } catch {
+    return false;
+  }
+}
+
 interface SitePasswordGateProps {
   children: ReactNode;
 }
@@ -93,15 +113,19 @@ function ConnectionSetup({ onComplete }: { onComplete: () => void }) {
 
     // Try to parse as invite link first (backward compat)
     const parsed = parseInviteLink(trimmed);
-    if (parsed?.token) {
+    if (parsed?.token && isValidTokenFormat(parsed.token)) {
       localStorage.setItem(TOKEN_KEY, parsed.token);
       localStorage.setItem(MODE_KEY, "admin");
-      if (parsed.ws) localStorage.setItem(DAEMON_URL_KEY, parsed.ws);
+      if (parsed.ws && isValidWsUrl(parsed.ws)) localStorage.setItem(DAEMON_URL_KEY, parsed.ws);
       onComplete();
       return;
     }
 
-    // Raw token (64-char hex or viewer token)
+    // Raw token — validate format before accepting
+    if (!isValidTokenFormat(trimmed)) {
+      setError("Invalid token format. Expected a 64-character hex string.");
+      return;
+    }
     localStorage.setItem(TOKEN_KEY, trimmed);
     localStorage.setItem(MODE_KEY, "admin");
     onComplete();
@@ -152,6 +176,7 @@ function ConnectionSetup({ onComplete }: { onComplete: () => void }) {
 
         <input
           type="password"
+          autoComplete="off"
           value={token}
           onChange={(e) => setToken(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && token.trim() && handleConnect()}
@@ -223,14 +248,16 @@ export function SitePasswordGate({ children }: SitePasswordGateProps) {
     const params = new URLSearchParams(window.location.search);
 
     // Auto-authenticate from ?token= parameter (invite links)
+    // Validate format to prevent storing arbitrary strings as admin tokens.
     const tokenParam = params.get('token');
-    if (tokenParam && tokenParam.length >= 32) {
+    if (tokenParam && isValidTokenFormat(tokenParam)) {
       localStorage.setItem(TOKEN_KEY, tokenParam);
       localStorage.setItem(MODE_KEY, 'admin');
     }
     // Auto-save daemon WS URL from ?ws= parameter (invite links)
+    // Validate against known tunnel domains to prevent open redirects.
     const wsParam = params.get('ws');
-    if (wsParam && (wsParam.startsWith('ws://') || wsParam.startsWith('wss://'))) {
+    if (wsParam && isValidWsUrl(wsParam)) {
       localStorage.setItem(DAEMON_URL_KEY, wsParam);
     }
     // Clean URL so tokens aren't visible in the address bar

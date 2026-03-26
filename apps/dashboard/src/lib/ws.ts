@@ -150,6 +150,7 @@ export function useHive(daemonUrl: string) {
         try {
           data = JSON.parse(event.data);
         } catch {
+          console.warn("[hive-ws] Malformed JSON from server:", String(event.data).slice(0, 100));
           return;
         }
 
