@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { randomBytes } from "crypto";
 import type { RevertHistoryEntry } from "@hive/types";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const HISTORY_PATH = join(HOME, ".hive", "revert-history.json");
 const MAX_ENTRIES = 32;
 

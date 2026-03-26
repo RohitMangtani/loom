@@ -1,7 +1,8 @@
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const QUEUE_PATH = join(HOME, ".hive", "queue.json");
 
 export interface QueuedTask {

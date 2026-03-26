@@ -1,7 +1,8 @@
 import type { MachineCapabilities } from "./types.js";
 import { scanLocalProjects } from "./project-discovery.js";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 
 /**
  * SwarmController: owns multi-machine spawn/kill/exec/repair routing.

@@ -1,7 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { randomBytes } from "crypto";
-import { hostname } from "os";
+import { hostname, homedir } from "os";
 import { basename, join } from "path";
 import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync, readdirSync } from "fs";
 import { describeAction, truncate } from "./utils.js";
@@ -32,7 +32,7 @@ import { ReplayManager } from "./replay.js";
 import type { RevertHistory } from "./revert-history.js";
 
 const IDLE_THRESHOLD = 30_000;
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const LOCAL_MACHINE_LABEL = hostname();
 
 interface QueuedMessage {
@@ -135,7 +135,7 @@ export class TelemetryReceiver {
   // it has no expiry  --  identity.sh overwrites it on the first prompt of each
   // new session, so stale entries are harmless (the JSONL file just won't exist).
   private static readonly TTY_SESSION_PATH = join(
-    process.env.HOME || `/Users/${process.env.USER}`, ".hive", "tty-sessions.json"
+    process.env.HOME || process.env.USERPROFILE || homedir(), ".hive", "tty-sessions.json"
   );
 
   // Recently-spawned TTYs: suppresses heuristic session file resolution so
@@ -331,7 +331,7 @@ export class TelemetryReceiver {
       this.clearSpawn(tty);
 
       // Update the session file to match this session_id
-      const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+      const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
       const projectsDir = join(homeDir, ".claude", "projects");
       // The JSONL is in the encoded-cwd directory. Try the worker's known project path first,
       // then fall back to home directory encoding.
@@ -418,7 +418,7 @@ export class TelemetryReceiver {
     try {
       if (!existsSync(TelemetryReceiver.TTY_SESSION_PATH)) return result;
       const raw = JSON.parse(readFileSync(TelemetryReceiver.TTY_SESSION_PATH, "utf-8")) as Record<string, string>;
-      const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+      const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
       const projectsDir = join(homeDir, ".claude", "projects");
 
       for (const [tty, sessionId] of Object.entries(raw)) {
@@ -1296,7 +1296,7 @@ export class TelemetryReceiver {
         this.sessionToWorker.set(pendingSession, id);
 
         // Set the session file
-        const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+        const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
         const projectsDir = join(homeDir, ".claude", "projects");
         const encodings = [
           worker.project.replace(/\//g, "-"),
@@ -1331,7 +1331,7 @@ export class TelemetryReceiver {
         console.log(`[register-tty] Replaying queued correction: tty=${worker.tty} session=${pendingSession} → ${id}`);
         this.pinnedSessions.set(pendingSession, id);
         this.sessionToWorker.set(pendingSession, id);
-        const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+        const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
         const projectsDir = join(homeDir, ".claude", "projects");
         const encodings = [
           worker.project.replace(/\//g, "-"),

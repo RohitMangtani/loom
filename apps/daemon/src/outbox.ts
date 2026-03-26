@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import type { TelemetryReceiver } from "./telemetry.js";
+import { homedir } from "os";
 
 /**
  * File-based message relay for agents that can't access the HTTP API
@@ -14,7 +15,7 @@ import type { TelemetryReceiver } from "./telemetry.js";
  * The daemon picks them up every tick (3s) and processes them.
  */
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const OUTBOX_DIR = join(HOME, ".hive", "outbox");
 
 export class OutboxScanner {

@@ -1,8 +1,9 @@
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { randomBytes } from "crypto";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const REVIEWS_PATH = join(HOME, ".hive", "reviews.json");
 const REVIEW_TTL = 48 * 60 * 60 * 1000; // 48 hours auto-expiry
 const MAX_REVIEWS = 50;

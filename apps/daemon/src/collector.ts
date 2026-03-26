@@ -10,8 +10,9 @@ import { existsSync, mkdirSync, appendFileSync, readFileSync } from "fs";
 import { join } from "path";
 import type { Request, Response, NextFunction } from "express";
 import type express from "express";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const COLLECTOR_DIR = join(HOME, ".hive", "collector");
 
 // Time windows

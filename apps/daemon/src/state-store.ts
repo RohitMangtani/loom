@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const STATE_PATH = join(HOME, ".hive", "daemon-state.json");
 const SAVE_INTERVAL = 30_000;
 const MAX_AGE = 10 * 60 * 1000;

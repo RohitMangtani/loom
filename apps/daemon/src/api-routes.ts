@@ -22,6 +22,7 @@ import { ReplayManager } from "./replay.js";
 import type { ParsedQs } from "qs";
 import { resolveExecCwd, runShellExec } from "./shell-exec.js";
 import { RevertHistory } from "./revert-history.js";
+import { homedir } from "os";
 
 function normalizeQueryString(
   value: string | string[] | ParsedQs | ParsedQs[] | (string | ParsedQs)[] | undefined,
@@ -746,7 +747,7 @@ export function registerApiRoutes(
 
   // GET /api/notifications/config
   app.get("/api/notifications/config", requireAuth, (_req, res) => {
-    const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+    const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
     const configPath = join(HOME, ".hive", "notifications.json");
     try {
       if (existsSync(configPath)) {

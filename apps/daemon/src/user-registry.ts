@@ -1,9 +1,9 @@
 import { randomBytes, createHash } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { hostname } from "os";
+import { hostname, homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const HIVE_DIR = join(HOME, ".hive");
 const USERS_PATH = join(HIVE_DIR, "users.json");
 const LEGACY_TOKEN_PATH = join(HIVE_DIR, "token");

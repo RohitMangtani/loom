@@ -6,6 +6,7 @@ import type { SessionStreamer } from "./session-stream.js";
 import type { WorkerState } from "./types.js";
 import { readTail, describeBashCommand } from "./utils.js";
 import type { ProcessDiscoverer, TerminalIO } from "./platform/interfaces.js";
+import { homedir } from "os";
 
 /** Quadrant Audit  --  logs every status transition with full decision context */
 interface AuditEntry {
@@ -17,7 +18,7 @@ interface AuditEntry {
   context: Record<string, unknown>;
 }
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const AUDIT_LOG_PATH = join(HOME, ".hive", "quadrant-audit.log");
 const AUDIT_MAX_ENTRIES = 500;
 
@@ -1723,7 +1724,7 @@ end tell
           // This ensures newly opened instances get picked up immediately
           // instead of being silently skipped until lsof starts working.
           if (psTty && psTty !== "??" && psTty.startsWith("ttys")) {
-            const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+            const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
             results.push({
               pid, cpuPercent, startedAt,
               tty: psTty,
@@ -1821,7 +1822,7 @@ end tell
    * project directory search (finds agents even when lsof misses task files).
    */
   private findBestJsonlFile(sessionIds: string[], cwd?: string): { path: string; mtimeMs: number } | null {
-    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
     const projectsDir = join(homeDir, ".claude", "projects");
     let bestFile: string | null = null;
     let bestMtime = 0;
@@ -1876,7 +1877,7 @@ end tell
     const ttyToFile = new Map<string, string>();
     if (processes.length === 0) return ttyToFile;
 
-    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
     const sessionsDir = join(homeDir, ".hive", "sessions");
     const projectsDir = join(homeDir, ".claude", "projects");
 
@@ -1920,7 +1921,7 @@ end tell
    * because birthtimes are unique per file, unlike mtime which changes constantly.
    */
   private findSessionFileByStartTime(cwd: string, startedAt: number, claimedFiles?: Set<string>): string | null {
-    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
     const projectsDir = join(homeDir, ".claude", "projects");
     const encoded = cwd.replace(/\//g, "-");
     const candidateDir = join(projectsDir, encoded);

@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
+import { homedir } from "os";
 import type { TelemetryReceiver } from "./telemetry.js";
 
 /**
@@ -17,7 +18,7 @@ import type { TelemetryReceiver } from "./telemetry.js";
  * Agents fix the system. Learnings compound.
  */
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const SCAN_INTERVAL_MS = 5 * 60 * 1000;
 const AUDIT_LOG_PATH = join(HOME, ".hive", "quadrant-audit.log");
 const MAX_ATTEMPTS = 3;

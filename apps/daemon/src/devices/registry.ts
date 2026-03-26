@@ -10,8 +10,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { DeviceRegistration, RegisteredDevice } from "./types.js";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const HIVE_DIR = join(HOME, ".hive");
 const DEVICES_FILE = join(HIVE_DIR, "devices.json");
 

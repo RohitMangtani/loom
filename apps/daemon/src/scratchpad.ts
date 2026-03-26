@@ -1,7 +1,8 @@
 import { join } from "path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const SCRATCHPAD_PATH = join(HOME, ".hive", "scratchpad.json");
 const SCRATCHPAD_TTL = 60 * 60 * 1000; // 1 hour auto-expiry
 

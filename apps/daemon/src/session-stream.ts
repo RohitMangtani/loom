@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync, readdirSync, watch, type FSWatcher } from "fs";
 import { basename, join } from "path";
+import { homedir } from "os";
 import type { ChatEntry } from "./types.js";
 import { describeAction, describeBashCommand, truncate } from "./utils.js";
 
@@ -83,7 +84,7 @@ export class SessionStreamer {
    * Find the best session file for a worker by scanning .claude/projects/
    */
   findSessionFile(sessionIds: string[]): string | null {
-    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
     const projectsDir = join(homeDir, ".claude", "projects");
 
     let bestFile: string | null = null;
@@ -123,7 +124,7 @@ export class SessionStreamer {
   verifySessionFile(workerId: string, tty: string | undefined): boolean {
     if (!tty) return false;
 
-    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
     const markerPath = join(homeDir, ".hive", "sessions", tty);
     let markerSessionId: string;
     try {
@@ -359,7 +360,7 @@ function resolveRoutedMessage(text: string): string | null {
   const match = text.match(HIVE_ROUTING_RE);
   if (!match) return null;
   try {
-    const homeDir = process.env.HOME || `/Users/${process.env.USER}`;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || homedir();
     const filePath = join(homeDir, ".hive", "context-messages", match[1]);
     const content = readFileSync(filePath, "utf-8");
     const lines = content.split("\n");

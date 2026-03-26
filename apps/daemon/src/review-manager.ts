@@ -4,6 +4,7 @@ import { ReviewStore } from "./review-store.js";
 import type { ReviewItem } from "./review-store.js";
 import type { WorkerState } from "./types.js";
 import type { RevertHistoryEntry } from "@hive/types";
+import { homedir } from "os";
 
 export type { ReviewItem } from "./review-store.js";
 
@@ -197,7 +198,7 @@ export class ReviewManager {
     if (cdMatch) {
       let dir = cdMatch[1].trim();
       if (dir.startsWith("~/") || dir === "~") {
-        const home = process.env.HOME || `/Users/${process.env.USER}`;
+        const home = process.env.HOME || process.env.USERPROFILE || homedir();
         dir = dir.replace(/^~/, home);
       }
       try {

@@ -1,8 +1,9 @@
 import webpush from "web-push";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const HIVE_DIR = join(HOME, ".hive");
 const VAPID_PATH = join(HIVE_DIR, "vapid.json");
 const SUBS_PATH = join(HIVE_DIR, "push-subs.json");

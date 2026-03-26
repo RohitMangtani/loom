@@ -1,8 +1,9 @@
 import { readFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import { join, basename } from "path";
 import type { Suggestion, WorkerState } from "./types.js";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const KEY_FILE = join(HOME, ".hive", "anthropic-key");
 const FEEDBACK_FILE = join(HOME, ".hive", "suggestion-feedback.jsonl");
 const MODEL = "claude-haiku-4-5-20251001";

@@ -17,8 +17,9 @@ import { join } from "path";
 import { randomBytes } from "crypto";
 import type { DeviceRegistry } from "./registry.js";
 import type { DeviceDataPayload, DeviceEvent } from "./types.js";
+import { homedir } from "os";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const DATA_ROOT = join(HOME, "hive-data", "devices");
 
 /** Pixel-diff threshold (0-1). Above this = "something changed". */

@@ -142,14 +142,22 @@ function detectCapabilities(): MachineCapabilities {
     caps.gpu = false;
   }
 
-  // Disk free space (macOS: df -g, Linux/WSL: df --block-size=G)
+  // Disk free space
   try {
-    const dfArgs = platform() === "darwin" ? ["-g", homedir()] : ["--block-size=G", homedir()];
-    const dfCmd = platform() === "darwin" ? "/bin/df" : "df";
-    const df = execFileSync(dfCmd, dfArgs, { timeout: 3000, encoding: "utf-8" });
-    const parts = df.split("\n")[1]?.split(/\s+/);
-    const col = platform() === "darwin" ? 3 : 3; // Available column
-    if (parts?.[col]) caps.diskFreeGb = parseInt(parts[col], 10);
+    if (platform() === "win32") {
+      // Windows: use PowerShell to get free space on the system drive
+      const ps = execFileSync("powershell", ["-NoProfile", "-Command",
+        "Get-Volume -DriveLetter C -ErrorAction SilentlyContinue | Select-Object -ExpandProperty SizeRemaining",
+      ], { timeout: 5000, encoding: "utf-8" }).trim();
+      const bytes = parseInt(ps, 10);
+      if (bytes > 0) caps.diskFreeGb = Math.round(bytes / (1024 ** 3));
+    } else {
+      const dfArgs = platform() === "darwin" ? ["-g", homedir()] : ["--block-size=G", homedir()];
+      const dfCmd = platform() === "darwin" ? "/bin/df" : "df";
+      const df = execFileSync(dfCmd, dfArgs, { timeout: 3000, encoding: "utf-8" });
+      const parts = df.split("\n")[1]?.split(/\s+/);
+      if (parts?.[3]) caps.diskFreeGb = parseInt(parts[3], 10);
+    }
   } catch { /* skip */ }
 
   // Software detection  --  check if commands exist

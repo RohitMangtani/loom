@@ -10,10 +10,16 @@ DAEMON_URL="${HIVE_DAEMON_URL:-http://localhost:3001}"
 SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 
 # stdin is a pipe, so walk up the process tree to find the owning TTY.
-TTY_NAME=$(ps -o tty= -p "$PPID" 2>/dev/null | tr -d ' ')
-if [ -z "$TTY_NAME" ] || [ "$TTY_NAME" = "??" ]; then
-  GRANDPARENT=$(ps -o ppid= -p "$PPID" 2>/dev/null | tr -d ' ')
-  [ -n "$GRANDPARENT" ] && TTY_NAME=$(ps -o tty= -p "$GRANDPARENT" 2>/dev/null | tr -d ' ')
+# On Windows (Git Bash/MSYS2), ps may not support -o tty=. Use PID fallback.
+if command -v ps &>/dev/null && ps -o tty= -p 1 &>/dev/null 2>&1; then
+  TTY_NAME=$(ps -o tty= -p "$PPID" 2>/dev/null | tr -d ' ')
+  if [ -z "$TTY_NAME" ] || [ "$TTY_NAME" = "??" ]; then
+    GRANDPARENT=$(ps -o ppid= -p "$PPID" 2>/dev/null | tr -d ' ')
+    [ -n "$GRANDPARENT" ] && TTY_NAME=$(ps -o tty= -p "$GRANDPARENT" 2>/dev/null | tr -d ' ')
+  fi
+else
+  # Windows fallback: use PID as TTY identifier (matches platform/windows discovery)
+  TTY_NAME="pid:$PPID"
 fi
 
 [ -z "$TTY_NAME" ] || [ "$TTY_NAME" = "??" ] && exit 0
@@ -34,8 +40,11 @@ WORKERS="$HOME/.hive/workers.json"
 [ ! -f "$WORKERS" ] && exit 0
 
 python3 -c "
-import json, os, sys
-LOCAL_MACHINE = os.uname().nodename
+import json, os, sys, platform
+try:
+    LOCAL_MACHINE = os.uname().nodename
+except AttributeError:
+    LOCAL_MACHINE = platform.node()
 
 def machine_label(worker):
     label = worker.get('machineLabel')

@@ -1,11 +1,12 @@
 import { execSync } from "child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 import type { TelemetryReceiver } from "./telemetry.js";
 import type { WorkerState } from "./types.js";
 import type { WebPushManager } from "./web-push.js";
 
-const HOME = process.env.HOME || `/Users/${process.env.USER}`;
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const CONFIG_PATH = join(HOME, ".hive", "notifications.json");
 const DEFAULT_COOLDOWN = 60_000;
 const DEFAULT_ERROR_THRESHOLD = 3;
