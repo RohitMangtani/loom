@@ -2156,8 +2156,16 @@ export class WsServer {
 
         // Mark TTY as freshly spawned so discovery skips heuristic session
         // file resolution  --  new agents start with blank chat history.
+        // Also clear prompt suppression  --  TTY devices can be reused when
+        // Terminal tabs are closed and reopened, and a previous approve call
+        // suppresses that TTY permanently. Without this, re-spawned Claude
+        // sessions never show the trust prompt on the dashboard.
         if (termResult.tty) {
           this.telemetry.markSpawn(termResult.tty);
+          if (this.discovery) {
+            this.discovery.clearPromptCache(termResult.tty);
+            this.discovery.unsuppressPrompt(termResult.tty);
+          }
         }
 
         // Create an immediate placeholder worker so the dashboard tile

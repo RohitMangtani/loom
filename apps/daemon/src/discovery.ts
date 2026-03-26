@@ -294,6 +294,16 @@ end tell
     }
   }
 
+  /** Re-enable prompt detection for a TTY.
+   *  Called on new spawns because Terminal.app can reuse TTY devices when
+   *  tabs are closed and reopened. Without this, a previous approve call
+   *  permanently blocks trust prompt detection for the reused TTY. */
+  unsuppressPrompt(tty: string): void {
+    const device = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+    this.promptSuppressed.delete(device);
+    this.promptSuppressed.delete(tty);
+  }
+
   /** Record a status transition with full decision context */
   private audit(
     tty: string,
