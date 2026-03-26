@@ -40,7 +40,7 @@ function getGitVersion(): string {
   try {
     // Resolve repo root from this file: apps/daemon/src/satellite.ts → ../../..
     const repoDir = join(import.meta.dirname, "..", "..", "..");
-    return execFileSync("/usr/bin/git", ["rev-parse", "--short=8", "HEAD"], {
+    return execFileSync("git", ["rev-parse", "--short=8", "HEAD"], {
       cwd: repoDir, timeout: 3000, encoding: "utf-8",
     }).trim();
   } catch { return "unknown"; }
@@ -410,7 +410,11 @@ export class SatelliteClient {
       this.selfHealAttempts = 0;
     } else {
       this.consecutiveFailures += 1;
-      this.shortLivedConnections += 1;
+      // Only count as short-lived if WS actually opened (local issue).
+      // Pure connection failures (WS never opened) = primary unreachable.
+      if (meta.wasConnected) {
+        this.shortLivedConnections += 1;
+      }
     }
     this.connectedAt = 0;
 
@@ -439,9 +443,24 @@ export class SatelliteClient {
     const logPath = join(homedir(), ".hive", "logs", `satellite-self-heal-${action}.log`);
     const primaryUrlPath = join(homedir(), ".hive", "primary-url");
     const primaryTokenPath = join(homedir(), ".hive", "primary-token");
-    const detachedCommand = action === "reinstall"
-      ? `cd '${repoDir}' && PRIMARY_URL=$(cat '${primaryUrlPath}' 2>/dev/null) && PRIMARY_TOKEN=$(cat '${primaryTokenPath}' 2>/dev/null) && [ -n "$PRIMARY_URL" ] && [ -n "$PRIMARY_TOKEN" ] && nohup bash scripts/install.sh --connect "$PRIMARY_URL" "$PRIMARY_TOKEN" > '${logPath}' 2>&1 &`
-      : `cd '${repoDir}' && nohup bash scripts/doctor.sh --repair-satellite > '${logPath}' 2>&1 &`;
+
+    const isWindows = process.platform === "win32";
+    let selfHealShell: string;
+    let selfHealArgs: string[];
+
+    if (isWindows) {
+      selfHealShell = "powershell";
+      const psCmd = action === "reinstall"
+        ? `$u = Get-Content '${primaryUrlPath}' -Raw; $t = Get-Content '${primaryTokenPath}' -Raw; if ($u -and $t) { Set-Location '${repoDir}'; & .\\scripts\\install.ps1 -Connect -Url $u.Trim() -Token $t.Trim() } *> '${logPath}'`
+        : `Set-Location '${repoDir}'; & .\\scripts\\doctor.ps1 --repair-satellite *> '${logPath}'`;
+      selfHealArgs = ["-NoProfile", "-Command", psCmd];
+    } else {
+      selfHealShell = "/bin/zsh";
+      const bashCmd = action === "reinstall"
+        ? `cd '${repoDir}' && PRIMARY_URL=$(cat '${primaryUrlPath}' 2>/dev/null) && PRIMARY_TOKEN=$(cat '${primaryTokenPath}' 2>/dev/null) && [ -n "$PRIMARY_URL" ] && [ -n "$PRIMARY_TOKEN" ] && nohup bash scripts/install.sh --connect "$PRIMARY_URL" "$PRIMARY_TOKEN" > '${logPath}' 2>&1 &`
+        : `cd '${repoDir}' && nohup bash scripts/doctor.sh --repair-satellite > '${logPath}' 2>&1 &`;
+      selfHealArgs = ["-lc", bashCmd];
+    }
 
     console.log(`[satellite] Self-heal triggered: ${action} (failures=${this.consecutiveFailures}, short=${this.shortLivedConnections})`);
     appendControlPlaneAudit({
@@ -454,7 +473,7 @@ export class SatelliteClient {
 
     try {
       await new Promise<void>((resolve, reject) => {
-        execFile("/bin/zsh", ["-lc", detachedCommand], { timeout: 10_000 }, (err) => err ? reject(err) : resolve());
+        execFile(selfHealShell, selfHealArgs, { timeout: 10_000 }, (err) => err ? reject(err) : resolve());
       });
       setTimeout(() => process.exit(0), 1_000);
     } catch (err) {
@@ -1075,18 +1094,18 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
         // Run git add + commit asynchronously
         try {
           const gitAdd = () => new Promise<void>((resolve, reject) => {
-            execFile("/usr/bin/git", ["add", ...existingFiles], { cwd: project, timeout: 10_000 },
+            execFile("git", ["add", ...existingFiles], { cwd: project, timeout: 10_000 },
               (err) => err ? reject(err) : resolve());
           });
           const gitCommit = () => new Promise<string>((resolve, reject) => {
             const shortTask = commitMessage.slice(0, 100);
             const fileNames = existingFiles.map(f => basename(f)).join(", ");
             const fullMsg = `${shortTask}\n\nFiles: ${fileNames}\n\nAuto-committed by Hive (satellite: ${this.machineId}).`;
-            execFile("/usr/bin/git", ["commit", "-m", fullMsg, "--no-verify"], { cwd: project, timeout: 15_000 },
+            execFile("git", ["commit", "-m", fullMsg, "--no-verify"], { cwd: project, timeout: 15_000 },
               (err, stdout) => err ? reject(err) : resolve(stdout));
           });
           const gitHash = () => new Promise<string>((resolve, reject) => {
-            execFile("/usr/bin/git", ["rev-parse", "--short", "HEAD"], { cwd: project, timeout: 3_000, encoding: "utf-8" },
+            execFile("git", ["rev-parse", "--short", "HEAD"], { cwd: project, timeout: 3_000, encoding: "utf-8" },
               (err, stdout) => err ? reject(err) : resolve((stdout || "").trim()));
           });
 
@@ -1099,7 +1118,7 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
           // Auto-push to keep repos in sync across machines
           try {
             await new Promise<void>((resolve, reject) => {
-              execFile("/usr/bin/git", ["push"], { cwd: project, timeout: 30_000 },
+              execFile("git", ["push"], { cwd: project, timeout: 30_000 },
                 (err) => err ? reject(err) : resolve());
             });
             console.log(`[satellite-autocommit] Pushed to remote`);
@@ -1134,7 +1153,7 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
         const repoDir = msg.project || join(import.meta.dirname, "..", "..", "..");
         try {
           await new Promise<void>((resolve, reject) => {
-            execFile("/usr/bin/git", ["pull", "--ff-only"], { cwd: repoDir, timeout: 30_000 },
+            execFile("git", ["pull", "--ff-only"], { cwd: repoDir, timeout: 30_000 },
               (err, stdout) => {
                 if (err) reject(err);
                 else { console.log(`[satellite] git pull: ${(stdout || "").trim()}`); resolve(); }
@@ -1170,15 +1189,35 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
         const primaryUrlPath = join(homedir(), ".hive", "primary-url");
         const primaryTokenPath = join(homedir(), ".hive", "primary-token");
 
-        const detachedCommand = action === "reinstall"
-          ? `cd '${repoDir}' && PRIMARY_URL=$(cat '${primaryUrlPath}' 2>/dev/null) && PRIMARY_TOKEN=$(cat '${primaryTokenPath}' 2>/dev/null) && [ -n "$PRIMARY_URL" ] && [ -n "$PRIMARY_TOKEN" ] && /usr/bin/git pull --ff-only && nohup bash scripts/install.sh --connect "$PRIMARY_URL" "$PRIMARY_TOKEN" > '${logPath}' 2>&1 &`
-          : `cd '${repoDir}' && nohup bash scripts/doctor.sh --repair-satellite > '${logPath}' 2>&1 &`;
+        const isWindows = process.platform === "win32";
+        let detachedCommand: string;
+        let shell: string;
+        let shellArgs: string[];
+
+        if (isWindows) {
+          shell = "powershell";
+          if (action === "reinstall") {
+            // Read URL/token from files, then run install script
+            detachedCommand = `$u = Get-Content '${primaryUrlPath}' -Raw; $t = Get-Content '${primaryTokenPath}' -Raw; if ($u -and $t) { Set-Location '${repoDir}'; git pull --ff-only; & .\\scripts\\install.ps1 -Connect -Url $u.Trim() -Token $t.Trim() } *> '${logPath}'`;
+          } else {
+            detachedCommand = `Set-Location '${repoDir}'; & .\\scripts\\doctor.ps1 --repair-satellite *> '${logPath}'`;
+          }
+          shellArgs = ["-NoProfile", "-Command", detachedCommand];
+        } else {
+          shell = "/bin/zsh";
+          if (action === "reinstall") {
+            detachedCommand = `cd '${repoDir}' && PRIMARY_URL=$(cat '${primaryUrlPath}' 2>/dev/null) && PRIMARY_TOKEN=$(cat '${primaryTokenPath}' 2>/dev/null) && [ -n "$PRIMARY_URL" ] && [ -n "$PRIMARY_TOKEN" ] && git pull --ff-only && nohup bash scripts/install.sh --connect "$PRIMARY_URL" "$PRIMARY_TOKEN" > '${logPath}' 2>&1 &`;
+          } else {
+            detachedCommand = `cd '${repoDir}' && nohup bash scripts/doctor.sh --repair-satellite > '${logPath}' 2>&1 &`;
+          }
+          shellArgs = ["-lc", detachedCommand];
+        }
 
         console.log(`[satellite] Received maintenance command  --  action=${action}`);
 
         try {
           await new Promise<void>((resolve, reject) => {
-            execFile("/bin/zsh", ["-lc", detachedCommand], { timeout: 10_000 }, (err) => err ? reject(err) : resolve());
+            execFile(shell, shellArgs, { timeout: 10_000 }, (err) => err ? reject(err) : resolve());
           });
           this.send({
             type: "satellite_result",

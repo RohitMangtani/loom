@@ -196,8 +196,9 @@ export class Watchdog {
     this.notify("Hive Watchdog Escalation", `${tracked.anomaly.type}  --  ${tracked.attempts} failed auto-fix attempts`);
   }
 
-  /** Fire a macOS system notification. */
+  /** Fire a system notification. */
   private notify(title: string, message: string): void {
+    if (process.platform !== "darwin") return;
     try {
       const t = title.replace(/"/g, '\\"');
       const m = message.replace(/"/g, '\\"').slice(0, 200);

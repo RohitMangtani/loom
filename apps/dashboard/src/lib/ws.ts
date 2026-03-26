@@ -186,6 +186,12 @@ export function useHive(daemonUrl: string) {
                 next.delete(rid);
                 return next;
               });
+              setChatEntries((prev) => {
+                if (!prev.has(rid)) return prev;
+                const next = new Map(prev);
+                next.delete(rid);
+                return next;
+              });
               setWorkerContexts((prev) => {
                 if (!prev.has(rid)) return prev;
                 const next = new Map(prev);

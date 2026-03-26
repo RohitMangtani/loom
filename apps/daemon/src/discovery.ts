@@ -401,7 +401,8 @@ end tell
         // starts with blank chat history. Only authoritative sources (lsof, session
         // ID from process args) are used during the grace period. The identity hook
         // will pin the correct session once it fires on the first prompt.
-        const isFreshSpawn = this.telemetry.isRecentSpawn(proc.tty);
+        // Also treat never-before-seen PIDs as fresh (covers externally-started agents).
+        const isFreshSpawn = this.telemetry.isRecentSpawn(proc.tty) || !this.discoveredPids.has(proc.pid);
 
         // Priority 0: content-based match (ground truth from identity hook in JSONL).
         // Overrides all heuristics because it matches TTY↔file using actual content.

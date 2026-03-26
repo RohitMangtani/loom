@@ -73,10 +73,14 @@ export function runShellExec(request: ShellExecRequest): Promise<ShellExecResult
   const cwd = request.cwd || homedir();
   const startedAt = Date.now();
 
+  const isWindows = process.platform === "win32";
+  const shell = isWindows ? "cmd.exe" : "/bin/zsh";
+  const shellArgs = isWindows ? ["/c", request.command] : ["-lc", request.command];
+
   return new Promise((resolve) => {
     execFile(
-      "/bin/zsh",
-      ["-lc", request.command],
+      shell,
+      shellArgs,
       {
         cwd,
         timeout: timeoutMs,

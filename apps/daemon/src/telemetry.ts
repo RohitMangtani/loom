@@ -888,13 +888,13 @@ export class TelemetryReceiver {
     // the hash won't match and the agent knows to pull first.
     if (dispatch.project) {
       try {
-        const gitHash = execFileSync("/usr/bin/git", ["rev-parse", "--short", "HEAD"], {
+        const gitHash = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
           cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
         }).trim();
-        const gitBranch = execFileSync("/usr/bin/git", ["branch", "--show-current"], {
+        const gitBranch = execFileSync("git", ["branch", "--show-current"], {
           cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
         }).trim();
-        const gitClean = execFileSync("/usr/bin/git", ["status", "--porcelain"], {
+        const gitClean = execFileSync("git", ["status", "--porcelain"], {
           cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
         }).trim();
         handoffData.git = { hash: gitHash, branch: gitBranch, clean: gitClean.length === 0 };
@@ -910,7 +910,7 @@ export class TelemetryReceiver {
     // Git diff summary (what exactly changed, not just which files)
     if (dispatch.project && fileList.length > 0) {
       try {
-        const diff = execFileSync("/usr/bin/git", ["diff", "--stat", "HEAD~1"], {
+        const diff = execFileSync("git", ["diff", "--stat", "HEAD~1"], {
           cwd: dispatch.project, encoding: "utf-8", timeout: 5000,
         }).trim();
         if (diff) {
@@ -942,7 +942,7 @@ export class TelemetryReceiver {
     }
     if (dispatch.project) {
       try {
-        const porcelain = execFileSync("/usr/bin/git", ["status", "--porcelain"], {
+        const porcelain = execFileSync("git", ["status", "--porcelain"], {
           cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
         }).trim();
         if (porcelain.length > 0) {
@@ -953,7 +953,7 @@ export class TelemetryReceiver {
 
       // Check for merge conflicts
       try {
-        const conflictCheck = execFileSync("/usr/bin/git", ["diff", "--check"], {
+        const conflictCheck = execFileSync("git", ["diff", "--check"], {
           cwd: dispatch.project, encoding: "utf-8", timeout: 3000,
         }).trim();
         if (conflictCheck.includes("conflict")) {
@@ -1164,7 +1164,7 @@ export class TelemetryReceiver {
 
       // Check if project is a git repo
       try {
-        execFileSync("/usr/bin/git", ["rev-parse", "--git-dir"], {
+        execFileSync("git", ["rev-parse", "--git-dir"], {
           cwd: project,
           encoding: "utf-8",
           timeout: 3000,
@@ -1181,14 +1181,14 @@ export class TelemetryReceiver {
         return null;
       }
 
-      execFileSync("/usr/bin/git", ["add", ...existingFiles], {
+      execFileSync("git", ["add", ...existingFiles], {
         cwd: project,
         encoding: "utf-8",
         timeout: 10_000,
       });
 
       // Check if there's anything staged
-      const staged = execFileSync("/usr/bin/git", ["diff", "--cached", "--name-only"], {
+      const staged = execFileSync("git", ["diff", "--cached", "--name-only"], {
         cwd: project,
         encoding: "utf-8",
         timeout: 5_000,
@@ -1204,14 +1204,14 @@ export class TelemetryReceiver {
       const fileNames = existingFiles.map(f => basename(f)).join(", ");
       const commitMsg = `${shortTask}\n\nFiles: ${fileNames}\n\nAuto-committed by Hive after task completion.`;
 
-      execFileSync("/usr/bin/git", ["commit", "-m", commitMsg, "--no-verify"], {
+      execFileSync("git", ["commit", "-m", commitMsg, "--no-verify"], {
         cwd: project,
         encoding: "utf-8",
         timeout: 15_000,
       });
 
       // Get the commit hash
-      const hash = execFileSync("/usr/bin/git", ["rev-parse", "--short", "HEAD"], {
+      const hash = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
         cwd: project,
         encoding: "utf-8",
         timeout: 3000,
@@ -1221,7 +1221,7 @@ export class TelemetryReceiver {
 
       // Auto-push to keep repos in sync across machines
       try {
-        execFileSync("/usr/bin/git", ["push"], {
+        execFileSync("git", ["push"], {
           cwd: project,
           encoding: "utf-8",
           timeout: 30_000,
@@ -1910,7 +1910,7 @@ export class TelemetryReceiver {
     if (!remoteWorker && worker.project && !options.source.startsWith("auto-pilot") && options.source !== "task-queue") {
       try {
         const { execFile: gitPull } = require("child_process");
-        gitPull("/usr/bin/git", ["pull", "--ff-only", "--no-edit"], {
+        gitPull("git", ["pull", "--ff-only", "--no-edit"], {
           cwd: worker.project,
           encoding: "utf-8",
           timeout: 15_000,
@@ -2289,7 +2289,7 @@ export class TelemetryReceiver {
       if (resolvedTaskProject) {
         try {
           const { execFileSync } = require("child_process");
-          execFileSync("/usr/bin/git", ["pull", "--ff-only", "--no-edit"], {
+          execFileSync("git", ["pull", "--ff-only", "--no-edit"], {
             cwd: resolvedTaskProject,
             encoding: "utf-8",
             timeout: 15_000,

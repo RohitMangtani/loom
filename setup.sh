@@ -75,6 +75,11 @@ if [ "$HAS_OPENCLAW" -eq 1 ]; then
 fi
 
 HAS_SWIFT=0
+IS_WINDOWS=0
+if [ "$(uname -o 2>/dev/null)" = "Msys" ] || [ "$(uname -o 2>/dev/null)" = "Cygwin" ] || [ -n "$MSYSTEM" ]; then
+  IS_WINDOWS=1
+fi
+
 if [ "$(uname)" = "Darwin" ]; then
   if command -v swiftc &>/dev/null; then
     echo "  ✓ Swift compiler"
@@ -82,6 +87,17 @@ if [ "$(uname)" = "Darwin" ]; then
   else
     echo "  • swiftc not found — auto-pilot (auto-approve prompts) will be disabled"
     echo "    To enable later: xcode-select --install && bash setup.sh"
+  fi
+elif [ "$IS_WINDOWS" -eq 1 ]; then
+  echo "  • Windows detected — auto-pilot uses PowerShell automation"
+  if command -v wt.exe &>/dev/null; then
+    echo "  ✓ Windows Terminal"
+  else
+    echo "  • Windows Terminal not found — install from Microsoft Store for best experience"
+  fi
+  if command -v nvidia-smi &>/dev/null; then
+    GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "unknown")"
+    echo "  ✓ GPU: $GPU_NAME"
   fi
 else
   echo "  • Linux detected — auto-pilot uses tmux (no swiftc needed)"

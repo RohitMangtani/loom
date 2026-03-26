@@ -18,6 +18,7 @@ import { loadOrCreateToken, deriveViewerToken, patchHookUrls } from "./auth.js";
 import { SatelliteClient } from "./satellite.js";
 import { acquireRuntimeSingleton } from "./runtime-singleton.js";
 import { loadPlatform } from "./platform/index.js";
+import { TunnelHealthMonitor } from "./tunnel-health.js";
 import { UserRegistry } from "./user-registry.js";
 import { ReplayManager } from "./replay.js";
 import { RevertHistory } from "./revert-history.js";
@@ -117,6 +118,7 @@ if (satFlagIdx !== -1) {
     process.exit(0);
   }
 
+  const tunnelHealth = new TunnelHealthMonitor();
   const replayManager = new ReplayManager();
   const telemetry = new TelemetryReceiver(3001, token, {
     terminal: platform.terminal,
@@ -207,6 +209,7 @@ if (satFlagIdx !== -1) {
     collector.tick();
     outbox.tick();
     devices.tick();
+    tunnelHealth.tick();
   }, 3_000);
 
   // Write initial workers file immediately after first scan

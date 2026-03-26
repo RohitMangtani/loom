@@ -180,8 +180,10 @@ if [ -n "$TUNNEL_URL" ]; then
   echo "  Tunnel:  $TUNNEL_URL"
   echo "  Token:   $(cat "$HIVE_DIR/token" 2>/dev/null || echo '(not found)')"
   echo ""
-  echo "  Connect another Mac:"
-  echo "  bash scripts/install.sh --connect $WS_URL $(cat "$HIVE_DIR/token" 2>/dev/null || echo 'TOKEN')"
+  echo "  Connect another machine:"
+  echo ""
+  echo "  macOS/Linux: bash scripts/install.sh --connect $WS_URL $(cat "$HIVE_DIR/token" 2>/dev/null || echo 'TOKEN')"
+  echo "  Windows:     .\\scripts\\install.ps1 -Connect -Url $WS_URL -Token $(cat "$HIVE_DIR/token" 2>/dev/null || echo 'TOKEN')"
   echo ""
   echo "  Or anytime later: npm run invite"
 else

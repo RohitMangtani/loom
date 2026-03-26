@@ -52,6 +52,12 @@ echo "  git clone https://github.com/RohitMangtani/hive.git"
 echo "  cd hive"
 echo "  $CONNECT_CMD"
 echo ""
+echo "  Windows (PowerShell):"
+echo ""
+echo "  git clone https://github.com/RohitMangtani/hive.git"
+echo "  cd hive"
+echo "  .\\scripts\\install.ps1 -Connect -Url $WS_URL -Token $TOKEN"
+echo ""
 echo "  Or paste this into Claude Code / Codex on the other machine:"
 echo ""
 echo "  Install Hive for me. Clone https://github.com/RohitMangtani/hive."
@@ -61,14 +67,24 @@ echo ""
 echo "  ── Connection is permanent ──"
 echo ""
 echo "  Once connected, the satellite runs as a background"
-echo "  service (launchd). It survives sleep, reboot, and"
-echo "  terminal close. Agents appear and disappear as the"
-echo "  machine wakes and sleeps. The only way to disconnect"
-echo "  is to explicitly remove the service."
+echo "  service. It survives sleep, reboot, and terminal"
+echo "  close. Agents appear and disappear as the machine"
+echo "  wakes and sleeps. The only way to disconnect is to"
+echo "  explicitly remove the service."
 echo ""
 
-if [ "${1:-}" = "--copy" ] && command -v pbcopy &>/dev/null; then
-  echo "$CONNECT_CMD" | pbcopy
-  echo "  Copied to clipboard."
+if [ "${1:-}" = "--copy" ]; then
+  if command -v pbcopy &>/dev/null; then
+    echo "$CONNECT_CMD" | pbcopy
+    echo "  Copied to clipboard."
+  elif command -v xclip &>/dev/null; then
+    echo "$CONNECT_CMD" | xclip -selection clipboard
+    echo "  Copied to clipboard."
+  elif command -v xsel &>/dev/null; then
+    echo "$CONNECT_CMD" | xsel --clipboard
+    echo "  Copied to clipboard."
+  else
+    echo "  (clipboard tool not found — copy manually)"
+  fi
   echo ""
 fi

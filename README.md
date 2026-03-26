@@ -1,6 +1,6 @@
 # Hive
 
-Multi-agent orchestration layer for LLM-based development workflows. One dashboard across multiple models, multiple machines, multiple people, and every handoff in plain English. macOS native, Linux via tmux in progress.
+Multi-agent orchestration layer for LLM-based development workflows. One dashboard across multiple models, multiple machines, multiple people, and every handoff in plain English. macOS, Windows, and Linux.
 
 ![Hive stacked dashboard diagram](docs/hive-stack.svg)
 
@@ -35,7 +35,7 @@ The five projects: two websites with 25 published articles, this orchestration s
 
 Paste this into Claude Code or Codex:
 
-> Install Hive for me. Clone https://github.com/RohitMangtani/hive. Before running the install script, ask me: "Which setup do you want? (1) Desktop app on this Mac, (2) New Hive environment with your own hosted dashboard, or (3) Connect this Mac to an existing Hive network on another computer." If I choose 1, run `npm install`, then `npm run desktop:prepare`, `npm run desktop:smoke`, and `npm run desktop:dev`. If I choose 2, run `bash scripts/install.sh --fresh`. It handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end. If I choose 3, ask me for the tunnel URL and token from the other machine, then run `bash scripts/install.sh --connect <URL> <TOKEN>` with what I provide. Give me whatever it prints at the end.
+> Install Hive for me. Clone https://github.com/RohitMangtani/hive. Before running the install script, ask me: "Which setup do you want? (1) Desktop app on this computer, (2) New Hive environment with your own hosted dashboard, or (3) Connect this computer to an existing Hive network on another machine." If I choose 1, run `npm install`, then `npm run desktop:prepare`, `npm run desktop:smoke`, and `npm run desktop:dev`. If I choose 2: on macOS/Linux run `bash scripts/install.sh --fresh`, on Windows run `powershell -File scripts\install.ps1 -Fresh`. It handles setup, dependencies, Vercel login, the daemon, and dashboard deploy. When Vercel opens my browser, I'll click authorize and it continues. Give me the dashboard URL and token it prints at the end. If I choose 3, ask me for the tunnel URL and token from the other machine, then: on macOS/Linux run `bash scripts/install.sh --connect <URL> <TOKEN>`, on Windows run `powershell -File scripts\install.ps1 -Connect -Url <URL> -Token <TOKEN>`. Give me whatever it prints at the end.
 
 When the agent runs, approve these one-time prompts:
 
@@ -44,17 +44,26 @@ When the agent runs, approve these one-time prompts:
 3. **Sandbox mode** - select full sandbox so the agent can run commands without pausing on every action.
 
 **What you need beforehand:**
-- macOS with Node.js 20+ installed
+- macOS, Windows, or Linux with Node.js 20+ installed
 - A free [Vercel](https://vercel.com) account (the dashboard deploys here so you can access it from any device)
 - At least one AI CLI installed: `claude`, `codex`, or `openclaw`
 
 ### Manual install (no AI CLI needed)
 
+**macOS / Linux:**
 ```bash
 git clone https://github.com/RohitMangtani/hive.git
 cd hive
 bash scripts/install.sh --fresh        # new environment
 bash scripts/install.sh --connect URL TOKEN  # join existing
+```
+
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
+.\scripts\install.ps1 -Fresh           # new environment
+.\scripts\install.ps1 -Connect -Url URL -Token TOKEN  # join existing
 ```
 
 Inside the repo, the same flows are available through the local CLI wrapper:
@@ -73,12 +82,14 @@ npx @rohitmangtani/hive init
 
 The published CLI clones or reuses Hive at `~/hive` by default. Pass `--dir /path/to/hive` if you want a different install location.
 
-### After install: one-time macOS approvals
+### After install: one-time OS approvals
 
-Once setup finishes and Hive is running, macOS may ask for a couple more permissions the first time you use certain features:
+**macOS:** Once setup finishes, macOS may ask for permissions:
 
 4. **Automation permission** -macOS asks "Terminal wants to control Terminal." Click **OK**. This lets Hive send messages to agents and close terminals from the dashboard. If you miss it: System Settings → Privacy & Security → Automation.
 5. **Accessibility permission** (optional). If setup compiled the auto-pilot binary, it opens System Settings and Finder. Drag `send-return` into the Accessibility list and toggle it on. This lets agents auto-approve their own prompts. Skip if you prefer manual approval.
+
+**Windows:** No special approvals needed. Windows Terminal is recommended for the best experience (`winget install Microsoft.WindowsTerminal`). The satellite installs as a Task Scheduler task that auto-starts at logon.
 
 ### Using your token
 
@@ -86,11 +97,11 @@ Once setup finishes, Hive prints your token. Copy it. Open the dashboard URL Hiv
 
 ### Running agents
 
-Open Terminal.app windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds.
+Open terminal windows and run `claude`, `codex`, or `openclaw tui`. They appear on the dashboard within 3 seconds. On macOS use Terminal.app, on Windows use Windows Terminal or PowerShell, on Linux use tmux.
 
 ### Connect another computer
 
-You can connect multiple Macs to the same Hive dashboard. Terminals on the second machine appear alongside your local ones. Chat, close, and manage them all from one screen.
+You can connect any Mac, Windows PC, or Linux machine to the same Hive dashboard. Terminals on the second machine appear alongside your local ones. Chat, close, and manage them all from one screen.
 
 On the primary machine, run:
 
@@ -100,29 +111,37 @@ npm run invite
 
 This prints the full connect command with your tunnel URL and token. Copy it.
 
-On the second computer, clone and paste:
+On the second computer, clone and connect:
 
+**macOS / Linux:**
 ```bash
 git clone https://github.com/RohitMangtani/hive.git
 cd hive
 bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
 ```
 
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/RohitMangtani/hive.git
+cd hive
+.\scripts\install.ps1 -Connect -Url wss://YOUR-TUNNEL-URL -Token YOUR-TOKEN
+```
+
 Or paste the one-liner into Claude Code / Codex on the other machine and it handles everything.
 
-**Connection is permanent.** The satellite installs as a macOS background service (launchd). It survives sleep, reboot, and terminal close. Agents appear on the dashboard when the machine is awake and disappear when it sleeps. The only way to disconnect is to explicitly remove the service (`launchctl bootout`).
+**Connection is permanent.** The satellite installs as a background service on every OS: launchd on macOS, systemd on Linux, Task Scheduler on Windows. It survives sleep, reboot, and terminal close. Agents appear on the dashboard when the machine is awake and disappear when it sleeps.
 
 The tunnel URL and token are printed at the end of the primary install. You can also find them at `~/.hive/tunnel-url.txt` and `~/.hive/token` on the primary machine. The connect command also appears in the install output.
 
-Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the active public tunnel, so the machines don't need to be on the same network. The satellite runs as a background service (launchd) and survives sleep, reboot, and terminal close. If macOS asks you to approve Node.js in System Settings → Privacy & Security, click Allow once.
+Satellite terminals show a machine badge on the dashboard so you can tell which computer each agent is running on. Everything works through the active public tunnel, so the machines don't need to be on the same network. If macOS asks you to approve Node.js in System Settings → Privacy & Security, click Allow once.
 
 The connect install is idempotent. Re-running it on the same machine updates the stored primary URL/token, cleans out stale satellite processes, and re-installs the background service cleanly.
 
 If a satellite gets into a reconnect loop or stale state, Hive self-heals on the remote machine. A connected primary can trigger `update`, `repair`, or `reinstall`, and a disconnected satellite escalates from local repair to local reinstall automatically using the stored `~/.hive/primary-url` and `~/.hive/primary-token`.
 
-### Connect a Windows PC (via WSL)
+### Windows via WSL (alternative)
 
-Hive runs on Windows through WSL2. Agents run inside WSL, and the satellite has full access to your GPU via WSL2's native GPU passthrough. If your Windows machine has an NVIDIA GPU, Hive auto-detects it and tasks with `"requires":["gpu"]` route there automatically.
+If you prefer running inside WSL2 instead of native Windows, that works too. Agents run inside WSL with full GPU access via WSL2's native GPU passthrough.
 
 **One-time WSL setup:**
 
@@ -142,7 +161,7 @@ Hive runs on Windows through WSL2. Agents run inside WSL, and the satellite has 
    bash scripts/install.sh --connect wss://YOUR-TUNNEL-URL YOUR-TOKEN
    ```
 
-The satellite installs as a systemd user service inside WSL. It auto-starts when WSL boots and survives terminal close. Your Windows machine's GPU, CPU, RAM, and installed software all show up as capabilities on the primary dashboard.
+The satellite installs as a systemd user service inside WSL. It auto-starts when WSL boots and survives terminal close.
 
 **GPU routing:** If `nvidia-smi` is available inside WSL (it is by default on WSL2 with NVIDIA drivers installed on Windows), Hive reports GPU name and VRAM. Queue tasks with `"requires":["gpu"]` and they route to the GPU machine.
 
@@ -158,9 +177,9 @@ npm run launch:local
 
 ## Prerequisites
 
-- **macOS** (primary, uses AppleScript + CGEvent for terminal interaction) or **Linux / WSL2** (satellite, uses tmux)
+- **macOS**, **Windows**, or **Linux** — all fully supported as primary or satellite
 - **Node.js 20+** - [nodejs.org](https://nodejs.org)
-- **Homebrew** - [brew.sh](https://brew.sh) (macOS, for installing Cloudflare tunnel and other optional dependencies)
+- **Homebrew** - [brew.sh](https://brew.sh) (macOS only, for installing tunnel tools)
 
 That's it. Everything else is optional and the setup script handles it gracefully:
 

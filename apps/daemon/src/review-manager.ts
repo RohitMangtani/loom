@@ -243,7 +243,7 @@ export class ReviewManager {
 
   private getCommitHash(worker: WorkerState): string | undefined {
     try {
-      return execFileSync("/usr/bin/git", ["rev-parse", "--short=8", "HEAD"], {
+      return execFileSync("git", ["rev-parse", "--short=8", "HEAD"], {
         cwd: worker.project,
         encoding: "utf-8",
         timeout: 3000,
@@ -255,7 +255,7 @@ export class ReviewManager {
 
   private getCommitMessage(worker: WorkerState): string | undefined {
     try {
-      return execFileSync("/usr/bin/git", ["log", "-1", "--pretty=%s"], {
+      return execFileSync("git", ["log", "-1", "--pretty=%s"], {
         cwd: worker.project,
         encoding: "utf-8",
         timeout: 3000,
@@ -267,7 +267,7 @@ export class ReviewManager {
 
   private resolveGitBranch(worker: WorkerState): string | undefined {
     try {
-      return execFileSync("/usr/bin/git", ["symbolic-ref", "--short", "HEAD"], {
+      return execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
         cwd: worker.project,
         encoding: "utf-8",
         timeout: 3000,
@@ -279,7 +279,7 @@ export class ReviewManager {
 
   private resolveGitUrl(worker: WorkerState): string | undefined {
     try {
-      const remote = execFileSync("/usr/bin/git", ["remote", "get-url", "origin"], {
+      const remote = execFileSync("git", ["remote", "get-url", "origin"], {
         cwd: worker.project,
         encoding: "utf-8",
         timeout: 3000,
@@ -298,7 +298,7 @@ export class ReviewManager {
 
   private resolveGitRepoName(worker: WorkerState): string {
     try {
-      const root = execFileSync("/usr/bin/git", ["rev-parse", "--show-toplevel"], {
+      const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
         cwd: worker.project,
         encoding: "utf-8",
         timeout: 3000,

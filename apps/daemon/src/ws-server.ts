@@ -36,7 +36,7 @@ import type { HiveUser as HiveUserInfo } from "@hive/types";
 function getLocalVersion(): string {
   try {
     const repoDir = join(import.meta.dirname, "..", "..", "..");
-    return execFileSync("/usr/bin/git", ["rev-parse", "--short=8", "HEAD"], {
+    return execFileSync("git", ["rev-parse", "--short=8", "HEAD"], {
       cwd: repoDir, timeout: 3000, encoding: "utf-8",
     }).trim();
   } catch { return "unknown"; }
@@ -2568,7 +2568,7 @@ export class WsServer {
         }
         // Execute git revert
         try {
-          execFileSync("/usr/bin/git", ["-C", entry.projectPath, "revert", "--no-edit", entry.commit], {
+          execFileSync("git", ["-C", entry.projectPath, "revert", "--no-edit", entry.commit], {
             timeout: 15_000,
             encoding: "utf-8",
           });

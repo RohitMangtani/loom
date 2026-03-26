@@ -39,6 +39,8 @@ export interface FederationDisconnectMeta {
   reason: FederationDisconnectReason;
   connectionAgeMs: number;
   stable: boolean;
+  /** True if the WebSocket actually opened before disconnecting. False if connection was refused/timed out. */
+  wasConnected: boolean;
 }
 
 /**
@@ -282,7 +284,8 @@ export class FederationSocketClient<TIncoming extends { type?: string }, TOutgoi
     if (this.stopped) return;
 
     const now = Date.now();
-    const connectionAgeMs = this.connectedAt ? now - this.connectedAt : 0;
+    const wasConnected = this.connectedAt > 0;
+    const connectionAgeMs = wasConnected ? now - this.connectedAt : 0;
     const stable = connectionAgeMs >= this.stableConnectionMs;
     this.connectedAt = 0;
 
@@ -291,6 +294,7 @@ export class FederationSocketClient<TIncoming extends { type?: string }, TOutgoi
       reason,
       connectionAgeMs,
       stable,
+      wasConnected,
     });
 
     if (this.stopped || decision === "handled") return;
