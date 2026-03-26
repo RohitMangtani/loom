@@ -231,7 +231,9 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
     [ -f "$HOME/.hive/primary-urls.txt" ] && cat "$HOME/.hive/primary-urls.txt"
   } | awk 'NF && !seen[$0]++' | head -5 > "$HOME/.hive/primary-urls.txt"
   echo "$PRIMARY_TOKEN" > "$HOME/.hive/primary-token"
-  chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-urls.txt" "$HOME/.hive/primary-token" 2>/dev/null || true
+  if ! chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-urls.txt" "$HOME/.hive/primary-token" 2>/dev/null; then
+    echo "  ⚠ Could not restrict token file permissions — they may be world-readable"
+  fi
   echo "  ✓ Primary connection stored"
 
   echo "  Cleaning existing Hive satellite runtime..."
@@ -556,7 +558,9 @@ else
   # child process. This is required for osascript Automation permission
   # (closing terminals from the dashboard). macOS may show an approval
   # dialog the first time — click OK.
-  if osascript -e "tell application \"Terminal\" to do script \"cd '$ROOT' && npm start\"" 2>/dev/null; then
+  # Escape single quotes in ROOT for safe embedding in AppleScript string
+  ESCAPED_ROOT="${ROOT//\'/\'\\\'\'}"
+  if osascript -e "tell application \"Terminal\" to do script \"cd '${ESCAPED_ROOT}' && npm start\"" 2>/dev/null; then
     echo "  ✓ Daemon started in a new Terminal window"
     DAEMON_START_MODE="terminal_window"
   else

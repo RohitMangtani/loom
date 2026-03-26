@@ -20,6 +20,11 @@ if [ ! -f "$TOKEN_FILE" ]; then
 fi
 
 TOKEN="$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')"
+if ! echo "$TOKEN" | grep -qE '^[0-9a-f]{64}$'; then
+  echo "  Token file exists but content is invalid (expected 64-char hex)."
+  echo "  Re-run setup: bash scripts/install.sh --fresh"
+  exit 1
+fi
 
 if [ ! -f "$TUNNEL_FILE" ]; then
   echo "  No tunnel URL found at $TUNNEL_FILE."

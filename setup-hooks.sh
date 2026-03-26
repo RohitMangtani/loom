@@ -28,8 +28,12 @@ if [ ! -f "$IDENTITY_SRC" ]; then
   exit 1
 fi
 
-cp "$IDENTITY_SRC" "$IDENTITY_DST"
-chmod +x "$IDENTITY_DST"
+# Atomic copy: write to temp, set permissions, then move into place.
+# Prevents a window where the file exists with wrong permissions.
+IDENTITY_TMP="${IDENTITY_DST}.tmp.$$"
+cp "$IDENTITY_SRC" "$IDENTITY_TMP"
+chmod +x "$IDENTITY_TMP"
+mv "$IDENTITY_TMP" "$IDENTITY_DST"
 
 if [ ! -f "$TOKEN_PATH" ]; then
   node <<'NODE'
