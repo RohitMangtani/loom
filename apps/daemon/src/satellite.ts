@@ -1155,9 +1155,10 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
 
       case "satellite_update": {
         // Primary tells us to pull latest code and restart.
-        // Find our own repo directory, git pull, then respawn the process.
+        // After pulling, re-run the install script so the process supervisor
+        // config (batch file, Task Scheduler, launchd plist) stays in sync
+        // with the code. This is what makes updates fully automatic.
         console.log("[satellite] Received update command  --  pulling latest code...");
-        // Derive repo root from this file's location: apps/daemon/src/satellite.ts → ../../..
         const repoDir = msg.project || join(import.meta.dirname, "..", "..", "..");
         try {
           await new Promise<void>((resolve, reject) => {
@@ -1167,19 +1168,41 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
                 else { console.log(`[satellite] git pull: ${(stdout || "").trim()}`); resolve(); }
               });
           });
-          // Build after pull so compiled JS matches pulled source
-          const npxPath = process.env.NPX_PATH || "npx";
-          await new Promise<void>((resolve, reject) => {
-            execFile(npxPath, ["tsc"], { cwd: join(repoDir, "apps/daemon"), timeout: 30_000 },
-              (err) => {
-                if (err) { console.log(`[satellite] build warning: ${err.message.slice(0, 100)}`); resolve(); }
-                else { console.log("[satellite] rebuild complete"); resolve(); }
-              });
-          });
+
+          // Re-run install script to update process supervisor config
+          // (batch file restart loop, Task Scheduler triggers, launchd plist).
+          // This ensures the supervisor config always matches the pulled code.
+          const primaryUrlPath = join(homedir(), ".hive", "primary-url");
+          const primaryTokenPath = join(homedir(), ".hive", "primary-token");
+          const logPath = join(homedir(), ".hive", "logs", "satellite-update.log");
+          const isWindows = process.platform === "win32";
+
+          if (isWindows) {
+            const psCmd = `$u = Get-Content '${primaryUrlPath}' -Raw; $t = Get-Content '${primaryTokenPath}' -Raw; if ($u -and $t) { Set-Location '${repoDir}'; & .\\scripts\\install.ps1 -Connect -Url $u.Trim() -Token $t.Trim() } *> '${logPath}'`;
+            await new Promise<void>((resolve) => {
+              execFile("powershell", ["-NoProfile", "-Command", psCmd],
+                { timeout: 60_000 }, (err) => {
+                  if (err) console.log(`[satellite] install.ps1 re-run warning: ${err.message.slice(0, 100)}`);
+                  else console.log("[satellite] install.ps1 re-run complete");
+                  resolve(); // non-fatal — the pull already landed
+                });
+            });
+          } else {
+            const bashCmd = `cd '${repoDir}' && PRIMARY_URL=$(cat '${primaryUrlPath}' 2>/dev/null) && PRIMARY_TOKEN=$(cat '${primaryTokenPath}' 2>/dev/null) && [ -n "$PRIMARY_URL" ] && [ -n "$PRIMARY_TOKEN" ] && bash scripts/install.sh --connect "$PRIMARY_URL" "$PRIMARY_TOKEN" > '${logPath}' 2>&1`;
+            const shell = existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash";
+            await new Promise<void>((resolve) => {
+              execFile(shell, ["-lc", bashCmd],
+                { timeout: 60_000 }, (err) => {
+                  if (err) console.log(`[satellite] install.sh re-run warning: ${err.message.slice(0, 100)}`);
+                  else console.log("[satellite] install.sh re-run complete");
+                  resolve();
+                });
+            });
+          }
+
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
-          // Restart: give time for the result to send, then exit.
-          // The process supervisor (launchd/systemd/pm2) or install.sh wrapper
-          // should restart us automatically.
+          // Restart: the install script already re-registered the process
+          // supervisor, so exit and let it restart us with fresh code.
           console.log("[satellite] Restarting in 2 seconds...");
           setTimeout(() => process.exit(0), 2000);
         } catch (err) {
