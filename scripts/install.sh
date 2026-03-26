@@ -30,12 +30,21 @@ install_dependencies() {
 
 IS_LINUX=0
 IS_WSL=0
-if [ "$(uname)" = "Linux" ]; then
-  IS_LINUX=1
-  if grep -qi microsoft /proc/version 2>/dev/null; then
-    IS_WSL=1
-  fi
-fi
+IS_GITBASH=0
+UNAME_OUT="$(uname -s)"
+case "$UNAME_OUT" in
+  Linux*)
+    IS_LINUX=1
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+      IS_WSL=1
+    fi
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    # Git Bash / MSYS2 / Cygwin on Windows — treat like Linux for most paths
+    IS_LINUX=1
+    IS_GITBASH=1
+    ;;
+esac
 
 cleanup_hive_satellite_runtime() {
   mkdir -p "$HOME/.hive/runtime"
@@ -243,7 +252,34 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
   NODE_DIR="$(dirname "$(which node 2>/dev/null || echo '/usr/local/bin/node')")"
   mkdir -p "$HOME/.hive/logs"
 
-  if [ "$IS_LINUX" -eq 1 ]; then
+  if [ "$IS_GITBASH" -eq 1 ]; then
+    # ── Git Bash / MSYS2 on Windows: use Task Scheduler via PowerShell ──
+    echo "  Windows (Git Bash) detected — using Task Scheduler..."
+
+    # Convert MSYS path to Windows path for Task Scheduler
+    WIN_ROOT="$(cygpath -w "$ROOT" 2>/dev/null || echo "$ROOT")"
+    WIN_NPX="$(cygpath -w "$NPX_PATH" 2>/dev/null || echo "$NPX_PATH")"
+
+    # Create Task Scheduler task via PowerShell
+    powershell.exe -NoProfile -Command "
+      \$action = New-ScheduledTaskAction -Execute '$WIN_NPX' -Argument 'tsx apps/daemon/src/index.ts --satellite' -WorkingDirectory '$WIN_ROOT'
+      \$trigger = New-ScheduledTaskTrigger -AtLogOn -User \$env:USERNAME
+      \$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Seconds 10) -ExecutionTimeLimit (New-TimeSpan -Days 365)
+      Register-ScheduledTask -TaskName 'HiveSatellite' -Action \$action -Trigger \$trigger -Settings \$settings -Description 'Hive Satellite Daemon' -Force | Out-Null
+      Start-ScheduledTask -TaskName 'HiveSatellite'
+      Write-Output 'ok'
+    " 2>/dev/null && echo "  ✓ Satellite service installed (Windows Task Scheduler)" || {
+      # Fallback: start with nohup in Git Bash
+      echo "  Task Scheduler failed — starting in background..."
+      nohup "$NPX_PATH" tsx apps/daemon/src/index.ts --satellite \
+        > "$HOME/.hive/logs/satellite.stdout.log" \
+        2> "$HOME/.hive/logs/satellite.stderr.log" &
+      echo $! > "$HOME/.hive/runtime/satellite.pid"
+      disown "$!" 2>/dev/null || true
+      echo "  ✓ Satellite started (PID $(cat "$HOME/.hive/runtime/satellite.pid"))"
+    }
+
+  elif [ "$IS_LINUX" -eq 1 ]; then
     # ── Linux / WSL: systemd user service ────────────────────────────
     CURRENT_PATH="$NODE_DIR:/usr/local/bin:/usr/bin:/bin"
 
@@ -396,7 +432,10 @@ PLIST
   echo "  Your terminals will appear on the primary's"
   echo "  dashboard within a few seconds."
   echo ""
-  if [ "$IS_LINUX" -eq 1 ]; then
+  if [ "$IS_GITBASH" -eq 1 ]; then
+    echo "  Open terminal windows and run 'claude', 'codex',"
+    echo "  or any agent — the primary dashboard sees them."
+  elif [ "$IS_LINUX" -eq 1 ]; then
     echo "  Open tmux panes and run 'claude', 'codex',"
     echo "  or any agent — the primary dashboard sees them."
     echo "  (Hive uses tmux for terminal management on Linux.)"
@@ -418,7 +457,9 @@ PLIST
     echo ""
   fi
   echo "  Log:   cat ~/.hive/logs/satellite.stderr.log"
-  if [ "$IS_LINUX" -eq 1 ] && [ "$HAS_SYSTEMD" -eq 1 ]; then
+  if [ "$IS_GITBASH" -eq 1 ]; then
+    echo "  Stop:  powershell.exe -Command \"Unregister-ScheduledTask -TaskName HiveSatellite -Confirm:\\\$false\""
+  elif [ "$IS_LINUX" -eq 1 ] && [ "${HAS_SYSTEMD:-0}" -eq 1 ]; then
     echo "  Stop:  systemctl --user stop hive-satellite"
   elif [ "$IS_LINUX" -eq 0 ]; then
     echo "  Stop:  launchctl bootout gui/$(id -u)/com.hive.satellite"
