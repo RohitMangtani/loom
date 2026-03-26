@@ -245,14 +245,12 @@ goto loop
 "@
   [System.IO.File]::WriteAllText($batFile, $batContent, [System.Text.Encoding]::ASCII)
 
-  # Install as Windows Task Scheduler task
-  # Two triggers: AtStartup (survives reboot even without login) + AtLogOn (covers user sessions)
+  # Install as Windows Task Scheduler task.
+  # Try elevated (AtStartup + AtLogOn + RunLevel Highest) first. If that fails
+  # (non-admin shell), fall back to user-level (AtLogOn only, no elevation).
   $action = New-ScheduledTaskAction `
     -Execute $batFile `
     -WorkingDirectory $Root
-
-  $triggerLogon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-  $triggerStartup = New-ScheduledTaskTrigger -AtStartup
 
   $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
@@ -263,18 +261,57 @@ goto loop
     -ExecutionTimeLimit (New-TimeSpan -Days 365) `
     -StartWhenAvailable
 
-  Register-ScheduledTask `
-    -TaskName 'HiveSatellite' `
-    -Action $action `
-    -Trigger @($triggerLogon, $triggerStartup) `
-    -Settings $settings `
-    -Description 'Hive Satellite Daemon - connects to primary Hive network' `
-    -RunLevel Highest `
-    -Force | Out-Null
+  $registered = $false
 
-  # Start the task now
-  Start-ScheduledTask -TaskName 'HiveSatellite'
-  Write-Host "  OK Satellite service installed (Windows Task Scheduler)"
+  # Attempt 1: elevated with AtStartup (survives reboot without login)
+  try {
+    $triggerLogon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $triggerStartup = New-ScheduledTaskTrigger -AtStartup
+    Register-ScheduledTask `
+      -TaskName 'HiveSatellite' `
+      -Action $action `
+      -Trigger @($triggerLogon, $triggerStartup) `
+      -Settings $settings `
+      -Description 'Hive Satellite Daemon - connects to primary Hive network' `
+      -RunLevel Highest `
+      -Force | Out-Null
+    $registered = $true
+    Write-Host "  OK Satellite service installed (Task Scheduler, elevated)"
+  } catch {
+    # Attempt 2: user-level (no admin needed, AtLogOn only)
+    try {
+      $triggerLogon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+      Register-ScheduledTask `
+        -TaskName 'HiveSatellite' `
+        -Action $action `
+        -Trigger $triggerLogon `
+        -Settings $settings `
+        -Description 'Hive Satellite Daemon - connects to primary Hive network' `
+        -Force | Out-Null
+      $registered = $true
+      Write-Host "  OK Satellite service installed (Task Scheduler, user-level)"
+    } catch {
+      Write-Host "  ! Task Scheduler registration failed: $_"
+    }
+  }
+
+  if (-not $registered) {
+    # Attempt 3: Startup folder fallback (always works, no admin needed)
+    $startupDir = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
+    if (Test-Path $startupDir) {
+      Copy-Item $batFile (Join-Path $startupDir "hive-satellite.bat") -Force
+      Write-Host "  OK Auto-start via Startup folder (fallback)"
+    }
+  }
+
+  # Start the task now (or start directly if no task)
+  if ($registered) {
+    Start-ScheduledTask -TaskName 'HiveSatellite'
+    Write-Host "  OK Satellite service started"
+  } else {
+    Start-Process -FilePath $batFile -WorkingDirectory $Root -WindowStyle Hidden
+    Write-Host "  OK Satellite started directly"
+  }
 
   # Wait for satellite to start
   $satOk = $false

@@ -288,21 +288,37 @@ goto loop
 BATEOF
 
     # Register Task Scheduler task via PowerShell for permanent auto-restart.
-    # Two triggers: AtStartup (survives reboot) + AtLogOn (covers user sessions).
+    # Try elevated first (AtStartup + AtLogOn), fall back to user-level (AtLogOn only).
     WIN_BAT="$(cygpath -w "$BAT_FILE" 2>/dev/null || echo "$BAT_FILE")"
     echo "  Registering Windows Task Scheduler task..."
-    powershell.exe -NoProfile -Command "
+    TASK_OK=0
+
+    # Attempt 1: elevated (AtStartup + AtLogOn)
+    if powershell.exe -NoProfile -Command "
       \$action = New-ScheduledTaskAction -Execute '$WIN_BAT' -WorkingDirectory '$WIN_ROOT'
       \$t1 = New-ScheduledTaskTrigger -AtLogOn -User \$env:USERNAME
       \$t2 = New-ScheduledTaskTrigger -AtStartup
       \$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -DontStopOnIdleEnd -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 365) -StartWhenAvailable
       Register-ScheduledTask -TaskName 'HiveSatellite' -Action \$action -Trigger @(\$t1, \$t2) -Settings \$settings -Description 'Hive Satellite Daemon' -RunLevel Highest -Force | Out-Null
       Start-ScheduledTask -TaskName 'HiveSatellite'
-    " 2>/dev/null
-
-    if powershell.exe -NoProfile -Command "Get-ScheduledTask -TaskName 'HiveSatellite' -ErrorAction SilentlyContinue" 2>/dev/null | grep -q "HiveSatellite"; then
-      echo "  ✓ Satellite service installed (Windows Task Scheduler)"
+    " 2>/dev/null; then
+      TASK_OK=1
+      echo "  ✓ Satellite service installed (Task Scheduler, elevated)"
     else
+      # Attempt 2: user-level (AtLogOn only, no admin needed)
+      if powershell.exe -NoProfile -Command "
+        \$action = New-ScheduledTaskAction -Execute '$WIN_BAT' -WorkingDirectory '$WIN_ROOT'
+        \$t1 = New-ScheduledTaskTrigger -AtLogOn -User \$env:USERNAME
+        \$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -DontStopOnIdleEnd -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 365) -StartWhenAvailable
+        Register-ScheduledTask -TaskName 'HiveSatellite' -Action \$action -Trigger \$t1 -Settings \$settings -Description 'Hive Satellite Daemon' -Force | Out-Null
+        Start-ScheduledTask -TaskName 'HiveSatellite'
+      " 2>/dev/null; then
+        TASK_OK=1
+        echo "  ✓ Satellite service installed (Task Scheduler, user-level)"
+      fi
+    fi
+
+    if [ "$TASK_OK" -eq 0 ]; then
       # Fallback: Startup folder + background process
       STARTUP_DIR="$(cygpath "$APPDATA/Microsoft/Windows/Start Menu/Programs/Startup" 2>/dev/null || echo "")"
       if [ -n "$STARTUP_DIR" ] && [ -d "$STARTUP_DIR" ]; then
