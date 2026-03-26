@@ -231,7 +231,7 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
     [ -f "$HOME/.hive/primary-urls.txt" ] && cat "$HOME/.hive/primary-urls.txt"
   } | awk 'NF && !seen[$0]++' | head -5 > "$HOME/.hive/primary-urls.txt"
   echo "$PRIMARY_TOKEN" > "$HOME/.hive/primary-token"
-  chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-urls.txt" "$HOME/.hive/primary-token"
+  chmod 600 "$HOME/.hive/primary-url" "$HOME/.hive/primary-urls.txt" "$HOME/.hive/primary-token" 2>/dev/null || true
   echo "  ✓ Primary connection stored"
 
   echo "  Cleaning existing Hive satellite runtime..."
@@ -239,7 +239,9 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
 
   # Stop any existing daemon on port 3001
   check_port_3001() {
-    if [ "$IS_LINUX" -eq 1 ]; then
+    if [ "$IS_GITBASH" -eq 1 ]; then
+      powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue" 2>/dev/null | grep -q "Listen" || return 1
+    elif [ "$IS_LINUX" -eq 1 ]; then
       ss -tlnp 2>/dev/null | grep -q ':3001 ' || return 1
     else
       lsof -tiTCP:3001 -sTCP:LISTEN >/dev/null 2>&1 || return 1
@@ -248,7 +250,9 @@ if [ "$SATELLITE_MODE" -eq 1 ]; then
 
   if check_port_3001; then
     echo "  Stopping existing daemon on :3001..."
-    if [ "$IS_LINUX" -eq 1 ]; then
+    if [ "$IS_GITBASH" -eq 1 ]; then
+      powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force -ErrorAction SilentlyContinue }" 2>/dev/null || true
+    elif [ "$IS_LINUX" -eq 1 ]; then
       fuser -k 3001/tcp 2>/dev/null || true
     else
       kill "$(lsof -tiTCP:3001 -sTCP:LISTEN)" 2>/dev/null || true
@@ -464,7 +468,7 @@ PLIST
   echo "  Agents disappear from the dashboard when this"
   echo "  computer is off and reappear when it wakes."
   echo ""
-  if [ "$IS_LINUX" -eq 0 ]; then
+  if [ "$IS_LINUX" -eq 0 ] && [ "$IS_GITBASH" -eq 0 ]; then
     echo "  ⚠  If macOS asks you to approve Node.js in"
     echo "     System Settings → Privacy & Security,"
     echo "     click Allow. This is a one-time approval"
@@ -473,7 +477,7 @@ PLIST
   fi
   echo "  Log:   cat ~/.hive/logs/satellite.stderr.log"
   if [ "$IS_GITBASH" -eq 1 ]; then
-    echo "  Stop:  powershell.exe -Command \"Unregister-ScheduledTask -TaskName HiveSatellite -Confirm:\\\$false\""
+    echo "  Stop:  kill \$(cat ~/.hive/runtime/satellite.pid)"
   elif [ "$IS_LINUX" -eq 1 ] && [ "${HAS_SYSTEMD:-0}" -eq 1 ]; then
     echo "  Stop:  systemctl --user stop hive-satellite"
   elif [ "$IS_LINUX" -eq 0 ]; then
