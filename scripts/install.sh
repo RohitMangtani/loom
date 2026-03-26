@@ -49,7 +49,16 @@ esac
 cleanup_hive_satellite_runtime() {
   mkdir -p "$HOME/.hive/runtime"
 
-  if [ "$IS_LINUX" -eq 1 ]; then
+  if [ "$IS_GITBASH" -eq 1 ]; then
+    # Git Bash / Windows cleanup — kill all satellite processes and remove Task Scheduler task
+    powershell.exe -NoProfile -Command "Unregister-ScheduledTask -TaskName 'HiveSatellite' -Confirm:\$false -ErrorAction SilentlyContinue" 2>/dev/null || true
+    # Kill any running satellite processes (including background ones from previous installs)
+    powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -match '--satellite' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>/dev/null || true
+    # Also kill via PID file
+    if [ -f "$HOME/.hive/runtime/satellite.pid" ]; then
+      kill "$(cat "$HOME/.hive/runtime/satellite.pid")" 2>/dev/null || true
+    fi
+  elif [ "$IS_LINUX" -eq 1 ]; then
     # systemd cleanup
     systemctl --user stop hive-satellite.service 2>/dev/null || true
     systemctl --user disable hive-satellite.service 2>/dev/null || true
