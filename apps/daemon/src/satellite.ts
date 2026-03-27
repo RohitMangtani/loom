@@ -1256,8 +1256,25 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
           }
 
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
-          // Restart: the install script already re-registered the process
-          // supervisor, so exit and let it restart us with fresh code.
+          // Ensure the launchd plist is loaded before exiting so the supervisor
+          // can restart us. Without this, process.exit(0) is a one-way trip if
+          // the plist was unloaded or the install script re-run failed.
+          if (process.platform === "darwin") {
+            const plistPath = join(homedir(), "Library", "LaunchAgents", "com.hive.satellite.plist");
+            if (existsSync(plistPath)) {
+              const uid = process.getuid?.() ?? 501;
+              try {
+                execFileSync("launchctl", ["bootstrap", `gui/${uid}`, plistPath], { timeout: 5000 });
+                console.log("[satellite] Ensured launchd plist is bootstrapped");
+              } catch {
+                // Already bootstrapped or bootstrap not available — try legacy load
+                try {
+                  execFileSync("launchctl", ["load", "-w", plistPath], { timeout: 5000 });
+                  console.log("[satellite] Ensured launchd plist is loaded (legacy)");
+                } catch { /* already loaded — fine */ }
+              }
+            }
+          }
           console.log("[satellite] Restarting in 2 seconds...");
           setTimeout(() => process.exit(0), 2000);
         } catch (err) {
