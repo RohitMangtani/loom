@@ -248,9 +248,25 @@ if ($SatelliteMode) {
     Start-Sleep -Seconds 2
   }
 
-  # Find npx path
-  $npxPath = (Get-Command npx -ErrorAction SilentlyContinue).Source
-  if (-not $npxPath) { $npxPath = "npx" }
+  # Find npx path — must use npx.cmd (not npx.ps1) for Start-Process and batch files.
+  # PowerShell resolves 'npx' to npx.ps1 by default, but Start-Process and cmd.exe
+  # cannot execute .ps1 files directly ('%1 is not a valid Win32 application').
+  $npxCmd = (Get-Command npx.cmd -ErrorAction SilentlyContinue).Source
+  if (-not $npxCmd) {
+    # Fallback: check common Node.js install paths
+    $candidates = @(
+      (Join-Path $env:ProgramFiles "nodejs\npx.cmd"),
+      (Join-Path ${env:ProgramFiles(x86)} "nodejs\npx.cmd"),
+      (Join-Path $env:LOCALAPPDATA "fnm_multishells\*\npx.cmd"),
+      (Join-Path $env:APPDATA "nvm\*\npx.cmd")
+    )
+    foreach ($c in $candidates) {
+      $resolved = Get-Item $c -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($resolved) { $npxCmd = $resolved.FullName; break }
+    }
+  }
+  if (-not $npxCmd) { $npxCmd = "npx.cmd" }
+  $npxPath = $npxCmd
   $nodePath = (Get-Command node -ErrorAction SilentlyContinue).Source
   if (-not $nodePath) { $nodePath = "node" }
 
@@ -324,11 +340,14 @@ goto loop
   }
 
   if (-not $registered) {
-    # Attempt 3: Startup folder fallback (always works, no admin needed)
+    # Attempt 3: Startup folder with restart-loop bat (always works, no admin needed).
+    # This is the reliable non-admin path — the bat file has an infinite restart loop
+    # so the satellite comes back after crashes, and the Startup folder placement
+    # ensures it runs on every login (equivalent to launchd KeepAlive + RunAtLoad).
     $startupDir = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
     if (Test-Path $startupDir) {
       Copy-Item $batFile (Join-Path $startupDir "hive-satellite.bat") -Force
-      Write-Host "  OK Auto-start via Startup folder (fallback)"
+      Write-Host "  OK Auto-start via Startup folder (restart loop, survives crashes)"
     }
   }
 
@@ -355,12 +374,9 @@ goto loop
     Write-Host "  OK Satellite daemon running"
   } else {
     Write-Host "  X Satellite daemon failed to start via Task Scheduler."
-    Write-Host "    Falling back to direct start..."
-    # Fallback: start directly (works reliably, just no auto-restart)
-    Start-Process -FilePath $npxPath -ArgumentList "tsx apps/daemon/src/index.ts --satellite" `
-      -WorkingDirectory $Root -WindowStyle Hidden `
-      -RedirectStandardOutput (Join-Path $logsDir "satellite.stdout.log") `
-      -RedirectStandardError (Join-Path $logsDir "satellite.stderr.log")
+    Write-Host "    Falling back to direct start via batch file..."
+    # Fallback: start the restart-loop bat directly (has infinite loop for crash recovery)
+    Start-Process -FilePath $batFile -WorkingDirectory $Root -WindowStyle Hidden
     Start-Sleep -Seconds 5
     if (Test-Port3001) {
       Write-Host "  OK Satellite daemon running (direct start)"
