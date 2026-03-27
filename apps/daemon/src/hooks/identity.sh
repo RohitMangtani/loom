@@ -6,6 +6,30 @@
 INPUT=$(cat)
 DAEMON_URL="${HIVE_DAEMON_URL:-http://localhost:3001}"
 
+# Auto-start the Hive daemon if it is not running.
+# On macOS, launchd handles this. On Windows/Linux, the satellite bat or
+# systemd service may not be active (e.g., after reboot without login,
+# or if Task Scheduler registration failed). This ensures Claude agents
+# always connect to Hive without the user needing to manually start it.
+if ! curl -s --connect-timeout 1 "${DAEMON_URL}/health" >/dev/null 2>&1; then
+  HIVE_DIR="$HOME/.hive"
+  if [ -f "$HIVE_DIR/satellite.bat" ] && command -v cmd.exe &>/dev/null; then
+    # Windows: start the restart-loop bat in the background
+    cmd.exe /c start /min "" "$HIVE_DIR\\satellite.bat" &>/dev/null &
+  elif [ -f "$HOME/Library/LaunchAgents/com.hive.satellite.plist" ]; then
+    # macOS: bootstrap the launchd plist if not loaded
+    launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.hive.satellite.plist" 2>/dev/null
+    launchctl kickstart "gui/$(id -u)/com.hive.satellite" 2>/dev/null
+  elif [ -f "$HOME/Library/LaunchAgents/com.hive.daemon.plist" ]; then
+    # macOS primary: bootstrap the daemon plist
+    launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.hive.daemon.plist" 2>/dev/null
+    launchctl kickstart "gui/$(id -u)/com.hive.daemon" 2>/dev/null
+  elif systemctl --user is-enabled hive-satellite &>/dev/null 2>&1; then
+    # Linux: start the systemd user service
+    systemctl --user start hive-satellite 2>/dev/null
+  fi
+fi
+
 # Extract session_id from the hook JSON payload.
 SESSION_ID=$(echo "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 
