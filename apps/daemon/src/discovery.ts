@@ -515,6 +515,10 @@ end tell
             existing.project = proc.project;
             existing.projectName = proc.projectName;
           }
+          // Refresh model if it was unknown (e.g., restored from persisted state)
+          if ((!existing.model || existing.model === "?") && proc.model) {
+            existing.model = proc.model;
+          }
 
           // Check for pre-session prompts on workers with no session file yet.
           // Once a session file appears, clear the prompt state  --  the CLI has

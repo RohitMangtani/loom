@@ -2838,7 +2838,7 @@ export class TelemetryReceiver {
       id: w.id, pid: w.pid, project: w.project, projectName: w.projectName,
       status: w.status, lastAction: w.lastAction, lastActionAt: w.lastActionAt,
       errorCount: w.errorCount, startedAt: w.startedAt, task: w.task,
-      managed: w.managed, tty: w.tty,
+      managed: w.managed, tty: w.tty, model: w.model,
     }));
 
     const messageQueue: Record<string, QueuedMessage[]> = {};
