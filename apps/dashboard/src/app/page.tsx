@@ -489,16 +489,6 @@ export default function Home() {
                   Manage
                 </button>
               )}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowDiagnostics(true);
-                }}
-                className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
-              >
-                Health
-              </button>
             </>
           )}
         </div>
