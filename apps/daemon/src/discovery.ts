@@ -1647,7 +1647,7 @@ end tell
 
   /** Built-in patterns to match AI agent processes in `ps` output. */
   private static readonly BUILTIN_PATTERNS: { regex: RegExp; model: string }[] = [
-    { regex: /claude\s*$/, model: "claude" },
+    { regex: /claude(?:\s|$)/, model: "claude" },
     { regex: /\/codex(?:\s+(?!app-server)|$)/, model: "codex" },
     { regex: /openclaw(?:\s+tui)?(?:\s|$)/, model: "openclaw" },
     { regex: /\/gemini(?:\s|$)/, model: "gemini" },

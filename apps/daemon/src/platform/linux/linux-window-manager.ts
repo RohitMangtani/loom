@@ -23,7 +23,7 @@ function normalizeTty(tty: string): string {
 
 function resolveSpawnCommand(model: string, initialMessage?: string): string {
   let cliCmd: string;
-  if (model === "claude") cliCmd = "claude";
+  if (model === "claude") cliCmd = "claude --enable-auto-mode";
   else if (model === "codex") cliCmd = "codex";
   else if (model === "openclaw") cliCmd = "openclaw tui";
   else if (model === "gemini") cliCmd = "gemini";
