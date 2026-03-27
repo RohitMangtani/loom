@@ -223,7 +223,7 @@ export class Watchdog {
 
       hiveWorker.status = "stuck";
       hiveWorker.currentAction = `Watchdog: ${tracked.anomaly.type}`;
-      hiveWorker.stuckMessage = `[Escalated after ${tracked.attempts} failed auto-fix attempts] ${tracked.anomaly.description}`;
+      hiveWorker.stuckMessage = `[watchdog] Escalated after ${tracked.attempts} failed auto-fix attempts: ${tracked.anomaly.description}`;
       hiveWorker.lastAction = "Watchdog escalation";
       hiveWorker.lastActionAt = Date.now();
       this.telemetry.notifyExternal(hiveWorker);

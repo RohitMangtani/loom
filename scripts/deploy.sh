@@ -35,7 +35,10 @@ npx tsc || fail "Daemon build failed"
 # 4. Build dashboard
 step "Building dashboard..."
 cd "$ROOT/apps/dashboard"
-npx next build 2>&1 | tail -5 || fail "Dashboard build failed"
+npx next build 2>&1 | tail -5
+if [ ${pipestatus[1]} -ne 0 ]; then
+  fail "Dashboard build failed"
+fi
 
 # 5. Git commit + push (if message provided)
 cd "$ROOT"

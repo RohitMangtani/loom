@@ -416,7 +416,7 @@ Two channels, zero setup:
 Configure at `~/.hive/notifications.json`. Set `pushOnComplete: false` to disable completion notifications. Defaults work out of the box.
 
 ### Watchdog
-Monitors agents for stuck loops (same tool called 6+ times in a row). Detects when agents are spinning on a problem and escalates to the dashboard so you can intervene. Does not send messages to agents automatically.
+Monitors agents for stuck loops (same tool called 6+ times in a row). Detects when agents are spinning on a problem and escalates to the dashboard. When a stuck loop is detected, the watchdog auto-dispatches a fix task to an idle agent with context about the anomaly. Safety guards: never dispatches to the anomaly's own TTY, max 3 attempts per anomaly, and adaptive suppression to avoid flooding the fleet.
 
 ## API Reference
 

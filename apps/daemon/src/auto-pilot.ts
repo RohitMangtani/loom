@@ -46,6 +46,9 @@ export class AutoPilot {
       if (!worker.tty) continue;
       if (worker.status !== "stuck") continue;
 
+      // Skip watchdog escalations — these are meant for the human, not auto-pilot
+      if (worker.stuckMessage && worker.stuckMessage.startsWith("[watchdog]")) continue;
+
       // Cooldown: max one auto-send per COOLDOWN_MS per worker
       const lastSend = this.lastAutoSend.get(worker.id) || 0;
       if (now - lastSend < COOLDOWN_MS) continue;

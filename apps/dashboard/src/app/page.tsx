@@ -147,7 +147,7 @@ export default function Home() {
 
   // Voice mode — active when role is "voice"
   const isVoice = role === "voice";
-  const isViewer = mode === "viewer" && !isVoice;
+  const isViewer = role === "viewer" && !isVoice;
   const voice = useVoiceRecording();
   const [voiceTargetId, setVoiceTargetId] = useState<string | null>(null);
   const [voiceUnsupported, setVoiceUnsupported] = useState(false);

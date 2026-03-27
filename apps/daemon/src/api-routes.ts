@@ -181,7 +181,7 @@ export function registerApiRoutes(
   });
 
   // DELETE /api/message-queue/:id
-  app.delete("/api/message-queue/:id", requireAuth, (req, res) => {
+  app.delete("/api/message-queue/:id", requireAuth, requireAdmin, (req, res) => {
     const cancelled = receiver.cancelMessage(req.params.id as string);
     if (cancelled) {
       res.json({ ok: true, cancelled: req.params.id });
@@ -211,7 +211,7 @@ export function registerApiRoutes(
   });
 
   // DELETE /api/queue/:id
-  app.delete("/api/queue/:id", requireAuth, (req, res) => {
+  app.delete("/api/queue/:id", requireAuth, requireAdmin, (req, res) => {
     const removed = receiver.removeTask(req.params.id as string);
     if (removed) {
       res.json({ ok: true, remaining: receiver.getTaskQueueLength() });
@@ -548,13 +548,13 @@ export function registerApiRoutes(
   });
 
   // POST /api/update-satellites  --  tell all satellites to pull and restart
-  app.post("/api/update-satellites", requireAuth, (_req, res) => {
+  app.post("/api/update-satellites", requireAuth, requireAdmin, (_req, res) => {
     receiver.updateSatellites();
     res.json({ ok: true });
   });
 
   // POST /api/spawn
-  app.post("/api/spawn", requireAuth, (req, res) => {
+  app.post("/api/spawn", requireAuth, requireAdmin, (req, res) => {
     const { project, model, task, targetQuadrant, machine } = req.body as {
       project?: string;
       model?: string;
@@ -596,7 +596,7 @@ export function registerApiRoutes(
   });
 
   // POST /api/kill
-  app.post("/api/kill", requireAuth, (req, res) => {
+  app.post("/api/kill", requireAuth, requireAdmin, (req, res) => {
     const { workerId } = req.body as { workerId?: string };
     if (!workerId) {
       res.status(400).json({ error: "Missing workerId" });
@@ -616,7 +616,7 @@ export function registerApiRoutes(
   });
 
   // POST /api/satellites/repair
-  app.post("/api/satellites/repair", requireAuth, (req, res) => {
+  app.post("/api/satellites/repair", requireAuth, requireAdmin, (req, res) => {
     const { machine, action } = req.body as { machine?: string; action?: string };
     if (!machine) {
       res.status(400).json({ error: "Missing machine" });
@@ -640,7 +640,7 @@ export function registerApiRoutes(
   });
 
   // POST /api/exec
-  app.post("/api/exec", requireAuth, async (req, res) => {
+  app.post("/api/exec", requireAuth, requireAdmin, async (req, res) => {
     const { command, cwd, timeoutMs, machine } = req.body as {
       command?: string;
       cwd?: string;
@@ -751,7 +751,7 @@ export function registerApiRoutes(
   });
 
   // DELETE /api/reviews/:id
-  app.delete("/api/reviews/:id", requireAuth, (req, res) => {
+  app.delete("/api/reviews/:id", requireAuth, requireAdmin, (req, res) => {
     const dismissed = receiver.dismissReview(req.params.id as string);
     if (dismissed) {
       res.json({ ok: true });
@@ -761,7 +761,7 @@ export function registerApiRoutes(
   });
 
   // DELETE /api/reviews  --  clear all reviews
-  app.delete("/api/reviews", requireAuth, (_req, res) => {
+  app.delete("/api/reviews", requireAuth, requireAdmin, (_req, res) => {
     const count = receiver.clearAllReviews();
     res.json({ ok: true, cleared: count });
   });
@@ -783,7 +783,7 @@ export function registerApiRoutes(
   });
 
   // POST /api/rearrange  --  force rearrange terminal windows
-  app.post("/api/rearrange", requireAuth, (_req, res) => {
+  app.post("/api/rearrange", requireAuth, requireAdmin, (_req, res) => {
     receiver.forceRearrange();
     res.json({ ok: true });
   });
