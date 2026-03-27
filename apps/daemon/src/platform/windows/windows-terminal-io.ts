@@ -153,11 +153,13 @@ for ($i = 0; $i -lt 5; $i++) {
   if (-not $parentRow -or -not $parentRow.ParentProcessId) { break }
   $targetPid = $parentRow.ParentProcessId
 }
-if (-not $attached) { exit 1 }
-$hInput = [HiveConsoleApi]::GetStdHandle(-10)
-if ($hInput -eq [IntPtr]::Zero -or $hInput -eq [IntPtr]::new(-1)) {
-  [HiveConsoleApi]::FreeConsole() | Out-Null
-  exit 1
+$hInput = [IntPtr]::Zero
+if ($attached) {
+  $hInput = [HiveConsoleApi]::GetStdHandle(-10)
+  if ($hInput -eq [IntPtr]::Zero -or $hInput -eq [IntPtr]::new(-1)) {
+    [HiveConsoleApi]::FreeConsole() | Out-Null
+    $attached = $false
+  }
 }
 `;
 }
@@ -165,16 +167,57 @@ if ($hInput -eq [IntPtr]::Zero -or $hInput -eq [IntPtr]::new(-1)) {
 /**
  * Build the PowerShell snippet that reads text from a file and sends each
  * character as a KEY_EVENT pair, followed by Enter.
+ *
+ * If AttachConsole succeeded but the process uses ConPTY (Windows Terminal),
+ * WriteConsoleInput may not reach the actual PTY input. In that case, fall
+ * back to clipboard paste (Set-Clipboard + SendKeys Ctrl+V + Enter) which
+ * works at the terminal emulator level regardless of console type.
  */
-function buildSendTextSnippet(tmpFilePath: string): string {
+function buildSendTextSnippet(tmpFilePath: string, pid: string): string {
   return `
 $text = Get-Content -Path '${tmpFilePath.replace(/'/g, "''")}' -Raw
-foreach ($ch in $text.ToCharArray()) {
-  [HiveConsoleApi]::SendKeyEvent($hInput, 0, $ch)
+if ($attached) {
+  # Try WriteConsoleInput first (works for legacy console / cmd.exe)
+  foreach ($ch in $text.ToCharArray()) {
+    [HiveConsoleApi]::SendKeyEvent($hInput, 0, $ch)
+  }
+  [HiveConsoleApi]::SendKeyEvent($hInput, 0x0D, [char]13)
+  [HiveConsoleApi]::FreeConsole() | Out-Null
+} else {
+  # Clipboard paste fallback for Windows Terminal / ConPTY
+  Set-Clipboard -Value $text
+  ${_buildClipboardPasteSnippet(pid)}
 }
-# Send Enter (VK_RETURN = 0x0D, char = 13)
-[HiveConsoleApi]::SendKeyEvent($hInput, 0x0D, [char]13)
-[HiveConsoleApi]::FreeConsole() | Out-Null
+`;
+}
+
+/**
+ * Clipboard paste fallback: focus the window, Ctrl+V to paste, then Enter.
+ * Used when AttachConsole fails (ConPTY / Windows Terminal).
+ */
+function _buildClipboardPasteSnippet(pid: string): string {
+  return `
+Add-Type -AssemblyName System.Windows.Forms
+$proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+if (-not $proc -or $proc.MainWindowHandle -eq [IntPtr]::Zero) {
+  $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -EA SilentlyContinue).ParentProcessId
+  if ($parent) { $proc = Get-Process -Id $parent -EA SilentlyContinue }
+}
+if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
+  Add-Type @"
+    using System; using System.Runtime.InteropServices;
+    public class HivePaste {
+      [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+      [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+    }
+"@
+  [HivePaste]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null
+  [HivePaste]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+  Start-Sleep -Milliseconds 300
+  [System.Windows.Forms.SendKeys]::SendWait("^v")
+  Start-Sleep -Milliseconds 100
+  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+}
 `;
 }
 
@@ -204,7 +247,7 @@ function sendViaPowerShell(pid: string, text: string): PlatformSendResult {
   const psScript =
     buildConsoleInputType() +
     buildAttachConsoleSnippet(pid) +
-    buildSendTextSnippet(tmpFile);
+    buildSendTextSnippet(tmpFile, pid);
 
   try {
     execFileSync("powershell", ["-NoProfile", "-Command", psScript], {
@@ -232,7 +275,7 @@ async function sendViaPowerShellAsync(pid: string, text: string): Promise<Platfo
   const psScript =
     buildConsoleInputType() +
     buildAttachConsoleSnippet(pid) +
-    buildSendTextSnippet(tmpFile);
+    buildSendTextSnippet(tmpFile, pid);
 
   try {
     await execFileAsync("powershell", ["-NoProfile", "-Command", psScript], {
