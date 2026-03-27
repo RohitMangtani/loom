@@ -31,6 +31,7 @@ import {
 import { HiveUser, UserRegistry } from "./user-registry.js";
 import { ReplayManager } from "./replay.js";
 import type { HiveUser as HiveUserInfo } from "@hive/types";
+import { rebuildAndRestart } from "./auto-update.js";
 
 /** Get the git commit hash of the hive repo (short, 8 chars). */
 function getLocalVersion(): string {
@@ -186,6 +187,9 @@ export class WsServer {
       () => this.getAllWorkers(),
       (repoDir) => this.updateAllSatellites(repoDir),
     );
+
+    // Auto-update: rebuild + restart primary when hive repo is pushed
+    this.telemetry.setPrimaryRebuildFn(() => rebuildAndRestart());
 
     // Capability-based routing: let telemetry query machine capabilities for task dispatch
     this.telemetry.setCapabilityRouter(

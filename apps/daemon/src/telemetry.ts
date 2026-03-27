@@ -1017,6 +1017,10 @@ export class TelemetryReceiver {
     this.reviewManager.setSatelliteUpdateFn(updateAll ? () => updateAll() : undefined);
   }
 
+  setPrimaryRebuildFn(fn: (() => void) | undefined): void {
+    this.reviewManager.setPrimaryRebuildFn(fn);
+  }
+
   setRevertHook(hook?: ReviewManagerDeps["recordRevert"]): void {
     this.reviewManager.setRevertHook(hook);
   }

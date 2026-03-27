@@ -21,6 +21,7 @@ export interface ReviewManagerDeps {
   getQuadrant(workerId: string): number | undefined;
   getRecentArtifacts(workerId: string, limit: number): Array<{ path: string; action: string; ts: number }>;
   onSatelliteUpdate?: () => void;
+  onPrimaryRebuild?: () => void;
   recordRevert?: (payload: Omit<RevertHistoryEntry, "id" | "timestamp">) => void;
 }
 
@@ -86,8 +87,25 @@ export class ReviewManager {
     this.deps.onSatelliteUpdate = fn;
   }
 
+  /** Wire the primary rebuild callback. */
+  setPrimaryRebuildFn(fn: (() => void) | undefined): void {
+    this.deps.onPrimaryRebuild = fn;
+  }
+
   setRevertHook(hook?: ReviewManagerDeps["recordRevert"]): void {
     this.revertHook = hook;
+  }
+
+  /** Trigger auto-update cascade when the hive repo is pushed. */
+  private triggerHiveAutoUpdate(): void {
+    if (this.deps.onPrimaryRebuild) {
+      console.log("[auto-update] Hive push detected — rebuilding primary daemon");
+      this.deps.onPrimaryRebuild();
+    }
+    if (this.deps.onSatelliteUpdate) {
+      console.log("[auto-update] Hive push detected — updating all satellites");
+      this.deps.onSatelliteUpdate();
+    }
   }
 
   /** Called from tick() to expire old reviews. */
@@ -127,6 +145,7 @@ export class ReviewManager {
       if (this.isDuplicateReview(workerId, "push")) return;
       const summary = this.buildReviewSummary("committed and pushed", worker, repoName, branch);
       this.addReview(summary, workerId, repoName, { type: "push", url: gitUrl, artifacts });
+      if (repoName === "hive") this.triggerHiveAutoUpdate();
       this.recordRevertCandidate(effectiveWorker, summary, command);
       return;
     }
@@ -137,11 +156,7 @@ export class ReviewManager {
       const summary = this.buildReviewSummary("pushed", worker, repoName, branch);
       console.log(`[review] Auto-detected push by ${worker.tty || workerId} in ${repoName}`);
       this.addReview(summary, workerId, repoName, { type: "push", url: gitUrl, artifacts });
-      // Auto-update satellites when the hive repo itself is pushed
-      if (repoName === "hive" && this.deps.onSatelliteUpdate) {
-        console.log(`[satellite-update] Hive repo pushed  --  triggering satellite updates`);
-        this.deps.onSatelliteUpdate();
-      }
+      if (repoName === "hive") this.triggerHiveAutoUpdate();
       this.recordRevertCandidate(effectiveWorker, summary, command);
       return;
     }

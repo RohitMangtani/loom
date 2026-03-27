@@ -23,6 +23,7 @@ import type { ParsedQs } from "qs";
 import { resolveExecCwd, runShellExec } from "./shell-exec.js";
 import { RevertHistory } from "./revert-history.js";
 import { homedir } from "os";
+import { getHealthStatus } from "./auto-update.js";
 
 function normalizeQueryString(
   value: string | string[] | ParsedQs | ParsedQs[] | (string | ParsedQs)[] | undefined,
@@ -56,6 +57,11 @@ export function registerApiRoutes(
     }
     next();
   };
+
+  // GET /api/health  --  version + uptime for update verification
+  app.get("/api/health", requireAuth, (_req, res) => {
+    res.json(getHealthStatus());
+  });
 
   // GET /api/workers  --  includes satellite workers when available
   app.get("/api/workers", requireAuth, (_req, res) => {
