@@ -938,7 +938,8 @@ export class WsServer {
         this.satelliteIdleCounts.set(key, idleCount);
         const definitiveIdle =
           w.lastAction === "Session ended" ||
-          w.lastAction === "Waiting for input";
+          w.lastAction === "Waiting for input" ||
+          w.lastAction === "Approved from dashboard";
         if (!definitiveIdle && idleCount < WsServer.SAT_IDLE_HYSTERESIS) {
           w.status = "working";
           w.currentAction = w.currentAction || "Thinking...";
@@ -1461,7 +1462,9 @@ export class WsServer {
         requestId: `spawn_${Date.now()}`,
         project: satProject,
         model: request.model || "claude",
-        initialMessage: request.task?.trim() || undefined,
+        // Hold initial message — satellite placeholder will store it as pendingTask
+        initialMessage: undefined,
+        pendingTask: request.task?.trim() || undefined,
         targetQuadrant: request.targetQuadrant,
       });
       console.log(`Spawn routed to satellite "${targetMachine}" project="${satProject}" (model=${request.model || "claude"})`);
@@ -1504,10 +1507,11 @@ export class WsServer {
       ? request.targetQuadrant
       : undefined;
     const openQ = requestedQ ?? this.telemetry.getFirstOpenQuadrant();
-    const initMessage = request.task?.trim() || undefined;
+    const heldTask = request.task?.trim() || undefined;
+    // Spawn without initial message — held until dashboard approval
     const termResult = this.windows
-      ? this.windows.spawnTerminal(real, model, openQ, initMessage, this.telemetry.getAll().length)
-      : spawnTerminalWindow(real, model, openQ, initMessage, this.telemetry.getAll().length);
+      ? this.windows.spawnTerminal(real, model, openQ, undefined, this.telemetry.getAll().length)
+      : spawnTerminalWindow(real, model, openQ, undefined, this.telemetry.getAll().length);
     if (!termResult.ok) {
       return { ok: false, error: termResult.error || "Failed to spawn terminal" };
     }
@@ -1516,14 +1520,13 @@ export class WsServer {
       const spawnTty = termResult.tty;
       const projectName = real.split("/").pop() || real;
       const placeholderId = `spawning_${spawnTty.replace("/dev/", "").replace(/\//g, "_")}`;
-      const isClaude = model === "claude";
       this.telemetry.registerDiscovered(placeholderId, {
         id: placeholderId,
         pid: 0,
         project: real,
         projectName,
         status: "waiting" as const,
-        currentAction: isClaude ? "Trust this project folder?" : "Starting...",
+        currentAction: "Awaiting approval",
         lastAction: "Spawning terminal",
         lastActionAt: Date.now(),
         errorCount: 0,
@@ -1533,8 +1536,9 @@ export class WsServer {
         tty: spawnTty,
         model,
         terminalPreview: undefined,
-        promptType: isClaude ? "trust" : null,
-        promptMessage: isClaude ? "Trust this project folder?" : undefined,
+        promptType: "approval",
+        promptMessage: "Approve this agent?",
+        pendingTask: heldTask || null,
       });
     }
     console.log(`Spawned ${model} terminal for ${real} (tty=${termResult.tty})`);
@@ -2101,7 +2105,9 @@ export class WsServer {
             requestId: `spawn_${Date.now()}`,
             project: satProject,
             model: msg.model || "claude",
-            initialMessage: msg.task?.trim() || undefined,
+            // Hold initial message — satellite placeholder will store it as pendingTask
+            initialMessage: undefined,
+            pendingTask: msg.task?.trim() || undefined,
           });
           console.log(`Spawn routed to satellite "${msg.machine}" project="${satProject}" (model=${msg.model || "claude"})`);
           break;
@@ -2142,13 +2148,14 @@ export class WsServer {
           : undefined;
         const openQ = requestedQ ?? this.telemetry.getFirstOpenQuadrant();
 
-        // Only send an init message if the user provided a task
-        const initMessage = msg.task?.trim() || undefined;
+        // Hold initial message until dashboard approval
+        const wsHeldTask = msg.task?.trim() || undefined;
 
         // Open a real Terminal window with the CLI, positioned in the target quadrant
+        // Spawn without initial message — held until dashboard approval
         const termResult = this.windows
-          ? this.windows.spawnTerminal(real, model, openQ, initMessage, this.telemetry.getAll().length)
-          : spawnTerminalWindow(real, model, openQ, initMessage, this.telemetry.getAll().length);
+          ? this.windows.spawnTerminal(real, model, openQ, undefined, this.telemetry.getAll().length)
+          : spawnTerminalWindow(real, model, openQ, undefined, this.telemetry.getAll().length);
         if (!termResult.ok) {
           this.send(ws, { type: "error", error: termResult.error || "Failed to spawn terminal" });
           return;
@@ -2175,17 +2182,13 @@ export class WsServer {
           const normalizedTty = spawnTty.replace("/dev/", "");
           const projectName = real.split("/").pop() || real;
           const placeholderId = `spawning_${normalizedTty.replace(/\//g, "_")}`;
-          // Claude agents always show a trust prompt on first launch in a folder.
-          // Pre-set promptType so the dashboard shows the blue "Trust folder"
-          // button immediately instead of a blank "Starting..." tile.
-          const isClaude = model === "claude";
           const placeholder: WorkerState = {
             id: placeholderId,
             pid: 0,
             project: real,
             projectName,
             status: "waiting" as const,
-            currentAction: isClaude ? "Trust this project folder?" : "Starting...",
+            currentAction: "Awaiting approval",
             lastAction: "Spawning terminal",
             lastActionAt: Date.now(),
             errorCount: 0,
@@ -2195,8 +2198,9 @@ export class WsServer {
             tty: spawnTty,
             model,
             terminalPreview: undefined,
-            promptType: isClaude ? "trust" : null,
-            promptMessage: isClaude ? "Trust this project folder?" : undefined,
+            promptType: "approval",
+            promptMessage: "Approve this agent?",
+            pendingTask: wsHeldTask || null,
           };
           this.telemetry.registerDiscovered(placeholderId, placeholder);
 
@@ -2248,12 +2252,11 @@ export class WsServer {
                 current.currentAction = prompt.message;
                 current.terminalPreview = prompt.content.split("\n").filter((l: string) => l.trim()).slice(-15).join("\n").trim().slice(0, 500) || undefined;
                 this.telemetry.notifyExternal(current);
-              } else if (current.promptType && polls >= 8) {
+              } else if (current.promptType && current.promptType !== "approval" && polls >= 8) {
                 // Pre-set promptType (e.g. trust for Claude) but no prompt detected
                 // after 8 polls (~12s). The CLI takes 3-5s to boot, so we wait long
                 // enough to be confident the folder was already trusted before clearing.
-                // (Old threshold of 2 polls / ~3s was too aggressive and caused the
-                // approval button to vanish before the CLI finished loading.)
+                // "approval" type is a daemon-level spawn gate — never auto-cleared.
                 current.promptType = null;
                 current.promptMessage = undefined;
                 current.status = "idle";
@@ -2747,16 +2750,17 @@ export class WsServer {
           if (approveRemote) {
             approveRemote.promptType = null;
             approveRemote.promptMessage = undefined;
+            approveRemote.pendingTask = null;
             approveRemote.status = "idle";
             approveRemote.currentAction = null;
-            approveRemote.lastAction = "Prompt approved from dashboard";
+            approveRemote.lastAction = "Approved from dashboard";
             approveRemote.lastActionAt = Date.now();
             this.lastWorkersSnapshot = null;
             this.satelliteOverrides.set(`${approveSat.machineId}:${parsed.localId}`, {
               until: Date.now() + 25_000,
               status: "idle",
               currentAction: null,
-              lastAction: "Prompt approved from dashboard",
+              lastAction: "Approved from dashboard",
             });
           }
           break;
@@ -2774,11 +2778,14 @@ export class WsServer {
 
         // Optimistically update state so the dashboard reflects the
         // approval immediately, before the async AppleScript finishes.
+        const wasApprovalGate = promptWorker.promptType === "approval";
+        const heldPendingTask = promptWorker.pendingTask || null;
         promptWorker.promptType = null;
         promptWorker.promptMessage = undefined;
+        promptWorker.pendingTask = null;
         promptWorker.status = "idle";
         promptWorker.currentAction = null;
-        promptWorker.lastAction = "Prompt approved from dashboard";
+        promptWorker.lastAction = "Approved from dashboard";
         promptWorker.lastActionAt = Date.now();
         if (this.discovery) {
           this.discovery.clearPromptCache(promptWorker.tty);
@@ -2786,24 +2793,64 @@ export class WsServer {
         }
         this.telemetry.notifyExternal(promptWorker);
 
-        // Send Enter keystroke through the async mutex so it serializes
-        // with message sends and other approvals  --  prevents focus races
-        // when approving multiple trust prompts rapidly.
         const approveTty = promptWorker.tty;
-        const approvePromise = this.terminal
-          ? this.terminal.sendKeystrokeAsync(approveTty, "enter")
-          : sendEnterToTtyAsync(approveTty);
-        approvePromise.then((approveResult) => {
-          if (approveResult.ok) {
-            console.log(`Prompt approved for ${approveTty}`);
+
+        if (wasApprovalGate) {
+          // Spawn-approval gate: check if Claude is also at a CLI trust/sandbox
+          // prompt and dismiss it before sending the held task.
+          const cliPrompt = this.discovery?.detectPrompt(approveTty, { bypassCache: true });
+
+          const approveWorkerId = msg.workerId!;
+          const sendHeldTask = () => {
+            if (heldPendingTask) {
+              this.telemetry.sendToWorkerAsync(approveWorkerId, heldPendingTask, {
+                source: "dashboard",
+                queueIfBusy: false,
+                markDashboardInput: true,
+              }).then((result) => {
+                if (result.ok) {
+                  console.log(`Spawn approved + task sent for ${approveTty}`);
+                } else {
+                  console.log(`Spawn approved but task send failed for ${approveTty}: ${result.error}`);
+                }
+              }).catch((err) => {
+                console.log(`Spawn approve task error for ${approveTty}: ${err instanceof Error ? err.message : String(err)}`);
+              });
+            } else {
+              console.log(`Spawn approved (no pending task) for ${approveTty}`);
+            }
+          };
+
+          if (cliPrompt) {
+            // Dismiss CLI prompt first, then wait for Claude to boot
+            const dismissPromise = this.terminal
+              ? this.terminal.sendKeystrokeAsync(approveTty, "enter")
+              : sendEnterToTtyAsync(approveTty);
+            dismissPromise.then(() => {
+              setTimeout(sendHeldTask, 5000);
+            }).catch(() => sendHeldTask());
           } else {
-            console.log(`Prompt approve failed for ${approveTty}: ${approveResult.error}`);
+            sendHeldTask();
           }
-        }).catch((err) => {
-          console.log(`Prompt approve error for ${approveTty}: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        } else {
+          // Legacy trust/sandbox prompt: send Enter keystroke through the
+          // async mutex so it serializes with message sends and other
+          // approvals — prevents focus races when approving multiple prompts.
+          const approvePromise = this.terminal
+            ? this.terminal.sendKeystrokeAsync(approveTty, "enter")
+            : sendEnterToTtyAsync(approveTty);
+          approvePromise.then((approveResult) => {
+            if (approveResult.ok) {
+              console.log(`Prompt approved for ${approveTty}`);
+            } else {
+              console.log(`Prompt approve failed for ${approveTty}: ${approveResult.error}`);
+            }
+          }).catch((err) => {
+            console.log(`Prompt approve error for ${approveTty}: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        }
         if (activeUser) {
-          this.broadcastActivity(activeUser, `Approved prompt for ${msg.workerId}`);
+          this.broadcastActivity(activeUser, `Approved ${wasApprovalGate ? "spawn" : "prompt"} for ${msg.workerId}`);
         }
         break;
       }

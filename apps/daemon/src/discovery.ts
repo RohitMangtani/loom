@@ -528,8 +528,10 @@ end tell
           // Check for pre-session prompts on workers with no session file yet.
           // Once a session file appears, clear the prompt state  --  the CLI has
           // passed the trust/sandbox prompts and started a real session.
+          // "approval" type is a daemon-level spawn gate (not a CLI prompt) —
+          // only cleared by explicit dashboard approve_prompt action.
           const cachedSessionFile = this.streamer.getSessionFile(id);
-          if (existing.promptType && cachedSessionFile) {
+          if (existing.promptType && existing.promptType !== "approval" && cachedSessionFile) {
             // Hold timer: placeholder-transferred prompts are kept for 20s
             // because readTerminalContent() is unreliable in the first
             // seconds of a new terminal tab. Without this, the session file
@@ -734,6 +736,7 @@ end tell
           if (placeholder.promptType && !worker.promptType) {
             worker.promptType = placeholder.promptType;
             worker.promptMessage = placeholder.promptMessage;
+            worker.pendingTask = placeholder.pendingTask;
             worker.terminalPreview = placeholder.terminalPreview;
             worker.status = "waiting";
             worker.currentAction = placeholder.currentAction;

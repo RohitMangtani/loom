@@ -356,7 +356,7 @@ export function AgentCard({
                 className="quick-reply-btn"
                 style={{ background: "rgba(96,165,250,0.15)", borderColor: "rgba(96,165,250,0.3)", color: "#93bbfd" }}
               >
-                {worker.promptType === "trust" ? "Trust folder" : "Allow"}
+                {worker.promptType === "approval" ? "Approve" : worker.promptType === "trust" ? "Trust folder" : "Allow"}
               </button>
             </div>
           )}

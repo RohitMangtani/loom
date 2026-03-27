@@ -238,6 +238,14 @@ export class TelemetryReceiver {
   start(): void {
     const app = express();
     app.use(express.json({ limit: "10mb" }));
+    // CORS: allow dashboard (Vercel) and phone capture page to call device APIs
+    app.use((_req, res, next) => {
+      res.header("Access-Control-Allow-Origin", "*");
+      res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+      if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
+      next();
+    });
     this.app = app;
 
     const requireAuth = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -1391,6 +1399,8 @@ export class TelemetryReceiver {
     this.lastInputSent.delete(id);
     this.coordination.releaseAllLocks(id);
     this.quadrantAssignments.delete(id);
+    this.signals.delete(id);
+    this.lastDashboardInput.delete(id);
     for (const [sid, wid] of this.sessionToWorker) {
       if (wid === id) {
         this.sessionToWorker.delete(sid);

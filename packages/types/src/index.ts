@@ -47,8 +47,10 @@ export interface WorkerState {
   model?: string;
   /** Server-assigned slot (1-8). Dashboard should use this for grid ordering. */
   quadrant?: number;
-  /** Pre-session prompt awaiting user approval (trust folder, sandbox, etc.). */
-  promptType?: "trust" | "sandbox" | null;
+  /** Pre-session prompt awaiting user approval (trust folder, sandbox, spawn approval, etc.). */
+  promptType?: "trust" | "sandbox" | "approval" | null;
+  /** Task held until dashboard approval. Sent to agent after approve_prompt. */
+  pendingTask?: string | null;
   /** Human-readable prompt message to display on the dashboard. */
   promptMessage?: string;
   /** Raw terminal output for agents with no session yet (shows CLI prompts). */

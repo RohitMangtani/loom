@@ -94,6 +94,7 @@ interface SatelliteDownMessage {
   model?: string;
   targetQuadrant?: number;
   initialMessage?: string;
+  pendingTask?: string;
   content?: string;
   command?: string;
   cwd?: string;
@@ -684,12 +685,13 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
       case "satellite_spawn": {
         const project = (!msg.project || msg.project === "~") ? homedir() : msg.project;
         const model = msg.model || "claude";
-        const isClaude = model === "claude";
+        const satHeldTask = msg.pendingTask;
+        // Spawn without initial message — held until dashboard approval
         const result = this.runtimePlatform.windows.spawnTerminal(
           project,
           model,
           msg.targetQuadrant,
-          msg.initialMessage,
+          undefined,
           this.telemetry.getAll().length,
         );
         if (result.tty) {
@@ -706,7 +708,7 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
             project,
             projectName,
             status: "waiting" as const,
-            currentAction: isClaude ? "Trust this project folder?" : "Starting...",
+            currentAction: "Awaiting approval",
             lastAction: "Spawning terminal",
             lastActionAt: Date.now(),
             errorCount: 0,
@@ -715,8 +717,9 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
             managed: false,
             tty: result.tty,
             model,
-            promptType: isClaude ? "trust" : null,
-            promptMessage: isClaude ? "Trust this project folder?" : undefined,
+            promptType: "approval",
+            promptMessage: "Approve this agent?",
+            pendingTask: satHeldTask || null,
           });
 
           // Match local spawn behavior: poll the new terminal immediately so
@@ -754,7 +757,10 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
             }
 
             const prompt = this.discovery.detectPrompt(result.tty!, { bypassCache: true });
-            if (prompt) {
+            if (prompt && current.promptType !== "approval") {
+              // Only set CLI-detected prompts if the daemon-level approval gate
+              // isn't active. The approval gate takes priority — CLI trust/sandbox
+              // prompts are handled after the user approves the spawn.
               current.status = "waiting";
               current.promptType = prompt.type;
               current.promptMessage = prompt.message;
@@ -875,20 +881,67 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
           this.send({ type: "satellite_result", requestId: msg.requestId, ok: false, error: "No TTY" });
           return;
         }
-        const result = this.runtimePlatform.terminal.sendKeystroke(worker.tty, "enter");
-        if (result.ok) {
+        const wasApprovalGate = worker.promptType === "approval";
+        const satPendingTask = worker.pendingTask || null;
+
+        if (wasApprovalGate) {
+          // Spawn-approval gate: clear the gate, then handle any CLI prompts
+          // before sending the held task.
           worker.promptType = null;
           worker.promptMessage = undefined;
+          worker.pendingTask = null;
           worker.status = "idle";
-          worker.currentAction = "Starting...";
-          worker.lastAction = "Prompt approved from dashboard";
+          worker.currentAction = null;
+          worker.lastAction = "Approved from dashboard";
           worker.lastActionAt = Date.now();
           this.telemetry.notifyExternal(worker);
-          // Suppress prompt re-detection for 20s so discovery doesn't
-          // re-report the stale prompt text before the terminal advances
           this.discovery.suppressPrompt(worker.tty);
+
+          // Check if Claude is also at a CLI trust/sandbox prompt — dismiss it
+          // with Enter before sending the task. Without this, the task text gets
+          // dumped into the ink selection UI instead of the chat prompt.
+          const cliPrompt = this.discovery.detectPrompt(worker.tty, { bypassCache: true });
+          const dismissFirst = !!cliPrompt;
+
+          const sendTask = () => {
+            if (satPendingTask) {
+              this.telemetry.sendToWorkerAsync(localId, satPendingTask, {
+                source: "dashboard",
+                queueIfBusy: false,
+                markDashboardInput: true,
+              }).then((r) => {
+                console.log(r.ok ? `Spawn approved + task sent for ${worker.tty}` : `Spawn approved but task send failed: ${r.error}`);
+              }).catch(() => {});
+            } else {
+              console.log(`Spawn approved (no pending task) for ${worker.tty}`);
+            }
+          };
+
+          if (dismissFirst) {
+            // Dismiss CLI prompt first, then wait for Claude to boot before sending task
+            this.runtimePlatform.terminal.sendKeystrokeAsync(worker.tty, "enter").then(() => {
+              // Wait 5s for Claude to finish booting past trust/sandbox prompts
+              setTimeout(sendTask, 5000);
+            }).catch(() => sendTask());
+          } else {
+            sendTask();
+          }
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: true });
+        } else {
+          // Legacy trust/sandbox prompt: send Enter keystroke
+          const result = this.runtimePlatform.terminal.sendKeystroke(worker.tty, "enter");
+          if (result.ok) {
+            worker.promptType = null;
+            worker.promptMessage = undefined;
+            worker.status = "idle";
+            worker.currentAction = "Starting...";
+            worker.lastAction = "Prompt approved from dashboard";
+            worker.lastActionAt = Date.now();
+            this.telemetry.notifyExternal(worker);
+            this.discovery.suppressPrompt(worker.tty);
+          }
+          this.send({ type: "satellite_result", requestId: msg.requestId, ok: result.ok, error: result.error });
         }
-        this.send({ type: "satellite_result", requestId: msg.requestId, ok: result.ok, error: result.error });
         break;
       }
 
