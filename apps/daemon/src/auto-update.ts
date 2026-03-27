@@ -1,6 +1,7 @@
-import { execFile } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { join } from "path";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import type { WorkerState } from "@hive/types";
 
 /**
  * Auto-update: rebuild the primary daemon after a hive repo push,
@@ -89,7 +90,6 @@ export function getHealthStatus(): {
 } {
   let version = "unknown";
   try {
-    const { execFileSync } = require("child_process");
     version = execFileSync("git", ["rev-parse", "--short=8", "HEAD"], {
       cwd: REPO_DIR,
       encoding: "utf-8",
@@ -102,5 +102,162 @@ export function getHealthStatus(): {
     repoDir: REPO_DIR,
     platform: process.platform,
     uptime: process.uptime(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+//  Pipeline Check System
+//
+//  Runs a comprehensive verification of the entire Hive pipeline and returns
+//  a structured pass/fail report. Called via GET /api/check or after auto-update.
+// ---------------------------------------------------------------------------
+
+export interface CheckResult {
+  name: string;
+  pass: boolean;
+  detail: string;
+}
+
+export interface PipelineReport {
+  ts: number;
+  version: string;
+  overall: "pass" | "fail" | "warn";
+  checks: CheckResult[];
+  satellites: SatelliteReport[];
+}
+
+interface SatelliteReport {
+  machine: string;
+  version: string;
+  versionMatch: boolean;
+  workers: number;
+  connected: boolean;
+}
+
+export function runPipelineCheck(deps: {
+  getWorkers: () => WorkerState[];
+  getSatellites: () => Array<{ machineId: string; hostname: string; version?: string; workers: WorkerState[] }>;
+  hasDiscovery: boolean;
+  hookCount: () => number;
+  tokenPath: string;
+}): PipelineReport {
+  const checks: CheckResult[] = [];
+  const primaryVersion = getHealthStatus().version;
+
+  // 1. Daemon running
+  checks.push({
+    name: "daemon_running",
+    pass: true,
+    detail: `PID ${process.pid}, uptime ${Math.round(process.uptime())}s`,
+  });
+
+  // 2. Git version
+  checks.push({
+    name: "git_version",
+    pass: primaryVersion !== "unknown",
+    detail: primaryVersion !== "unknown" ? primaryVersion : "git not available or not a repo",
+  });
+
+  // 3. Build output exists
+  const distIndex = join(REPO_DIR, "apps", "daemon", "dist", "index.js");
+  const buildExists = existsSync(distIndex);
+  checks.push({
+    name: "build_output",
+    pass: buildExists,
+    detail: buildExists ? "dist/index.js exists" : "dist/index.js missing — run npm build",
+  });
+
+  // 4. Auth token
+  const tokenExists = existsSync(deps.tokenPath);
+  checks.push({
+    name: "auth_token",
+    pass: tokenExists,
+    detail: tokenExists ? "~/.hive/token exists" : "Missing — run install.sh",
+  });
+
+  // 5. Discovery active
+  checks.push({
+    name: "discovery",
+    pass: deps.hasDiscovery,
+    detail: deps.hasDiscovery ? "Process scanner active" : "Discovery not initialized",
+  });
+
+  // 6. Workers detected
+  const workers = deps.getWorkers();
+  const localWorkers = workers.filter(w => !w.id.includes(":"));
+  checks.push({
+    name: "local_workers",
+    pass: localWorkers.length > 0,
+    detail: `${localWorkers.length} local worker(s) detected`,
+  });
+
+  // 7. Hook pipeline
+  const hookTotal = deps.hookCount();
+  checks.push({
+    name: "hook_pipeline",
+    pass: hookTotal > 0,
+    detail: hookTotal > 0 ? `${hookTotal} hooks received this session` : "No hooks received — check settings.json",
+  });
+
+  // 8. Status detection — check for any stuck-in-wrong-state workers
+  const wrongState = workers.filter(w =>
+    w.status === "working" && w.lastActionAt < Date.now() - 120_000
+  );
+  checks.push({
+    name: "status_accuracy",
+    pass: wrongState.length === 0,
+    detail: wrongState.length === 0
+      ? "No stale-working workers"
+      : `${wrongState.length} worker(s) show working but last action >2min ago: ${wrongState.map(w => w.id).join(", ")}`,
+  });
+
+  // 9. Workers.json file
+  const workersJson = join(REPO_DIR, "..", "..", "..", ".hive", "workers.json");
+  const wjExists = existsSync(workersJson);
+  checks.push({
+    name: "workers_json",
+    pass: wjExists,
+    detail: wjExists ? "~/.hive/workers.json exists" : "Missing — identity hook may fail",
+  });
+
+  // 10. Satellites
+  const sats = deps.getSatellites();
+  const satelliteReports: SatelliteReport[] = sats.map(s => ({
+    machine: s.hostname || s.machineId,
+    version: s.version || "unknown",
+    versionMatch: s.version === primaryVersion,
+    workers: s.workers.length,
+    connected: true,
+  }));
+
+  if (sats.length > 0) {
+    const allMatch = satelliteReports.every(s => s.versionMatch);
+    checks.push({
+      name: "satellite_versions",
+      pass: allMatch,
+      detail: allMatch
+        ? `${sats.length} satellite(s), all on ${primaryVersion}`
+        : `Version mismatch: ${satelliteReports.filter(s => !s.versionMatch).map(s => `${s.machine}=${s.version}`).join(", ")}`,
+    });
+
+    const totalSatWorkers = satelliteReports.reduce((n, s) => n + s.workers, 0);
+    checks.push({
+      name: "satellite_workers",
+      pass: totalSatWorkers > 0,
+      detail: `${totalSatWorkers} worker(s) across ${sats.length} satellite(s)`,
+    });
+  }
+
+  // Overall verdict
+  const failCount = checks.filter(c => !c.pass).length;
+  const overall: PipelineReport["overall"] =
+    failCount === 0 ? "pass" : failCount <= 2 ? "warn" : "fail";
+
+  return {
+    ts: Date.now(),
+    version: primaryVersion,
+    overall,
+    checks,
+    satellites: satelliteReports,
   };
 }

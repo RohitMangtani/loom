@@ -190,6 +190,7 @@ export class WsServer {
 
     // Auto-update: rebuild + restart primary when hive repo is pushed
     this.telemetry.setPrimaryRebuildFn(() => rebuildAndRestart());
+    this.telemetry.setSatelliteInfoGetter(() => this.getSatelliteInfo());
 
     // Capability-based routing: let telemetry query machine capabilities for task dispatch
     this.telemetry.setCapabilityRouter(
@@ -367,6 +368,16 @@ export class WsServer {
     const parsed = this.parseSatelliteWorker(workerId);
     if (!parsed) return null;
     return this.satellites.get(parsed.machineId) || null;
+  }
+
+  /** Get satellite info for pipeline checks. */
+  getSatelliteInfo(): Array<{ machineId: string; hostname: string; version?: string; workers: WorkerState[] }> {
+    return Array.from(this.satellites.values()).map(s => ({
+      machineId: s.machineId,
+      hostname: s.hostname,
+      version: s.version,
+      workers: s.workers,
+    }));
   }
 
   /** Tell all connected satellites to pull latest code and restart. */

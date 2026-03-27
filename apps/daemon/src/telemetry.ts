@@ -167,6 +167,7 @@ export class TelemetryReceiver {
   // messages to satellite workers (workerId contains "machineId:localId").
   private satelliteMessageRelay: ((workerId: string, content: string, from?: string) => Promise<{ ok: boolean; error?: string }>) | null = null;
   private satelliteAllWorkersGetter: (() => WorkerState[]) | null = null;
+  private satelliteInfoGetter: (() => Array<{ machineId: string; hostname: string; version?: string; workers: WorkerState[] }>) | null = null;
 
   // Workflow handoffs: workflowId → handoff context from completed steps
   private workflowHandoffs = new Map<string, string[]>();
@@ -1015,6 +1016,14 @@ export class TelemetryReceiver {
     this.satelliteUpdateFn = updateAll || null;
     // Wire satellite update to ReviewManager so auto-detected hive pushes trigger updates
     this.reviewManager.setSatelliteUpdateFn(updateAll ? () => updateAll() : undefined);
+  }
+
+  setSatelliteInfoGetter(fn: () => Array<{ machineId: string; hostname: string; version?: string; workers: WorkerState[] }>): void {
+    this.satelliteInfoGetter = fn;
+  }
+
+  getSatelliteInfo(): Array<{ machineId: string; hostname: string; version?: string; workers: WorkerState[] }> {
+    return this.satelliteInfoGetter?.() ?? [];
   }
 
   setPrimaryRebuildFn(fn: (() => void) | undefined): void {
