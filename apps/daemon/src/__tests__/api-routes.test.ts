@@ -1,4 +1,5 @@
 import express from "express";
+import { createServer } from "http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerApiRoutes } from "../api-routes.js";
 
@@ -90,8 +91,16 @@ async function createHarness(options?: {
     discovery,
   );
 
-  const server = await new Promise<import("http").Server>((resolve) => {
-    const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
+  // Use http.createServer so we get a proper 'error' event on bind failure
+  // instead of Express 5 silently swallowing it and returning a server whose
+  // .address() is null.
+  const server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Failed to bind test server");
@@ -99,7 +108,7 @@ async function createHarness(options?: {
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     receiver,
-    close: () => new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve())),
+    close: () => new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve())),
   };
 }
 

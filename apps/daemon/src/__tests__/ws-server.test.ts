@@ -38,6 +38,8 @@ function createServer(initialWorkers: unknown[] = []) {
       // no-op for tests
     },
     setSatelliteRelay() {},
+    setPrimaryRebuildFn() {},
+    setSatelliteInfoGetter() {},
     setCapabilityRouter() {},
     setSatelliteContextRelay() {},
     setSwarmApi() {},
