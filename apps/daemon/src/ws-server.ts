@@ -2278,9 +2278,10 @@ export class WsServer {
                 }
               }
 
-              // Check for trust/sandbox prompts
+              // Check for trust/sandbox prompts — but never overwrite the
+              // daemon-level approval gate. CLI prompts are handled after approval.
               const prompt = this.discovery.detectPrompt(spawnTty, { bypassCache: true });
-              if (prompt) {
+              if (prompt && current.promptType !== "approval") {
                 current.status = "waiting";
                 current.promptType = prompt.type;
                 current.promptMessage = prompt.message;
