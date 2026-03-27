@@ -1055,6 +1055,24 @@ export class WsServer {
       }
     }
 
+    // Clean up per-worker Maps/Sets for this satellite's workers.
+    // Without this, entries accumulate indefinitely after disconnects.
+    if (active) {
+      for (const w of active.workers) {
+        const key = `${machineId}:${w.id}`;
+        this.satellitePrevStatus.delete(key);
+        this.satelliteIdleCounts.delete(key);
+        this.satelliteOverrides.delete(key);
+        this.satelliteStuckFirstSeen.delete(key);
+        // satelliteAutoApproved keys include lastActionAt suffix — delete by prefix
+        for (const apKey of this.satelliteAutoApproved) {
+          if (apKey.startsWith(`sat_autopilot_${key}`)) {
+            this.satelliteAutoApproved.delete(apKey);
+          }
+        }
+      }
+    }
+
     this.lastWorkersSnapshot = null;
     this.pushState();
     this.broadcastMachines();
@@ -1715,7 +1733,7 @@ export class WsServer {
           // Apply override so dashboard shows working immediately
           const overrideKey = `${machineId}:${w.id}`;
           this.satelliteOverrides.set(overrideKey, {
-            until: now + 15_000,
+            until: now + 25_000,
             status: "working",
             currentAction: "Thinking...",
             lastAction: "Auto-approved from primary",

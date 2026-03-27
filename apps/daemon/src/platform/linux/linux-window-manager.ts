@@ -251,4 +251,76 @@ export class LinuxWindowManager implements WindowManager {
   resetArrangement(): void {
     lastArrangement = "";
   }
+
+  detectQuadrants(
+    ttys: string[],
+    callback: (result: Map<string, number>, rawSlots?: Map<string, number>) => void,
+  ): void {
+    if (ttys.length === 0) return;
+    if (!sessionExists()) return;
+
+    // Query tmux for pane positions: index, pid, top offset, left offset, width, height
+    const raw = runTmux([
+      "list-panes",
+      "-t",
+      sessionTarget(),
+      "-F",
+      "#{pane_index}\t#{pane_pid}\t#{pane_top}\t#{pane_left}\t#{pane_width}\t#{pane_height}\t#{pane_tty}",
+    ]);
+    if (!raw.ok || !raw.stdout) return;
+
+    const panes = raw.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.split("\t");
+        return {
+          index: parseInt(parts[0] || "0", 10),
+          pid: parseInt(parts[1] || "0", 10),
+          top: parseInt(parts[2] || "0", 10),
+          left: parseInt(parts[3] || "0", 10),
+          width: parseInt(parts[4] || "0", 10),
+          height: parseInt(parts[5] || "0", 10),
+          tty: normalizeTty(parts[6] || ""),
+        };
+      });
+
+    if (panes.length === 0) return;
+
+    // Build a lookup from normalized TTY to pane info
+    const ttySet = new Set(ttys.map(normalizeTty));
+    const matchedPanes = panes.filter((p) => ttySet.has(p.tty));
+    if (matchedPanes.length === 0) return;
+
+    // Sort by vertical position (top offset), then horizontal (left offset)
+    matchedPanes.sort((a, b) => (a.top - b.top) || (a.left - b.left));
+
+    // Assign quadrant slots 1..N based on sorted position (same grid logic as macOS:
+    // vertical stack, topmost pane = Q1, next = Q2, etc.)
+    const result = new Map<string, number>();
+    const rawSlots = new Map<string, number>();
+    const usedSlots = new Set<number>();
+
+    for (const pane of matchedPanes) {
+      // Find the original TTY string that matches this pane
+      const originalTty = ttys.find((t) => normalizeTty(t) === pane.tty);
+      if (!originalTty) continue;
+
+      const naturalSlot = matchedPanes.indexOf(pane) + 1;
+      rawSlots.set(originalTty, naturalSlot);
+
+      let q = naturalSlot;
+      if (usedSlots.has(q)) {
+        // Collision: find next free slot
+        for (let s = 1; s <= matchedPanes.length; s++) {
+          if (!usedSlots.has(s)) { q = s; break; }
+        }
+      }
+      result.set(originalTty, q);
+      usedSlots.add(q);
+    }
+
+    callback(result, rawSlots);
+  }
 }

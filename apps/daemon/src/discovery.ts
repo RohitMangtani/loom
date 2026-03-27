@@ -255,15 +255,6 @@ end tell
   }
 
   /**
-   * Detect provider-level errors from terminal output (quota exhaustion,
-   * billing issues, rate limits). Returns a human-readable error string
-   * or null if no provider error is detected.
-   *
-   * Only checks the last ~1500 chars of terminal history to avoid
-   * false-positives on old error messages that have scrolled up.
-   * Caches results for 10 seconds (avoids AppleScript spam).
-   */
-  /**
    * Read terminal content for a worker with no session yet.
    * Returns the visible text trimmed to the last meaningful lines.
    */

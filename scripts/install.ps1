@@ -165,12 +165,25 @@ if (-not (Test-Path $tokenFile)) {
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tokenBytes)
     $newToken = ($tokenBytes | ForEach-Object { $_.ToString("x2") }) -join ""
     Set-Content -Path $tokenFile -Value $newToken -NoNewline
+    # Restrict token file ACL to current user only
+    $acl = Get-Acl $tokenFile
+    $acl.SetAccessRuleProtection($true, $false)
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", "Allow")
+    $acl.SetAccessRule($rule)
+    Set-Acl $tokenFile $acl
 
     # Create viewer token
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
     $viewerBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes("${newToken}:viewer"))
     $viewerToken = ($viewerBytes | ForEach-Object { $_.ToString("x2") }) -join ""
-    Set-Content -Path (Join-Path $HiveDir "viewer-token") -Value $viewerToken -NoNewline
+    $viewerTokenPath = Join-Path $HiveDir "viewer-token"
+    Set-Content -Path $viewerTokenPath -Value $viewerToken -NoNewline
+    # Restrict viewer token file ACL to current user only
+    $acl = Get-Acl $viewerTokenPath
+    $acl.SetAccessRuleProtection($true, $false)
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", "Allow")
+    $acl.SetAccessRule($rule)
+    Set-Acl $viewerTokenPath $acl
 
     Write-Host "  OK Token ready"
 
@@ -192,8 +205,23 @@ if (-not (Test-Path $tokenFile)) {
 if ($SatelliteMode) {
   # Store primary connection
   New-Item -ItemType Directory -Path $HiveDir -Force | Out-Null
-  Set-Content -Path (Join-Path $HiveDir "primary-url") -Value $Url -NoNewline
-  Set-Content -Path (Join-Path $HiveDir "primary-token") -Value $Token -NoNewline
+  $primaryUrlPath = Join-Path $HiveDir "primary-url"
+  Set-Content -Path $primaryUrlPath -Value $Url -NoNewline
+  # Restrict primary-url ACL to current user only
+  $acl = Get-Acl $primaryUrlPath
+  $acl.SetAccessRuleProtection($true, $false)
+  $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", "Allow")
+  $acl.SetAccessRule($rule)
+  Set-Acl $primaryUrlPath $acl
+
+  $primaryTokenPath = Join-Path $HiveDir "primary-token"
+  Set-Content -Path $primaryTokenPath -Value $Token -NoNewline
+  # Restrict primary-token ACL to current user only
+  $acl = Get-Acl $primaryTokenPath
+  $acl.SetAccessRuleProtection($true, $false)
+  $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, "FullControl", "Allow")
+  $acl.SetAccessRule($rule)
+  Set-Acl $primaryTokenPath $acl
 
   # Maintain URL rotation file
   $urlsFile = Join-Path $HiveDir "primary-urls.txt"

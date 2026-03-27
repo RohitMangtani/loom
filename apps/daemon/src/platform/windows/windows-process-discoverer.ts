@@ -238,11 +238,31 @@ export class WindowsProcessDiscoverer implements ProcessDiscoverer {
   }
 
   getCpu(pid: number): number {
+    // Get-Process.CPU returns cumulative CPU seconds, not a percentage.
+    // Sample twice 500ms apart and compute the delta to get an instantaneous
+    // CPU percentage that's comparable to what macOS/Linux report.
     try {
-      const out = execFileSync("powershell", [
-        "-NoProfile", "-Command",
-        `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).CPU`,
-      ], { encoding: "utf-8", timeout: 3000 }).trim();
+      const psScript = `
+$p1 = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+if (-not $p1) { Write-Output "0"; exit }
+$cpu1 = $p1.TotalProcessorTime.TotalMilliseconds
+$ts1 = [System.Diagnostics.Stopwatch]::GetTimestamp()
+Start-Sleep -Milliseconds 500
+$p2 = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+if (-not $p2) { Write-Output "0"; exit }
+$cpu2 = $p2.TotalProcessorTime.TotalMilliseconds
+$ts2 = [System.Diagnostics.Stopwatch]::GetTimestamp()
+$freq = [System.Diagnostics.Stopwatch]::Frequency
+$wallMs = ($ts2 - $ts1) * 1000.0 / $freq
+if ($wallMs -le 0) { Write-Output "0"; exit }
+$cores = [System.Environment]::ProcessorCount
+$pct = (($cpu2 - $cpu1) / $wallMs) * 100.0 / $cores
+Write-Output ([math]::Round([math]::Max(0, $pct), 1))
+`;
+      const out = execFileSync("powershell", ["-NoProfile", "-Command", psScript], {
+        encoding: "utf-8",
+        timeout: 5000,
+      }).trim();
       return parseFloat(out) || 0;
     } catch {
       return 0;

@@ -16,6 +16,8 @@ import { join } from "path";
 import { readFileSync } from "fs";
 import type { WindowManager, WindowSlot } from "../interfaces.js";
 
+let lastArrangement = "";
+
 const HOME = process.env.USERPROFILE || process.env.HOME || homedir();
 
 function hasWindowsTerminal(): boolean {
@@ -121,8 +123,111 @@ export class WindowsWindowManager implements WindowManager {
     }
   }
 
-  arrangeWindows(_slots: WindowSlot[], _totalAgentCount?: number): void {
-    // Window arrangement on Windows is best-effort.
-    // Windows Terminal tabs are managed by the user.
+  arrangeWindows(slots: WindowSlot[], totalAgentCount?: number): void {
+    // Arrange windows in a grid matching the quadrant system.
+    // Uses PowerShell + Win32 SetWindowPos to position each agent's terminal window.
+    //
+    // Note: If agents run as tabs inside a single Windows Terminal (wt.exe) instance,
+    // only the WT window itself can be positioned — individual tabs cannot be placed
+    // in separate screen regions. In that case, this positions the WT window to fill
+    // the screen. When agents run in separate windows (cmd.exe), each gets its own
+    // quadrant.
+
+    const desired = slots.filter((slot) => !!slot.tty).sort((a, b) => a.quadrant - b.quadrant);
+    if (desired.length === 0) return;
+
+    // Dedup: skip if arrangement hasn't changed
+    const fingerprint = desired
+      .map((slot) => `${slot.quadrant}:${slot.tty}:${slot.projectName}:${slot.model}`)
+      .join("|") + `@${totalAgentCount || desired.length}`;
+    if (fingerprint === lastArrangement) return;
+    lastArrangement = fingerprint;
+
+    // Build a PowerShell script that:
+    // 1. Imports SetWindowPos from user32.dll
+    // 2. Gets the primary screen working area
+    // 3. Positions each window in its quadrant
+    const windowPositionCalls = desired.map((slot) => {
+      const pidStr = slot.tty.replace(/^pid:/, "");
+      // Quadrant layout (2x2 grid):
+      //   Q1 = top-left     Q2 = top-right
+      //   Q3 = bottom-left  Q4 = bottom-right
+      // For 1 window: full screen. For 2: left/right split. For 3+: 2x2 grid.
+      return `@{ Pid = ${pidStr}; Quadrant = ${slot.quadrant}; Label = "Q${slot.quadrant} - ${slot.projectName.replace(/'/g, "''")}" }`;
+    }).join(",\n    ");
+
+    const psScript = `
+Add-Type @"
+  using System;
+  using System.Runtime.InteropServices;
+  public class HiveLayout {
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    [DllImport("user32.dll")] public static extern bool SetWindowText(IntPtr hWnd, string lpString);
+    public static readonly IntPtr HWND_TOP = IntPtr.Zero;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+  }
+"@
+Add-Type -AssemblyName System.Windows.Forms
+
+$workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$totalW = $workArea.Width
+$totalH = $workArea.Height
+$originX = $workArea.X
+$originY = $workArea.Y
+
+$slots = @(
+    ${windowPositionCalls}
+)
+$count = $slots.Count
+
+foreach ($slot in $slots) {
+  $proc = Get-Process -Id $slot.Pid -ErrorAction SilentlyContinue
+  if (-not $proc -or $proc.MainWindowHandle -eq [IntPtr]::Zero) {
+    # Try parent process (conhost -> terminal)
+    $parentId = (Get-CimInstance Win32_Process -Filter "ProcessId=$($slot.Pid)" -ErrorAction SilentlyContinue).ParentProcessId
+    if ($parentId) { $proc = Get-Process -Id $parentId -ErrorAction SilentlyContinue }
+    if (-not $proc -or $proc.MainWindowHandle -eq [IntPtr]::Zero) { continue }
+  }
+  $hwnd = $proc.MainWindowHandle
+
+  if ($count -eq 1) {
+    # Single window: fill the screen
+    [HiveLayout]::SetWindowPos($hwnd, [HiveLayout]::HWND_TOP, $originX, $originY, $totalW, $totalH, [HiveLayout]::SWP_SHOWWINDOW) | Out-Null
+  } elseif ($count -eq 2) {
+    # Two windows: left/right split
+    $halfW = [math]::Floor($totalW / 2)
+    $x = if ($slot.Quadrant -le 2) { $originX + (($slot.Quadrant - 1) * $halfW) } else { $originX + (($slot.Quadrant - 3) * $halfW) }
+    [HiveLayout]::SetWindowPos($hwnd, [HiveLayout]::HWND_TOP, $x, $originY, $halfW, $totalH, [HiveLayout]::SWP_SHOWWINDOW) | Out-Null
+  } else {
+    # 3 or 4 windows: 2x2 grid
+    $halfW = [math]::Floor($totalW / 2)
+    $halfH = [math]::Floor($totalH / 2)
+    switch ($slot.Quadrant) {
+      1 { $x = $originX;           $y = $originY;           }
+      2 { $x = $originX + $halfW;  $y = $originY;           }
+      3 { $x = $originX;           $y = $originY + $halfH;  }
+      4 { $x = $originX + $halfW;  $y = $originY + $halfH;  }
+      default { $x = $originX;     $y = $originY;           }
+    }
+    [HiveLayout]::SetWindowPos($hwnd, [HiveLayout]::HWND_TOP, $x, $y, $halfW, $halfH, [HiveLayout]::SWP_SHOWWINDOW) | Out-Null
+  }
+
+  # Best-effort: set window title to show quadrant
+  try { [HiveLayout]::SetWindowText($hwnd, $slot.Label) | Out-Null } catch {}
+}
+`;
+
+    try {
+      execFileSync("powershell", ["-NoProfile", "-Command", psScript], {
+        encoding: "utf-8",
+        timeout: 10000,
+      });
+    } catch {
+      // Window arrangement is best-effort — don't crash if it fails
+    }
+  }
+
+  resetArrangement(): void {
+    lastArrangement = "";
   }
 }

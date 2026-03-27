@@ -25,7 +25,7 @@ It solves four problems:
 
 ### What You Need
 
-- **macOS** (Linux via tmux is in progress)
+- **macOS** or **Linux with tmux** (Linux support is implemented and working; live-host testing across more distributions is ongoing)
 - **Node.js 20+** ([nodejs.org](https://nodejs.org))
 - At least one AI CLI: `claude`, `codex`, or `openclaw`
 - A free [Vercel](https://vercel.com) account (for the hosted dashboard)
@@ -65,6 +65,16 @@ After install, macOS asks for two things:
 1. **Automation permission**: "Terminal wants to control Terminal." Click OK. This lets Hive send messages to agent terminals.
 2. **Accessibility permission** (optional): Drag `send-return` into System Settings > Privacy & Security > Accessibility and toggle it on. This enables auto-pilot, which auto-approves agent permission prompts so they never sit idle.
 
+### Linux Setup (tmux)
+
+On Linux, Hive uses tmux instead of Terminal.app. Before running the daemon:
+
+1. **Install tmux**: `sudo apt install tmux` (Debian/Ubuntu) or `sudo dnf install tmux` (Fedora).
+2. **Create the session**: The daemon creates a tmux session named `hive` automatically when spawning the first agent. You can also create it manually: `tmux new-session -d -s hive -n swarm`.
+3. **Attach to it**: `tmux attach -t hive` to see agent panes side by side.
+
+No accessibility permissions or special binaries are needed on Linux. Terminal I/O goes through tmux's `send-keys` command directly. Auto-pilot works out of the box once the tmux session is running.
+
 ### Your Token
 
 Setup prints an auth token. Copy it. Open the dashboard URL, paste the token into the input field at the top, and hit enter. You now have full admin control. The token is saved at `~/.hive/token` if you need it again.
@@ -93,7 +103,7 @@ This starts the daemon, opens a public tunnel, deploys the dashboard to your Ver
 
 ### Starting Agents
 
-Open Terminal.app windows and run any supported CLI:
+**macOS**: Open Terminal.app windows and run any supported CLI:
 
 ```bash
 claude
@@ -102,6 +112,15 @@ openclaw tui
 ```
 
 Each one appears on the dashboard within 3 seconds. Stack your terminal windows vertically on screen. The daemon detects their positions and maps each one to the matching tile in the dashboard stack. Move a terminal higher on screen, and it moves up in the dashboard.
+
+**Linux**: Agents run inside tmux panes in the `hive` session. Spawn them from the dashboard or split panes manually:
+
+```bash
+tmux split-window -t hive:swarm 'claude'
+tmux select-layout -t hive:swarm even-vertical
+```
+
+The daemon detects pane positions within 3 seconds. Panes are mapped to quadrant slots top-to-bottom based on their vertical position in the tmux layout.
 
 You can also spawn agents from the dashboard. Tap "+ Agent", pick a model, optionally add a starting task, and hit Spawn.
 

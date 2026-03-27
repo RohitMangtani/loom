@@ -12,7 +12,7 @@ npm install
 
 ### Requirements
 
-- **macOS** or **Linux with tmux**. The Linux platform layer is wired through the daemon now, but still needs more live-host hardening.
+- **macOS** or **Linux with tmux**. The Linux platform layer (process discovery, terminal I/O, window management) is fully implemented and wired through the daemon. What remains is live-host testing across more Linux distributions and desktop environments, not the platform code itself.
 - **Node.js 20+**
 - At least one AI CLI: `claude`, `codex`, or `openclaw`
 
@@ -92,7 +92,7 @@ See [docs/architecture.md](docs/architecture.md) for a detailed data flow explan
 
 ### Bigger contributions
 
-- **Live-smoke and harden the Linux/tmux runtime**  --  The platform layer is now wired through the daemon, but it still needs more verification on real Linux hosts, better layout polish, and failure-mode hardening.
+- **Live-test the Linux/tmux runtime on more hosts**  --  The platform layer (discovery, terminal I/O, window management, quadrant detection) is complete. What is needed is live testing across different Linux distributions (Debian, Fedora, Arch), desktop environments, and tmux versions to catch edge cases in pane layout detection, TTY path formats, and process tree differences.
 - **Publish the CLI/init flow**  --  `packages/cli` now owns the local `hive init` and `hive doctor` entry points. The next step is turning that into a polished npm install surface with a final package name.
 - **Agent plugin system**  --  Let users add new agent types via config files
 - **VS Code extension**  --  Show fleet status in the status bar using the protocol spec

@@ -58,10 +58,17 @@ fi
 
 # 6. Restart daemon
 step "Restarting daemon..."
-launchctl stop com.hive.daemon 2>/dev/null || true
-sleep 1
-launchctl start com.hive.daemon 2>/dev/null || true
-sleep 2
+if launchctl kickstart -k "gui/$(id -u)/com.hive.daemon" 2>/dev/null; then
+  step "Restarted via launchd"
+else
+  warn "launchd service not found — falling back to manual restart"
+  lsof -tiTCP:3001 -sTCP:LISTEN | xargs kill 2>/dev/null || true
+  sleep 1
+  cd "$ROOT"
+  nohup npm start > /dev/null 2>&1 &
+  step "Started daemon (pid $!)"
+fi
+sleep 3
 
 # 7. Verify daemon is up
 TOKEN=$(cat ~/.hive/token 2>/dev/null || echo "")

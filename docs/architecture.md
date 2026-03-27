@@ -175,7 +175,6 @@ Human actions (messages sent, agents spawned, prompts approved) are broadcast as
 |---------|---------|
 | `@rohitmangtani/hive` | CLI package for `hive init` and `hive doctor` flows |
 | `@hive/types` | Shared TypeScript interfaces (WorkerState, etc.) |
-| `@hive/protocol` | Typed definitions for all REST, WebSocket, and hook contracts |
 
 ## Multi-Machine Federation
 
