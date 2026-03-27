@@ -124,13 +124,8 @@ export class Watchdog {
 
       if (tracked.escalated) continue; // Already escalated, waiting for human
 
-      // Log-only: watchdog diagnoses but never auto-sends messages to agents.
-      // The human decides when and how to act on anomalies via the dashboard.
-      if (tracked.attempts === 0) {
-        tracked.attempts = 1;
-        tracked.lastDispatched = now;
-        console.log(`[watchdog] Detected ${anomaly.type}: ${anomaly.description.slice(0, 150)}`);
-      }
+      // --- DISPATCH: send a focused fix task to an idle agent ---
+      this.dispatch(anomaly, tracked, now);
     }
 
     // --- IDLE FLEET ALERT: notify if all agents idle >10 minutes ---
@@ -160,6 +155,56 @@ export class Watchdog {
       this.notify("Hive Fleet Idle", `All ${workers.length} agents idle for ${mins}+ minutes`);
       console.log(`[watchdog] Fleet idle alert: all ${workers.length} agents idle for ${mins}+ minutes`);
     }
+  }
+
+  /**
+   * Dispatch a fix task to an idle agent for a detected anomaly.
+   * Safety: never dispatches to the anomaly's own TTY, respects MAX_ATTEMPTS,
+   * and uses sendToWorkerAsync to go through the normal message pipeline.
+   */
+  private dispatch(anomaly: Anomaly, tracked: TrackedAnomaly, now: number): void {
+    // Find an idle agent that is NOT the anomaly's own TTY
+    const anomalyTty = (anomaly.data.tty as string) || "";
+    const idle = this.telemetry.getAll().find(
+      w => w.status === "idle" && w.tty !== anomalyTty
+    );
+
+    if (!idle) {
+      // No idle agent available — just log and wait for next scan
+      if (tracked.attempts === 0) {
+        console.log(`[watchdog] Detected ${anomaly.type} but no idle agent available: ${anomaly.description.slice(0, 150)}`);
+      }
+      return;
+    }
+
+    const task = [
+      `Watchdog detected: ${anomaly.type}`,
+      `Description: ${anomaly.description}`,
+      `Severity: ${anomaly.severity}`,
+      `Attempt ${tracked.attempts + 1}/${MAX_ATTEMPTS}.`,
+      `Read \`cat ${HIVE_PROJECT}/.claude/hive-learnings.md\` for prior fixes.`,
+      `Diagnose and fix the root cause. Write a learning back when done.`,
+    ].join("\n");
+
+    // Mark dispatched immediately so we don't double-dispatch this scan cycle
+    tracked.attempts++;
+    tracked.lastDispatched = now;
+
+    this.telemetry.sendToWorkerAsync(idle.id, task, {
+      source: "watchdog",
+      lastAction: `Watchdog: ${anomaly.type}`,
+      queueIfBusy: false,
+      markDashboardInput: false,
+    }).then(result => {
+      if (result.ok) {
+        tracked.dispatchedTo = idle.id;
+        console.log(`[watchdog] Dispatched ${anomaly.type} to ${idle.tty || idle.id} (attempt ${tracked.attempts}/${MAX_ATTEMPTS})`);
+      } else {
+        console.log(`[watchdog] Failed to dispatch ${anomaly.type} to ${idle.tty || idle.id}: ${result.ok === false ? result.error : "unknown"}`);
+      }
+    }).catch(() => {
+      console.log(`[watchdog] Dispatch error for ${anomaly.type}`);
+    });
   }
 
   /**

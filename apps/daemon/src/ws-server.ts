@@ -946,7 +946,9 @@ export class WsServer {
     // single-report working→idle flicker on the dashboard.
     for (const w of incoming) {
       const key = `${machineId}:${w.id}`;
-      if (w.status === "working") {
+      if (w.status === "working" || w.status === "stuck") {
+        // Reset idle count for both working and stuck — stuck is a real state
+        // that should pass through unchanged and reset the idle hysteresis
         this.satelliteIdleCounts.set(key, 0);
       } else if (w.status === "idle") {
         const idleCount = (this.satelliteIdleCounts.get(key) || 0) + 1;

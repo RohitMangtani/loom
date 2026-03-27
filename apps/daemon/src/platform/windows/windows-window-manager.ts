@@ -227,6 +227,102 @@ foreach ($slot in $slots) {
     }
   }
 
+  detectQuadrants(
+    ttys: string[],
+    callback: (result: Map<string, number>, rawSlots?: Map<string, number>) => void,
+  ): void {
+    if (ttys.length === 0) return;
+
+    // Build a PowerShell script that:
+    // 1. Gets the primary screen working area for midpoint calculations
+    // 2. For each PID, finds the window handle and reads its position via GetWindowRect
+    // 3. Maps each window to a quadrant based on its center position in a 2x2 grid
+    const pids = ttys.map((tty) => tty.replace(/^pid:/, ""));
+    const pidList = pids.join(",");
+
+    const psScript = `
+Add-Type @"
+  using System;
+  using System.Runtime.InteropServices;
+  public class HiveDetect {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  }
+"@
+Add-Type -AssemblyName System.Windows.Forms
+
+$workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$midX = $workArea.X + [math]::Floor($workArea.Width / 2)
+$midY = $workArea.Y + [math]::Floor($workArea.Height / 2)
+
+$pids = @(${pidList})
+foreach ($pid in $pids) {
+  $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+  if (-not $proc -or $proc.MainWindowHandle -eq [IntPtr]::Zero) {
+    # Try parent process (conhost -> terminal)
+    $parentId = (Get-CimInstance Win32_Process -Filter "ProcessId=$pid" -ErrorAction SilentlyContinue).ParentProcessId
+    if ($parentId) { $proc = Get-Process -Id $parentId -ErrorAction SilentlyContinue }
+    if (-not $proc -or $proc.MainWindowHandle -eq [IntPtr]::Zero) { continue }
+  }
+  $hwnd = $proc.MainWindowHandle
+  $rect = New-Object HiveDetect+RECT
+  $ok = [HiveDetect]::GetWindowRect($hwnd, [ref]$rect)
+  if (-not $ok) { continue }
+  $cx = [math]::Floor(($rect.Left + $rect.Right) / 2)
+  $cy = [math]::Floor(($rect.Top + $rect.Bottom) / 2)
+  # Quadrant: top-left=1, top-right=2, bottom-left=3, bottom-right=4
+  if ($cx -lt $midX -and $cy -lt $midY) { $q = 1 }
+  elseif ($cx -ge $midX -and $cy -lt $midY) { $q = 2 }
+  elseif ($cx -lt $midX -and $cy -ge $midY) { $q = 3 }
+  else { $q = 4 }
+  Write-Output "$pid$([char]9)$q"
+}
+`;
+
+    try {
+      const output = execFileSync("powershell", ["-NoProfile", "-Command", psScript], {
+        encoding: "utf-8",
+        timeout: 10000,
+      });
+
+      // Parse output: each line is "PID\tQuadrant"
+      const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
+      const result = new Map<string, number>();
+      const rawSlots = new Map<string, number>();
+      const usedSlots = new Set<number>();
+
+      for (const line of lines) {
+        const [pidStr, qStr] = line.split("\t");
+        if (!pidStr || !qStr) continue;
+        const quadrant = parseInt(qStr, 10);
+        if (quadrant < 1 || quadrant > 4) continue;
+
+        // Find the original tty string that matches this PID
+        const originalTty = ttys.find((tty) => tty.replace(/^pid:/, "") === pidStr);
+        if (!originalTty) continue;
+
+        rawSlots.set(originalTty, quadrant);
+
+        let q = quadrant;
+        if (usedSlots.has(q)) {
+          // Collision: find next free slot
+          for (let s = 1; s <= 4; s++) {
+            if (!usedSlots.has(s)) { q = s; break; }
+          }
+        }
+        result.set(originalTty, q);
+        usedSlots.add(q);
+      }
+
+      if (result.size > 0) {
+        callback(result, rawSlots);
+      }
+    } catch {
+      // detectQuadrants is best-effort -- don't crash if PowerShell fails
+    }
+  }
+
   resetArrangement(): void {
     lastArrangement = "";
   }

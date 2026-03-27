@@ -23,6 +23,7 @@ import { UserRegistry } from "./user-registry.js";
 import { ReplayManager } from "./replay.js";
 import { RevertHistory } from "./revert-history.js";
 import { DeviceLayer } from "./devices/index.js";
+import { detectAndWriteMachineManifest } from "./detect-capabilities.js";
 
 // ── Satellite mode ──────────────────────────────────────────────────
 // Usage: npx tsx apps/daemon/src/index.ts --satellite wss://URL TOKEN
@@ -117,6 +118,9 @@ if (satFlagIdx !== -1) {
     console.log(`[daemon] Runtime already owned by ${ownerText}. Exiting duplicate instance.`);
     process.exit(0);
   }
+
+  // Write machine capabilities to ~/.hive/machine.json on primary startup
+  detectAndWriteMachineManifest();
 
   const tunnelHealth = new TunnelHealthMonitor();
   const replayManager = new ReplayManager();
