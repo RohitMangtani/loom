@@ -323,7 +323,11 @@ The system solves four problems at once:
 - **Multi-model** -Claude, Codex, OpenClaw side by side. Spawn any from the dashboard. Add custom agents via `~/.hive/agents.json`.
 - **Multi-machine** -connect additional Macs as satellites. Agents from all machines appear in one dashboard. Messages, tasks, and coordination route transparently across the network.
 - **Auto-discovery** -start any supported agent in a terminal and it appears on the dashboard within 3 seconds. No registration, no config.
-- **Auto-pilot** -permission prompts auto-approve after a 3-second grace window. Stuck loops get caught and surfaced. Agents never sit idle.
+- **Spawn approval gate** -every new agent requires a dashboard "Approve" click before receiving its task. You see what is about to start and you control when it begins.
+- **Auto-pilot** -permission prompts auto-approve after a 3-second grace window. Stuck loops get caught and the watchdog dispatches idle agents to intervene. Three failures escalate to a yellow card the autopilot will not touch.
+- **Auto-update cascade** -when code is pushed, the primary rebuilds and all satellites auto-pull, rebuild, and restart. Fleet stays in sync without manual intervention.
+- **Pipeline health check** -`GET /api/check` verifies the entire fleet: daemon, build, auth, discovery, workers, hooks, status accuracy, satellite versions. One call, pass or fail.
+- **Diagnostics panel** -"Health" button on the dashboard shows fleet checks, stuck worker details, session routing, hook times, and signal timelines. Debug from your phone.
 - **Messaging** -tap any tile, type a message, it goes straight to that agent's terminal. Messages queue if the agent is busy.
 - **Coordination** -file locks, conflict detection, task queue, scratchpad. Multiple agents on the same codebase without collisions.
 - **Workflow handoff** -tag related tasks with a workflow ID. When step 1 finishes, step 2 receives the git diff, verbatim agent output, and a structured JSON context block. Git state is verified before each handoff to prevent stale-code drift. Warnings flag uncommitted files or merge conflicts before the next step starts.
