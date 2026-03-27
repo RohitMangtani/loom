@@ -8,6 +8,7 @@ import { ChatPanel } from "@/components/ChatPanel";
 import { ReviewDrawer } from "@/components/ReviewDrawer";
 import { SpawnDialog } from "@/components/SpawnDialog";
 import { InviteDialog } from "@/components/InviteDialog";
+import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import type { WorkerState } from "@/lib/types";
 import { usePushSubscription } from "@/components/ServiceWorker";
 import { useVoiceRecording } from "@/lib/useVoiceRecording";
@@ -92,6 +93,7 @@ export default function Home() {
   const [managing, setManaging] = useState(false);
   const [showSpawnDialog, setShowSpawnDialog] = useState(false);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [presenceMinimized, setPresenceMinimized] = useState(false);
   const contextAttachmentsRef = useRef<Map<string, string[]>>(new Map());
 
@@ -487,6 +489,16 @@ export default function Home() {
                   Manage
                 </button>
               )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDiagnostics(true);
+                }}
+                className="px-2 py-0.5 rounded border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--text-light)] transition-colors cursor-pointer"
+              >
+                Health
+              </button>
             </>
           )}
         </div>
@@ -681,6 +693,14 @@ export default function Home() {
           onClose={() => setShowInviteDialog(false)}
         />
       )}
+
+      <DiagnosticsPanel
+        wsUrl={daemonUrl}
+        token={typeof window !== "undefined" ? localStorage.getItem("hive_token") || "" : ""}
+        workers={workers}
+        open={showDiagnostics}
+        onClose={() => setShowDiagnostics(false)}
+      />
 
     </div>
   );
