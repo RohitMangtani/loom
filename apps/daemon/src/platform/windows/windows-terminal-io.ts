@@ -2,14 +2,22 @@
  * Windows terminal IO.
  *
  * On Windows there are no /dev/tty devices. Agents are identified by PID.
- * Terminal IO uses PowerShell to send keystrokes to the window owning
- * the target process via SetForegroundWindow + SendKeys.
+ * Terminal IO uses PowerShell + Win32 WriteConsoleInput to inject keystrokes
+ * directly into a console's input buffer via AttachConsole(pid). No window
+ * focus is required — works headless, minimized, or when another window is
+ * in the foreground.
  *
- * Limitations:
- * - SendKeys targets the foreground window. If another window is focused
- *   at the exact moment, input may go to the wrong window. This is
- *   inherently racy (same limitation as AppleScript on macOS).
- * - readContent() attempts several strategies to read terminal output:
+ * The approach:
+ * 1. FreeConsole() — detach from our own console
+ * 2. Walk the process tree (up to 5 levels) trying AttachConsole(pid) for
+ *    each ancestor until one succeeds (the target PID may be a child of
+ *    conhost.exe or WindowsTerminal.exe)
+ * 3. GetStdHandle(STD_INPUT_HANDLE) to get the console input buffer handle
+ * 4. WriteConsoleInput() to inject KEY_EVENT_RECORD pairs (down+up) for
+ *    each character or virtual key
+ * 5. FreeConsole() to detach cleanly
+ *
+ * readContent() attempts several strategies to read terminal output:
  *   1. Check if the process has a --log-file / -log argument and read the tail
  *   2. Check for hive-terminal-*.log temp files written by the process
  *   3. Return null as fallback if nothing works
@@ -31,10 +39,11 @@ function extractPid(tty: string): string | null {
 }
 
 /**
- * Build the PowerShell preamble that loads Win32 API and finds the window.
- * Reused across send/keystroke functions to avoid duplication.
+ * Legacy: Build the PowerShell preamble that loads Win32 API and focuses a window.
+ * Kept as a fallback — main send functions now use WriteConsoleInput which
+ * does not require window focus.
  */
-function buildWindowFocusScript(pid: string): string {
+function _buildWindowFocusScript(pid: string): string {
   return `
 Add-Type @"
   using System;
@@ -46,7 +55,6 @@ Add-Type @"
 "@
 $proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
 if (-not $proc -or -not $proc.MainWindowHandle -or $proc.MainWindowHandle -eq [IntPtr]::Zero) {
-  # Process may be a child of conhost — try finding the parent terminal window
   $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -ErrorAction SilentlyContinue).ParentProcessId
   if ($parent) { $proc = Get-Process -Id $parent -ErrorAction SilentlyContinue }
   if (-not $proc -or -not $proc.MainWindowHandle -or $proc.MainWindowHandle -eq [IntPtr]::Zero) { exit 1 }
@@ -55,6 +63,132 @@ if (-not $proc -or -not $proc.MainWindowHandle -or $proc.MainWindowHandle -eq [I
 [HiveWinApi]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
 Start-Sleep -Milliseconds 200
 Add-Type -AssemblyName System.Windows.Forms
+`;
+}
+
+/**
+ * Build the PowerShell C# type definition for WriteConsoleInput via AttachConsole.
+ * This is the core Win32 interop used by all send functions.
+ */
+function buildConsoleInputType(): string {
+  return `
+Add-Type @"
+  using System;
+  using System.Runtime.InteropServices;
+
+  [StructLayout(LayoutKind.Explicit)]
+  public struct KEY_EVENT_RECORD {
+    [FieldOffset(0)] public bool bKeyDown;
+    [FieldOffset(4)] public ushort wRepeatCount;
+    [FieldOffset(6)] public ushort wVirtualKeyCode;
+    [FieldOffset(8)] public ushort wVirtualScanCode;
+    [FieldOffset(10)] public char UnicodeChar;
+    [FieldOffset(12)] public uint dwControlKeyState;
+  }
+
+  [StructLayout(LayoutKind.Explicit)]
+  public struct INPUT_RECORD {
+    [FieldOffset(0)] public ushort EventType;
+    [FieldOffset(4)] public KEY_EVENT_RECORD KeyEvent;
+  }
+
+  public class HiveConsoleApi {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool FreeConsole();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool AttachConsole(uint dwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool WriteConsoleInput(
+      IntPtr hConsoleInput,
+      INPUT_RECORD[] lpBuffer,
+      uint nLength,
+      out uint lpNumberOfEventsWritten
+    );
+
+    public static void SendKeyEvent(IntPtr handle, ushort vk, char ch) {
+      INPUT_RECORD[] events = new INPUT_RECORD[2];
+
+      events[0].EventType = 0x0001; // KEY_EVENT
+      events[0].KeyEvent.bKeyDown = true;
+      events[0].KeyEvent.wRepeatCount = 1;
+      events[0].KeyEvent.wVirtualKeyCode = vk;
+      events[0].KeyEvent.UnicodeChar = ch;
+      events[0].KeyEvent.dwControlKeyState = 0;
+
+      events[1].EventType = 0x0001;
+      events[1].KeyEvent.bKeyDown = false;
+      events[1].KeyEvent.wRepeatCount = 1;
+      events[1].KeyEvent.wVirtualKeyCode = vk;
+      events[1].KeyEvent.UnicodeChar = ch;
+      events[1].KeyEvent.dwControlKeyState = 0;
+
+      uint written;
+      WriteConsoleInput(handle, events, 2, out written);
+    }
+  }
+"@
+`;
+}
+
+/**
+ * Build the PowerShell snippet that walks the process tree (up to 5 levels)
+ * and attaches to the first console that succeeds.
+ */
+function buildAttachConsoleSnippet(pid: string): string {
+  return `
+[HiveConsoleApi]::FreeConsole() | Out-Null
+$targetPid = ${pid}
+$attached = $false
+for ($i = 0; $i -lt 5; $i++) {
+  if ([HiveConsoleApi]::AttachConsole([uint32]$targetPid)) {
+    $attached = $true
+    break
+  }
+  $parentRow = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -ErrorAction SilentlyContinue
+  if (-not $parentRow -or -not $parentRow.ParentProcessId) { break }
+  $targetPid = $parentRow.ParentProcessId
+}
+if (-not $attached) { exit 1 }
+$hInput = [HiveConsoleApi]::GetStdHandle(-10)
+if ($hInput -eq [IntPtr]::Zero -or $hInput -eq [IntPtr]::new(-1)) {
+  [HiveConsoleApi]::FreeConsole() | Out-Null
+  exit 1
+}
+`;
+}
+
+/**
+ * Build the PowerShell snippet that reads text from a file and sends each
+ * character as a KEY_EVENT pair, followed by Enter.
+ */
+function buildSendTextSnippet(tmpFilePath: string): string {
+  return `
+$text = Get-Content -Path '${tmpFilePath.replace(/'/g, "''")}' -Raw
+foreach ($ch in $text.ToCharArray()) {
+  [HiveConsoleApi]::SendKeyEvent($hInput, 0, $ch)
+}
+# Send Enter (VK_RETURN = 0x0D, char = 13)
+[HiveConsoleApi]::SendKeyEvent($hInput, 0x0D, [char]13)
+[HiveConsoleApi]::FreeConsole() | Out-Null
+`;
+}
+
+/**
+ * Build the PowerShell snippet that sends a single virtual key (enter/down/up)
+ * as a KEY_EVENT pair.
+ */
+function buildSendKeystrokeSnippet(key: string): string {
+  // VK_RETURN=0x0D, VK_DOWN=0x28, VK_UP=0x26
+  const vk = key === "enter" ? "0x0D" : key === "down" ? "0x28" : "0x26";
+  const ch = key === "enter" ? "[char]13" : "[char]0";
+  return `
+[HiveConsoleApi]::SendKeyEvent($hInput, ${vk}, ${ch})
+[HiveConsoleApi]::FreeConsole() | Out-Null
 `;
 }
 
@@ -67,12 +201,10 @@ function sendViaPowerShell(pid: string, text: string): PlatformSendResult {
     return { ok: false, error: `Write tmp failed: ${msg.slice(0, 150)}` };
   }
 
-  const psScript = buildWindowFocusScript(pid) + `
-$text = Get-Content -Path '${tmpFile.replace(/'/g, "''")}' -Raw
-[System.Windows.Forms.SendKeys]::SendWait($text)
-Start-Sleep -Milliseconds 100
-[System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-`;
+  const psScript =
+    buildConsoleInputType() +
+    buildAttachConsoleSnippet(pid) +
+    buildSendTextSnippet(tmpFile);
 
   try {
     execFileSync("powershell", ["-NoProfile", "-Command", psScript], {
@@ -97,12 +229,10 @@ async function sendViaPowerShellAsync(pid: string, text: string): Promise<Platfo
     return { ok: false, error: `Write tmp failed: ${msg.slice(0, 150)}` };
   }
 
-  const psScript = buildWindowFocusScript(pid) + `
-$text = Get-Content -Path '${tmpFile.replace(/'/g, "''")}' -Raw
-[System.Windows.Forms.SendKeys]::SendWait($text)
-Start-Sleep -Milliseconds 100
-[System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-`;
+  const psScript =
+    buildConsoleInputType() +
+    buildAttachConsoleSnippet(pid) +
+    buildSendTextSnippet(tmpFile);
 
   try {
     await execFileAsync("powershell", ["-NoProfile", "-Command", psScript], {
@@ -119,9 +249,10 @@ Start-Sleep -Milliseconds 100
 }
 
 function sendKeystrokeViaPowerShell(pid: string, key: string): PlatformSendResult {
-  const sendKey = key === "enter" ? "{ENTER}" : key === "down" ? "{DOWN}" : "{UP}";
-  const psScript = buildWindowFocusScript(pid) +
-    `[System.Windows.Forms.SendKeys]::SendWait('${sendKey}')`;
+  const psScript =
+    buildConsoleInputType() +
+    buildAttachConsoleSnippet(pid) +
+    buildSendKeystrokeSnippet(key);
 
   try {
     execFileSync("powershell", ["-NoProfile", "-Command", psScript], {
@@ -136,9 +267,10 @@ function sendKeystrokeViaPowerShell(pid: string, key: string): PlatformSendResul
 }
 
 async function sendKeystrokeViaPowerShellAsync(pid: string, key: string): Promise<PlatformSendResult> {
-  const sendKey = key === "enter" ? "{ENTER}" : key === "down" ? "{DOWN}" : "{UP}";
-  const psScript = buildWindowFocusScript(pid) +
-    `[System.Windows.Forms.SendKeys]::SendWait('${sendKey}')`;
+  const psScript =
+    buildConsoleInputType() +
+    buildAttachConsoleSnippet(pid) +
+    buildSendKeystrokeSnippet(key);
 
   try {
     await execFileAsync("powershell", ["-NoProfile", "-Command", psScript], {
