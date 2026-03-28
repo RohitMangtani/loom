@@ -198,21 +198,31 @@ if ($attached) {
 function _buildClipboardPasteSnippet(pid: string): string {
   return `
 Add-Type -AssemblyName System.Windows.Forms
-$proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
-if (-not $proc -or $proc.MainWindowHandle -eq [IntPtr]::Zero) {
-  $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -EA SilentlyContinue).ParentProcessId
-  if ($parent) { $proc = Get-Process -Id $parent -EA SilentlyContinue }
-}
-if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
-  Add-Type @"
-    using System; using System.Runtime.InteropServices;
-    public class HivePaste {
-      [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-      [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
-    }
+Add-Type @"
+  using System; using System.Runtime.InteropServices;
+  public class HivePaste {
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+  }
 "@
-  [HivePaste]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null
-  [HivePaste]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+# Walk the full process tree to find the terminal window (wt.exe, cmd.exe, etc.)
+# Claude runs as: wt.exe → conhost.exe → node.exe (claude)
+# Only wt.exe has a MainWindowHandle. Walking one level hits conhost (no window).
+$targetPid = ${pid}
+$hwnd = [IntPtr]::Zero
+for ($i = 0; $i -lt 8; $i++) {
+  $p = Get-Process -Id $targetPid -EA SilentlyContinue
+  if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
+    $hwnd = $p.MainWindowHandle
+    break
+  }
+  $row = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -EA SilentlyContinue
+  if (-not $row -or -not $row.ParentProcessId -or $row.ParentProcessId -eq $targetPid) { break }
+  $targetPid = $row.ParentProcessId
+}
+if ($hwnd -ne [IntPtr]::Zero) {
+  [HivePaste]::ShowWindow($hwnd, 9) | Out-Null
+  [HivePaste]::SetForegroundWindow($hwnd) | Out-Null
   Start-Sleep -Milliseconds 300
   [System.Windows.Forms.SendKeys]::SendWait("^v")
   Start-Sleep -Milliseconds 100
