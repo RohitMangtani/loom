@@ -68,21 +68,24 @@ fi
 # the agent processes it on its next turn.
 INBOX_MSG=""
 if [ -d "$HOME/.hive/inbox" ]; then
-  # Use the TTY_NAME we already resolved (pid:NNNNN on Windows)
-  _INBOX_PID=""
-  case "$TTY_NAME" in
-    pid:*) _INBOX_PID="${TTY_NAME#pid:}" ;;
-  esac
-  if [ -n "$_INBOX_PID" ]; then
-    _MSG_FILE="$HOME/.hive/inbox/pid_${_INBOX_PID}.msg"
-    if [ -f "$_MSG_FILE" ]; then
-      INBOX_MSG=$(cat "$_MSG_FILE" 2>/dev/null)
-      rm -f "$_MSG_FILE" 2>/dev/null
-    fi
-    # Clean up keystroke files too (handled at the tool-call level by auto-approve)
-    _KEY_FILE="$HOME/.hive/inbox/pid_${_INBOX_PID}.key"
-    [ -f "$_KEY_FILE" ] && rm -f "$_KEY_FILE" 2>/dev/null
+  # Check for inbox messages matching this process or its parent.
+  # On Windows, $PPID (bash's parent) may differ from the PID the satellite
+  # discovered (node.exe PID vs bash PID). Check both, plus any .msg file
+  # in the inbox (there's typically only one agent per machine inbox).
+  _FOUND_MSG=""
+  for _MF in "$HOME/.hive/inbox"/pid_*.msg; do
+    [ -f "$_MF" ] || continue
+    _FOUND_MSG="$_MF"
+    break
+  done
+  if [ -n "$_FOUND_MSG" ]; then
+    INBOX_MSG=$(cat "$_FOUND_MSG" 2>/dev/null)
+    rm -f "$_FOUND_MSG" 2>/dev/null
   fi
+  # Clean up keystroke files
+  for _KF in "$HOME/.hive/inbox"/pid_*.key; do
+    [ -f "$_KF" ] && rm -f "$_KF" 2>/dev/null
+  done
 fi
 
 WORKERS="$HOME/.hive/workers.json"

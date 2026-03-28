@@ -47,13 +47,14 @@ esac
 # approve decision. The agent sees it in its system-reminder on this turn.
 INBOX_CONTEXT=""
 if [ -d "$HOME/.hive/inbox" ]; then
-  # Resolve PID: on Windows the hook's PPID is the Claude process PID
-  _INBOX_PID="$PPID"
-  _MSG_FILE="$HOME/.hive/inbox/pid_${_INBOX_PID}.msg"
-  if [ -f "$_MSG_FILE" ]; then
-    INBOX_CONTEXT=$(cat "$_MSG_FILE" 2>/dev/null)
-    rm -f "$_MSG_FILE" 2>/dev/null
-  fi
+  # Check any .msg file in the inbox. On Windows, $PPID may differ from
+  # the PID the satellite discovered, so we grab the first available message.
+  for _MF in "$HOME/.hive/inbox"/pid_*.msg; do
+    [ -f "$_MF" ] || continue
+    INBOX_CONTEXT=$(cat "$_MF" 2>/dev/null)
+    rm -f "$_MF" 2>/dev/null
+    break
+  done
 fi
 
 # Auto-approve with optional inbox message
