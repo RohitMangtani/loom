@@ -48,24 +48,77 @@ export class TunnelHealthMonitor {
     return existsSync(TUNNEL_PID_FILE) || existsSync(TUNNEL_URL_FILE);
   }
 
-  /** Check if the stored tunnel PID is alive. */
+  /** Check if the tunnel is actually working — not just PID alive but reachable. */
   private isTunnelAlive(): boolean {
+    // Step 1: check if PID is alive
     try {
       const pidStr = readFileSync(TUNNEL_PID_FILE, "utf-8").trim();
       const pid = parseInt(pidStr, 10);
       if (!pid || isNaN(pid)) return false;
-      // Signal 0 checks if process exists without killing it
       process.kill(pid, 0);
-      return true;
     } catch {
       return false;
     }
+
+    // Step 2: verify the tunnel is actually functional (not just process alive).
+    // ngrok can be running but broken (ERR_6030: multiple endpoints, ERR_8012: etc.)
+    // Check the ngrok local API to verify tunnel status.
+    try {
+      const raw = execFileSync("curl", ["-s", "--connect-timeout", "2", "http://127.0.0.1:4040/api/tunnels"], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+      const data = JSON.parse(raw);
+      if (!data.tunnels || data.tunnels.length === 0) {
+        console.log("[tunnel-health] ngrok running but no active tunnels — restarting");
+        return false;
+      }
+      return true;
+    } catch {
+      // ngrok API not responding — might be cloudflared, check URL reachability instead
+      try {
+        const url = readFileSync(TUNNEL_URL_FILE, "utf-8").trim();
+        if (!url) return true; // no URL to check, trust PID
+        const status = execFileSync("curl", ["-s", "-o", "/dev/null", "-w", "%{http_code}", "--connect-timeout", "3", url + "/health"], {
+          encoding: "utf-8",
+          timeout: 8000,
+        }).trim();
+        // Any HTTP response (even 426 Upgrade Required) means tunnel works
+        if (status !== "000") return true;
+        console.log("[tunnel-health] Tunnel URL unreachable (status 000) — restarting");
+        return false;
+      } catch {
+        return true; // can't verify, trust PID
+      }
+    }
   }
 
-  /** Restart the tunnel. Tries ngrok first, then cloudflared. */
+  /** Restart the tunnel. Kills ALL existing tunnel processes first to prevent
+   *  the "multiple endpoints" race (ERR_NGROK_6030), then starts fresh. */
   private restart(): void {
     this.restartCount++;
     this.lastRestartAt = Date.now();
+
+    // Kill ALL existing ngrok/cloudflared processes to prevent duplicates.
+    // This is the fix for ERR_NGROK_6030 ("multiple endpoints but not all
+    // have pooling enabled") which happens when a stale process lingers.
+    try {
+      if (process.platform === "win32") {
+        execFileSync("taskkill", ["/IM", "ngrok.exe", "/F"], { timeout: 5000, stdio: "pipe" });
+      } else {
+        execFileSync("pkill", ["-f", "ngrok"], { timeout: 5000, stdio: "pipe" });
+      }
+    } catch { /* no ngrok running — fine */ }
+    try {
+      if (process.platform === "win32") {
+        execFileSync("taskkill", ["/IM", "cloudflared.exe", "/F"], { timeout: 5000, stdio: "pipe" });
+      } else {
+        execFileSync("pkill", ["-f", "cloudflared"], { timeout: 5000, stdio: "pipe" });
+      }
+    } catch { /* no cloudflared running — fine */ }
+
+    // Wait a moment for processes to fully die before starting new ones
+    try { execFileSync("sleep", ["2"], { timeout: 5000 }); } catch { /* Windows */ }
 
     // Read stable domain if configured
     let ngrokDomain = "";
@@ -77,7 +130,7 @@ export class TunnelHealthMonitor {
     if (this.hasCommand("ngrok")) {
       try {
         const args = ngrokDomain
-          ? ["http", "3002", "--url", ngrokDomain, "--log=stdout"]
+          ? ["http", "3002", "--domain", ngrokDomain, "--log=stdout"]
           : ["http", "3002", "--log=stdout"];
 
         const child = spawn("ngrok", args, {
