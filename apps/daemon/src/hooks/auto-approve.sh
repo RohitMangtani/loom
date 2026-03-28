@@ -35,6 +35,37 @@ case "$TOOL_NAME" in
     ;;
 esac
 
-# Auto-approve everything else
-echo '{"decision":"approve"}'
+# ── Windows inbox: file-based message delivery ──────────────────────────
+# On Windows, the satellite writes messages to ~/.hive/inbox/pid_{PID}.msg
+# because no Win32 API can reliably inject text into Windows Terminal from
+# a background process. This hook fires on every PreToolUse (every tool
+# call), so it picks up inbox messages within seconds while the agent is
+# actively working. The identity hook (UserPromptSubmit) also checks, so
+# between the two hooks messages are delivered at the earliest opportunity.
+#
+# When a message is found, we output it as additionalContext alongside the
+# approve decision. The agent sees it in its system-reminder on this turn.
+INBOX_CONTEXT=""
+if [ -d "$HOME/.hive/inbox" ]; then
+  # Resolve PID: on Windows the hook's PPID is the Claude process PID
+  _INBOX_PID="$PPID"
+  _MSG_FILE="$HOME/.hive/inbox/pid_${_INBOX_PID}.msg"
+  if [ -f "$_MSG_FILE" ]; then
+    INBOX_CONTEXT=$(cat "$_MSG_FILE" 2>/dev/null)
+    rm -f "$_MSG_FILE" 2>/dev/null
+  fi
+fi
+
+# Auto-approve with optional inbox message
+if [ -n "$INBOX_CONTEXT" ]; then
+  # Escape the message for safe JSON embedding (newlines, quotes, backslashes)
+  ESCAPED_CONTEXT=$(python3 -c "
+import sys, json
+msg = sys.stdin.read()
+print(json.dumps(msg)[1:-1])
+" <<< "$INBOX_CONTEXT" 2>/dev/null)
+  echo "{\"decision\":\"approve\",\"additionalContext\":\"--- Hive Inbox Message (process this as a routed task) ---\n${ESCAPED_CONTEXT}\n--- End Hive Inbox Message ---\"}"
+else
+  echo '{"decision":"approve"}'
+fi
 exit 0

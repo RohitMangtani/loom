@@ -60,6 +60,31 @@ if [ -n "$SESSION_ID" ]; then
   fi
 fi
 
+# ── Windows inbox: file-based message delivery ──────────────────────────
+# On Windows, the satellite daemon can't inject text into Windows Terminal
+# from a background process (no reliable Win32 API). Instead it writes
+# messages to ~/.hive/inbox/pid_{PID}.msg. This hook reads the inbox on
+# every UserPromptSubmit and outputs the message as additionalContext so
+# the agent processes it on its next turn.
+INBOX_MSG=""
+if [ -d "$HOME/.hive/inbox" ]; then
+  # Use the TTY_NAME we already resolved (pid:NNNNN on Windows)
+  _INBOX_PID=""
+  case "$TTY_NAME" in
+    pid:*) _INBOX_PID="${TTY_NAME#pid:}" ;;
+  esac
+  if [ -n "$_INBOX_PID" ]; then
+    _MSG_FILE="$HOME/.hive/inbox/pid_${_INBOX_PID}.msg"
+    if [ -f "$_MSG_FILE" ]; then
+      INBOX_MSG=$(cat "$_MSG_FILE" 2>/dev/null)
+      rm -f "$_MSG_FILE" 2>/dev/null
+    fi
+    # Clean up keystroke files too (handled at the tool-call level by auto-approve)
+    _KEY_FILE="$HOME/.hive/inbox/pid_${_INBOX_PID}.key"
+    [ -f "$_KEY_FILE" ] && rm -f "$_KEY_FILE" 2>/dev/null
+  fi
+fi
+
 WORKERS="$HOME/.hive/workers.json"
 [ ! -f "$WORKERS" ] && exit 0
 
@@ -123,3 +148,12 @@ try:
 except Exception:
     pass
 "
+
+# Append inbox message after the identity/peer summary so it appears in
+# the same system-reminder block. The agent sees this as a routed task.
+if [ -n "$INBOX_MSG" ]; then
+  echo ""
+  echo "--- Hive Inbox Message (process this as a routed task) ---"
+  echo "$INBOX_MSG"
+  echo "--- End Hive Inbox Message ---"
+fi

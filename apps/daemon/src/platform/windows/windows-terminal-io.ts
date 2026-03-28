@@ -2,20 +2,19 @@
  * Windows terminal IO.
  *
  * On Windows there are no /dev/tty devices. Agents are identified by PID.
- * Terminal IO uses PowerShell + Win32 WriteConsoleInput to inject keystrokes
- * directly into a console's input buffer via AttachConsole(pid). No window
- * focus is required — works headless, minimized, or when another window is
- * in the foreground.
  *
- * The approach:
- * 1. FreeConsole() — detach from our own console
- * 2. Walk the process tree (up to 5 levels) trying AttachConsole(pid) for
- *    each ancestor until one succeeds (the target PID may be a child of
- *    conhost.exe or WindowsTerminal.exe)
- * 3. GetStdHandle(STD_INPUT_HANDLE) to get the console input buffer handle
- * 4. WriteConsoleInput() to inject KEY_EVENT_RECORD pairs (down+up) for
- *    each character or virtual key
- * 5. FreeConsole() to detach cleanly
+ * Message delivery uses a file-based inbox system instead of Win32 API
+ * injection. No Win32 API can reliably inject text into Windows Terminal
+ * from a background process (AttachConsole fails with ConPTY, PostMessage
+ * requires focus, SendKeys is fragile). Instead:
+ *
+ * 1. The satellite daemon writes messages to ~/.hive/inbox/pid_{PID}.msg
+ * 2. Claude Code hooks (identity.sh on UserPromptSubmit, auto-approve.sh
+ *    on PreToolUse) check the inbox and deliver messages as additionalContext
+ * 3. The agent sees the message in its next system-reminder and processes it
+ *
+ * This is reliable, requires no window focus or console attachment, and works
+ * with any terminal emulator (Windows Terminal, cmd.exe, PowerShell, etc.).
  *
  * readContent() attempts several strategies to read terminal output:
  *   1. Check if the process has a --log-file / -log argument and read the tail
@@ -23,326 +22,59 @@
  *   3. Return null as fallback if nothing works
  */
 
-import { execFileSync, execFile } from "child_process";
-import { promisify } from "util";
-import { writeFileSync, unlinkSync, readFileSync, existsSync, readdirSync, statSync } from "fs";
-import { randomBytes } from "crypto";
-import { tmpdir } from "os";
+import { execFileSync } from "child_process";
+import { writeFileSync, mkdirSync, readFileSync, existsSync, readdirSync, statSync } from "fs";
+import { homedir, tmpdir } from "os";
 import { join } from "path";
 import type { PlatformSendResult, TerminalIO } from "../interfaces.js";
-
-const execFileAsync = promisify(execFile);
 
 function extractPid(tty: string): string | null {
   const match = tty.match(/^pid:(\d+)$/);
   return match ? match[1] : null;
 }
 
-/**
- * Legacy: Build the PowerShell preamble that loads Win32 API and focuses a window.
- * Kept as a fallback — main send functions now use WriteConsoleInput which
- * does not require window focus.
- */
-function _buildWindowFocusScript(pid: string): string {
-  return `
-Add-Type @"
-  using System;
-  using System.Runtime.InteropServices;
-  public class HiveWinApi {
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-  }
-"@
-$proc = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
-if (-not $proc -or -not $proc.MainWindowHandle -or $proc.MainWindowHandle -eq [IntPtr]::Zero) {
-  $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" -ErrorAction SilentlyContinue).ParentProcessId
-  if ($parent) { $proc = Get-Process -Id $parent -ErrorAction SilentlyContinue }
-  if (-not $proc -or -not $proc.MainWindowHandle -or $proc.MainWindowHandle -eq [IntPtr]::Zero) { exit 1 }
-}
-[HiveWinApi]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null
-[HiveWinApi]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
-Start-Sleep -Milliseconds 200
-Add-Type -AssemblyName System.Windows.Forms
-`;
+/** Ensure ~/.hive/inbox/ exists and return its path. */
+function ensureInboxDir(): string {
+  const inboxDir = join(homedir(), ".hive", "inbox");
+  mkdirSync(inboxDir, { recursive: true });
+  return inboxDir;
 }
 
 /**
- * Build the PowerShell C# type definition for WriteConsoleInput via AttachConsole.
- * This is the core Win32 interop used by all send functions.
+ * Write a message to the inbox for a target PID.
+ * The file acts as the handoff point — hooks running inside the target
+ * agent's Claude Code process will pick it up and inject it.
  */
-function buildConsoleInputType(): string {
-  return `
-Add-Type @"
-  using System;
-  using System.Runtime.InteropServices;
-
-  [StructLayout(LayoutKind.Explicit)]
-  public struct KEY_EVENT_RECORD {
-    [FieldOffset(0)] public bool bKeyDown;
-    [FieldOffset(4)] public ushort wRepeatCount;
-    [FieldOffset(6)] public ushort wVirtualKeyCode;
-    [FieldOffset(8)] public ushort wVirtualScanCode;
-    [FieldOffset(10)] public char UnicodeChar;
-    [FieldOffset(12)] public uint dwControlKeyState;
-  }
-
-  [StructLayout(LayoutKind.Explicit)]
-  public struct INPUT_RECORD {
-    [FieldOffset(0)] public ushort EventType;
-    [FieldOffset(4)] public KEY_EVENT_RECORD KeyEvent;
-  }
-
-  public class HiveConsoleApi {
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool FreeConsole();
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool AttachConsole(uint dwProcessId);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern IntPtr GetStdHandle(int nStdHandle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool WriteConsoleInput(
-      IntPtr hConsoleInput,
-      INPUT_RECORD[] lpBuffer,
-      uint nLength,
-      out uint lpNumberOfEventsWritten
-    );
-
-    public static void SendKeyEvent(IntPtr handle, ushort vk, char ch) {
-      INPUT_RECORD[] events = new INPUT_RECORD[2];
-
-      events[0].EventType = 0x0001; // KEY_EVENT
-      events[0].KeyEvent.bKeyDown = true;
-      events[0].KeyEvent.wRepeatCount = 1;
-      events[0].KeyEvent.wVirtualKeyCode = vk;
-      events[0].KeyEvent.UnicodeChar = ch;
-      events[0].KeyEvent.dwControlKeyState = 0;
-
-      events[1].EventType = 0x0001;
-      events[1].KeyEvent.bKeyDown = false;
-      events[1].KeyEvent.wRepeatCount = 1;
-      events[1].KeyEvent.wVirtualKeyCode = vk;
-      events[1].KeyEvent.UnicodeChar = ch;
-      events[1].KeyEvent.dwControlKeyState = 0;
-
-      uint written;
-      WriteConsoleInput(handle, events, 2, out written);
-    }
-  }
-"@
-`;
-}
-
-/**
- * Build the PowerShell snippet that walks the process tree (up to 5 levels)
- * and attaches to the first console that succeeds.
- */
-function buildAttachConsoleSnippet(pid: string): string {
-  return `
-[HiveConsoleApi]::FreeConsole() | Out-Null
-$targetPid = ${pid}
-$attached = $false
-for ($i = 0; $i -lt 5; $i++) {
-  if ([HiveConsoleApi]::AttachConsole([uint32]$targetPid)) {
-    $attached = $true
-    break
-  }
-  $parentRow = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -ErrorAction SilentlyContinue
-  if (-not $parentRow -or -not $parentRow.ParentProcessId) { break }
-  $targetPid = $parentRow.ParentProcessId
-}
-$hInput = [IntPtr]::Zero
-if ($attached) {
-  $hInput = [HiveConsoleApi]::GetStdHandle(-10)
-  if ($hInput -eq [IntPtr]::Zero -or $hInput -eq [IntPtr]::new(-1)) {
-    [HiveConsoleApi]::FreeConsole() | Out-Null
-    $attached = $false
-  }
-}
-`;
-}
-
-/**
- * Build the PowerShell snippet that reads text from a file and sends each
- * character as a KEY_EVENT pair, followed by Enter.
- *
- * If AttachConsole succeeded but the process uses ConPTY (Windows Terminal),
- * WriteConsoleInput may not reach the actual PTY input. In that case, fall
- * back to clipboard paste (Set-Clipboard + SendKeys Ctrl+V + Enter) which
- * works at the terminal emulator level regardless of console type.
- */
-function buildSendTextSnippet(tmpFilePath: string, pid: string): string {
-  return `
-$text = Get-Content -Path '${tmpFilePath.replace(/'/g, "''")}' -Raw
-if ($attached) {
-  # Try WriteConsoleInput first (works for legacy console / cmd.exe)
-  foreach ($ch in $text.ToCharArray()) {
-    [HiveConsoleApi]::SendKeyEvent($hInput, 0, $ch)
-  }
-  [HiveConsoleApi]::SendKeyEvent($hInput, 0x0D, [char]13)
-  [HiveConsoleApi]::FreeConsole() | Out-Null
-} else {
-  # Clipboard paste fallback for Windows Terminal / ConPTY
-  Set-Clipboard -Value $text
-  ${_buildClipboardPasteSnippet(pid)}
-}
-`;
-}
-
-/**
- * Clipboard paste fallback: focus the window, Ctrl+V to paste, then Enter.
- * Used when AttachConsole fails (ConPTY / Windows Terminal).
- */
-function _buildClipboardPasteSnippet(pid: string): string {
-  return `
-Add-Type @"
-  using System; using System.Runtime.InteropServices;
-  public class HiveMsg {
-    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
-    public const uint WM_CHAR = 0x0102;
-    public const uint WM_KEYDOWN = 0x0100;
-    public const uint WM_KEYUP = 0x0101;
-  }
-"@
-# Walk the full process tree to find the terminal window (wt.exe, cmd.exe, etc.)
-$targetPid = ${pid}
-$hwnd = [IntPtr]::Zero
-for ($i = 0; $i -lt 8; $i++) {
-  $p = Get-Process -Id $targetPid -EA SilentlyContinue
-  if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
-    $hwnd = $p.MainWindowHandle
-    break
-  }
-  $row = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -EA SilentlyContinue
-  if (-not $row -or -not $row.ParentProcessId -or $row.ParentProcessId -eq $targetPid) { break }
-  $targetPid = $row.ParentProcessId
-}
-if ($hwnd -ne [IntPtr]::Zero) {
-  # PostMessage WM_CHAR sends characters directly to the window without needing focus.
-  # Background processes can't call SetForegroundWindow, but PostMessage always works.
-  foreach ($ch in $text.ToCharArray()) {
-    [HiveMsg]::PostMessage($hwnd, [HiveMsg]::WM_CHAR, [IntPtr][int][char]$ch, [IntPtr]::Zero) | Out-Null
-  }
-  # Send Enter (VK_RETURN = 0x0D)
-  [HiveMsg]::PostMessage($hwnd, [HiveMsg]::WM_KEYDOWN, [IntPtr]0x0D, [IntPtr]::Zero) | Out-Null
-  [HiveMsg]::PostMessage($hwnd, [HiveMsg]::WM_KEYUP, [IntPtr]0x0D, [IntPtr]::Zero) | Out-Null
-}
-`;
-}
-
-/**
- * Build the PowerShell snippet that sends a single virtual key (enter/down/up)
- * as a KEY_EVENT pair.
- */
-function buildSendKeystrokeSnippet(key: string): string {
-  // VK_RETURN=0x0D, VK_DOWN=0x28, VK_UP=0x26
-  const vk = key === "enter" ? "0x0D" : key === "down" ? "0x28" : "0x26";
-  const ch = key === "enter" ? "[char]13" : "[char]0";
-  return `
-[HiveConsoleApi]::SendKeyEvent($hInput, ${vk}, ${ch})
-[HiveConsoleApi]::FreeConsole() | Out-Null
-`;
-}
-
-function sendViaPowerShell(pid: string, text: string): PlatformSendResult {
-  const tmpFile = join(tmpdir(), `hive-input-${randomBytes(8).toString("hex")}.txt`);
+function writeToInbox(pid: string, text: string): PlatformSendResult {
   try {
-    writeFileSync(tmpFile, text, { encoding: "utf-8" });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `Write tmp failed: ${msg.slice(0, 150)}` };
-  }
-
-  const psScript =
-    buildConsoleInputType() +
-    buildAttachConsoleSnippet(pid) +
-    buildSendTextSnippet(tmpFile, pid);
-
-  try {
-    execFileSync("powershell", ["-NoProfile", "-Command", psScript], {
-      encoding: "utf-8",
-      timeout: 15000,
-    });
+    const inboxDir = ensureInboxDir();
+    const msgFile = join(inboxDir, `pid_${pid}.msg`);
+    writeFileSync(msgFile, text, { encoding: "utf-8" });
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `PowerShell send failed: ${msg.slice(0, 150)}` };
-  } finally {
-    try { unlinkSync(tmpFile); } catch { /* ignore */ }
+    return { ok: false, error: `Inbox write failed: ${msg.slice(0, 150)}` };
   }
 }
 
-async function sendViaPowerShellAsync(pid: string, text: string): Promise<PlatformSendResult> {
-  const tmpFile = join(tmpdir(), `hive-input-${randomBytes(8).toString("hex")}.txt`);
+/**
+ * Write a keystroke name to the inbox for a target PID.
+ * Used for selection prompts (enter/down/up).
+ */
+function writeKeystrokeToInbox(pid: string, key: string): PlatformSendResult {
   try {
-    writeFileSync(tmpFile, text, { encoding: "utf-8" });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `Write tmp failed: ${msg.slice(0, 150)}` };
-  }
-
-  const psScript =
-    buildConsoleInputType() +
-    buildAttachConsoleSnippet(pid) +
-    buildSendTextSnippet(tmpFile, pid);
-
-  try {
-    await execFileAsync("powershell", ["-NoProfile", "-Command", psScript], {
-      encoding: "utf-8",
-      timeout: 15000,
-    });
+    const inboxDir = ensureInboxDir();
+    const keyFile = join(inboxDir, `pid_${pid}.key`);
+    writeFileSync(keyFile, key, { encoding: "utf-8" });
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `PowerShell send failed: ${msg.slice(0, 150)}` };
-  } finally {
-    try { unlinkSync(tmpFile); } catch { /* ignore */ }
-  }
-}
-
-function sendKeystrokeViaPowerShell(pid: string, key: string): PlatformSendResult {
-  const psScript =
-    buildConsoleInputType() +
-    buildAttachConsoleSnippet(pid) +
-    buildSendKeystrokeSnippet(key);
-
-  try {
-    execFileSync("powershell", ["-NoProfile", "-Command", psScript], {
-      encoding: "utf-8",
-      timeout: 10000,
-    });
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `Keystroke failed: ${msg.slice(0, 150)}` };
-  }
-}
-
-async function sendKeystrokeViaPowerShellAsync(pid: string, key: string): Promise<PlatformSendResult> {
-  const psScript =
-    buildConsoleInputType() +
-    buildAttachConsoleSnippet(pid) +
-    buildSendKeystrokeSnippet(key);
-
-  try {
-    await execFileAsync("powershell", ["-NoProfile", "-Command", psScript], {
-      encoding: "utf-8",
-      timeout: 10000,
-    });
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, error: `Keystroke failed: ${msg.slice(0, 150)}` };
+    return { ok: false, error: `Inbox keystroke write failed: ${msg.slice(0, 150)}` };
   }
 }
 
 export class WindowsTerminalIO implements TerminalIO {
   private _sendInFlight = false;
-  private sendMutex: Promise<void> = Promise.resolve();
 
   sendText(tty: string, text: string): PlatformSendResult {
     const cleaned = text.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
@@ -353,7 +85,7 @@ export class WindowsTerminalIO implements TerminalIO {
 
     this._sendInFlight = true;
     try {
-      return sendViaPowerShell(pid, cleaned);
+      return writeToInbox(pid, cleaned);
     } finally {
       this._sendInFlight = false;
     }
@@ -366,16 +98,14 @@ export class WindowsTerminalIO implements TerminalIO {
     const pid = extractPid(tty);
     if (!pid) return Promise.resolve({ ok: false, error: `Invalid tty identifier: ${tty}` });
 
-    const resultPromise = this.sendMutex.then(async () => {
-      this._sendInFlight = true;
-      try {
-        return await sendViaPowerShellAsync(pid, cleaned);
-      } finally {
-        this._sendInFlight = false;
-      }
-    });
-    this.sendMutex = resultPromise.then(() => {}, () => {});
-    return resultPromise;
+    // Inbox write is synchronous (just a file write), but we keep the async
+    // signature for interface compatibility.
+    this._sendInFlight = true;
+    try {
+      return Promise.resolve(writeToInbox(pid, cleaned));
+    } finally {
+      this._sendInFlight = false;
+    }
   }
 
   sendKeystroke(tty: string, key: "enter" | "down" | "up"): PlatformSendResult {
@@ -384,7 +114,7 @@ export class WindowsTerminalIO implements TerminalIO {
 
     this._sendInFlight = true;
     try {
-      return sendKeystrokeViaPowerShell(pid, key);
+      return writeKeystrokeToInbox(pid, key);
     } finally {
       this._sendInFlight = false;
     }
@@ -394,16 +124,12 @@ export class WindowsTerminalIO implements TerminalIO {
     const pid = extractPid(tty);
     if (!pid) return Promise.resolve({ ok: false, error: `Invalid tty identifier: ${tty}` });
 
-    const resultPromise = this.sendMutex.then(async () => {
-      this._sendInFlight = true;
-      try {
-        return await sendKeystrokeViaPowerShellAsync(pid, key);
-      } finally {
-        this._sendInFlight = false;
-      }
-    });
-    this.sendMutex = resultPromise.then(() => {}, () => {});
-    return resultPromise;
+    this._sendInFlight = true;
+    try {
+      return Promise.resolve(writeKeystrokeToInbox(pid, key));
+    } finally {
+      this._sendInFlight = false;
+    }
   }
 
   sendSelection(tty: string, optionIndex: number): PlatformSendResult {
@@ -414,10 +140,10 @@ export class WindowsTerminalIO implements TerminalIO {
     this._sendInFlight = true;
     try {
       for (let i = 0; i < count; i++) {
-        const r = sendKeystrokeViaPowerShell(pid, "down");
+        const r = writeKeystrokeToInbox(pid, "down");
         if (!r.ok) return r;
       }
-      return sendKeystrokeViaPowerShell(pid, "enter");
+      return writeKeystrokeToInbox(pid, "enter");
     } finally {
       this._sendInFlight = false;
     }
