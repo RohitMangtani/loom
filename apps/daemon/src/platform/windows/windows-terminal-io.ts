@@ -43,13 +43,33 @@ function ensureInboxDir(): string {
 /**
  * Write a message to the inbox for a target PID.
  * The file acts as the handoff point — hooks running inside the target
- * agent's Claude Code process will pick it up and inject it.
+ * agent's Claude Code process will pick it up and inject it as additionalContext.
+ *
+ * For Claude agents, also spawns `claude -p -c "message"` in the agent's
+ * working directory to continue the conversation immediately (instant delivery).
+ * The inbox file is the fallback for non-Claude agents or if the spawn fails.
  */
-function writeToInbox(pid: string, text: string): PlatformSendResult {
+function writeToInbox(pid: string, text: string, cwd?: string): PlatformSendResult {
   try {
     const inboxDir = ensureInboxDir();
     const msgFile = join(inboxDir, `pid_${pid}.msg`);
     writeFileSync(msgFile, text, { encoding: "utf-8" });
+
+    // Instant delivery: spawn `claude -p -c "message"` which continues the
+    // same conversation. The running Claude sees the new turn via session sync.
+    // Fire-and-forget: inbox file is the fallback if this fails.
+    try {
+      const { execFile: ef } = require("child_process") as typeof import("child_process");
+      ef("claude.cmd", ["-p", "-c", text], {
+        cwd: homedir(),
+        timeout: 120_000,
+        windowsHide: true,
+      }, (err) => {
+        if (err) console.log(`[win-io] claude -p -c: ${(err.message || "").slice(0, 100)}`);
+        else try { require("fs").unlinkSync(msgFile); } catch { /* consumed by hook */ }
+      });
+    } catch { /* claude CLI not available — inbox file is fallback */ }
+
     return { ok: true };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
