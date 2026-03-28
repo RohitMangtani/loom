@@ -197,17 +197,18 @@ if ($attached) {
  */
 function _buildClipboardPasteSnippet(pid: string): string {
   return `
-Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
   using System; using System.Runtime.InteropServices;
-  public class HivePaste {
+  public class HiveMsg {
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+    public const uint WM_CHAR = 0x0102;
+    public const uint WM_KEYDOWN = 0x0100;
+    public const uint WM_KEYUP = 0x0101;
   }
 "@
 # Walk the full process tree to find the terminal window (wt.exe, cmd.exe, etc.)
-# Claude runs as: wt.exe → conhost.exe → node.exe (claude)
-# Only wt.exe has a MainWindowHandle. Walking one level hits conhost (no window).
 $targetPid = ${pid}
 $hwnd = [IntPtr]::Zero
 for ($i = 0; $i -lt 8; $i++) {
@@ -221,12 +222,14 @@ for ($i = 0; $i -lt 8; $i++) {
   $targetPid = $row.ParentProcessId
 }
 if ($hwnd -ne [IntPtr]::Zero) {
-  [HivePaste]::ShowWindow($hwnd, 9) | Out-Null
-  [HivePaste]::SetForegroundWindow($hwnd) | Out-Null
-  Start-Sleep -Milliseconds 300
-  [System.Windows.Forms.SendKeys]::SendWait("^v")
-  Start-Sleep -Milliseconds 100
-  [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+  # PostMessage WM_CHAR sends characters directly to the window without needing focus.
+  # Background processes can't call SetForegroundWindow, but PostMessage always works.
+  foreach ($ch in $text.ToCharArray()) {
+    [HiveMsg]::PostMessage($hwnd, [HiveMsg]::WM_CHAR, [IntPtr][int][char]$ch, [IntPtr]::Zero) | Out-Null
+  }
+  # Send Enter (VK_RETURN = 0x0D)
+  [HiveMsg]::PostMessage($hwnd, [HiveMsg]::WM_KEYDOWN, [IntPtr]0x0D, [IntPtr]::Zero) | Out-Null
+  [HiveMsg]::PostMessage($hwnd, [HiveMsg]::WM_KEYUP, [IntPtr]0x0D, [IntPtr]::Zero) | Out-Null
 }
 `;
 }
