@@ -1158,13 +1158,41 @@ All API calls go to \`127.0.0.1:3001\`  --  the local satellite daemon relays th
                 execFileSync("launchctl", ["bootstrap", `gui/${uid}`, plistPath], { timeout: 5000 });
                 console.log("[satellite] Ensured launchd plist is bootstrapped");
               } catch {
-                // Already bootstrapped or bootstrap not available — try legacy load
                 try {
                   execFileSync("launchctl", ["load", "-w", plistPath], { timeout: 5000 });
                   console.log("[satellite] Ensured launchd plist is loaded (legacy)");
                 } catch { /* already loaded — fine */ }
               }
             }
+          } else if (process.platform === "win32") {
+            // On Windows, ensure the restart-loop bat is running before we exit.
+            // If we were started manually (not via the bat), process.exit would be
+            // a one-way trip. Start the bat in the background so it takes over.
+            const batPath = join(homedir(), ".hive", "satellite.bat");
+            if (existsSync(batPath)) {
+              try {
+                // Check if the bat is already running (another cmd.exe with satellite.bat)
+                const check = execFileSync("powershell", ["-NoProfile", "-Command",
+                  `Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%satellite.bat%'" | Where-Object { $_.ProcessId -ne $PID } | Select-Object -First 1 | ForEach-Object { $_.ProcessId }`
+                ], { encoding: "utf-8", timeout: 5000 }).trim();
+                if (!check) {
+                  // Not running — start it so it restarts us after we exit
+                  execFileSync("cmd.exe", ["/c", "start", "/min", "", batPath], { timeout: 5000 });
+                  console.log("[satellite] Started restart-loop bat for Windows auto-restart");
+                } else {
+                  console.log("[satellite] Restart-loop bat already running (pid " + check + ")");
+                }
+              } catch {
+                // Best effort — if this fails, the identity hook will restart on next Claude open
+                console.log("[satellite] Could not verify restart-loop bat — identity hook will recover");
+              }
+            }
+          } else if (process.platform === "linux") {
+            // On Linux, try starting the systemd service if it exists
+            try {
+              execFileSync("systemctl", ["--user", "start", "hive-satellite"], { timeout: 5000 });
+              console.log("[satellite] Ensured systemd service is started");
+            } catch { /* not using systemd or already running */ }
           }
           console.log("[satellite] Restarting in 2 seconds...");
           setTimeout(() => process.exit(0), 2000);
