@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { ProcessDiscovery } from "../discovery.js";
 
-function writeSession(lines: string[]): string {
+function writeSession(lines: string[], ageMs = 0): string {
   const dir = mkdtempSync(join(tmpdir(), "hive-discovery-"));
   const file = join(dir, "session.jsonl");
   writeFileSync(file, lines.join("\n") + "\n", "utf-8");
+  if (ageMs > 0) {
+    const mtime = new Date(Date.now() - ageMs);
+    utimesSync(file, mtime, mtime);
+  }
   return file;
 }
 
@@ -185,6 +189,80 @@ describe("ProcessDiscovery idle-confirmed handling", () => {
     discovery.runJsonlAnalysis("w1", worker, "ttys000", null, 0, 3_000, {});
     expect(worker.status).toBe("working");
     expect(worker.currentAction).toBe("Thinking...");
+  });
+
+  it("keeps Codex green while awaiting task_complete instead of idling on silence", () => {
+    const file = writeSession([
+      '{"timestamp":"2026-05-01T10:00:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}',
+      '{"timestamp":"2026-05-01T10:00:00.100Z","type":"event_msg","payload":{"type":"user_message","message":"Think through this carefully"}}',
+      '{"timestamp":"2026-05-01T10:00:12.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Working through it"}]}}',
+    ], 13_000);
+    dirs.push(file.replace(/\/[^/]+$/, ""));
+
+    const { discovery, telemetry } = createDiscoveryHarness({
+      idleConfirmed: false,
+      hasReceivedHook: false,
+    });
+    const worker = {
+      id: "w1",
+      pid: 123,
+      project: "/Users/rmgtni/factory/projects/hive",
+      projectName: "hive",
+      status: "working",
+      currentAction: "Thinking...",
+      lastAction: "Thinking...",
+      lastActionAt: Date.now(),
+      errorCount: 0,
+      startedAt: Date.now() - 60_000,
+      task: null,
+      managed: false,
+      tty: "ttys001",
+      model: "codex",
+    };
+
+    discovery.runJsonlAnalysis("w1", worker, "ttys001", file, Date.now() - 13_000, 60_000, {});
+    discovery.runJsonlAnalysis("w1", worker, "ttys001", file, Date.now() - 13_000, 60_000, {});
+    discovery.runJsonlAnalysis("w1", worker, "ttys001", file, Date.now() - 13_000, 60_000, {});
+
+    expect(worker.status).toBe("working");
+    expect(worker.currentAction).toBe("Thinking...");
+    expect(telemetry.setIdleConfirmed).not.toHaveBeenCalledWith("w1", true);
+  });
+
+  it("clears a stale Codex idle lock when task_complete has not arrived yet", () => {
+    const file = writeSession([
+      '{"timestamp":"2026-05-01T10:00:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}',
+      '{"timestamp":"2026-05-01T10:00:00.100Z","type":"event_msg","payload":{"type":"user_message","message":"Think through this carefully"}}',
+      '{"timestamp":"2026-05-01T10:00:12.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Working through it"}]}}',
+    ], 13_000);
+    dirs.push(file.replace(/\/[^/]+$/, ""));
+
+    const { discovery, telemetry } = createDiscoveryHarness({
+      idleConfirmed: true,
+      hasReceivedHook: false,
+    });
+    const worker = {
+      id: "w1",
+      pid: 123,
+      project: "/Users/rmgtni/factory/projects/hive",
+      projectName: "hive",
+      status: "idle",
+      currentAction: null,
+      lastAction: "Thinking...",
+      lastActionAt: Date.now() - 13_000,
+      errorCount: 0,
+      startedAt: Date.now() - 60_000,
+      task: null,
+      managed: false,
+      tty: "ttys001",
+      model: "codex",
+    };
+
+    discovery.runJsonlAnalysis("w1", worker, "ttys001", file, Date.now() - 13_000, 60_000, {});
+
+    expect(worker.status).toBe("working");
+    expect(worker.currentAction).toBe("Thinking...");
+    expect(telemetry.setIdleConfirmed).toHaveBeenCalledWith("w1", false);
   });
 
   it("keeps a held trust prompt visible until a real hook arrives", () => {

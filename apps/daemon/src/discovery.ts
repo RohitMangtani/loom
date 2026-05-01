@@ -21,6 +21,10 @@ interface AuditEntry {
 const HOME = process.env.HOME || process.env.USERPROFILE || homedir();
 const AUDIT_LOG_PATH = join(HOME, ".hive", "quadrant-audit.log");
 const AUDIT_MAX_ENTRIES = 500;
+// Codex can be silent in its JSONL while the hosted model is thinking. Treat
+// task_complete as the real done signal and only fall back to idle after this
+// grace window, which prevents the dashboard from flashing red mid-thought.
+const CODEX_TASK_COMPLETE_GRACE_MS = 10 * 60_000;
 
 interface ProcessInfo {
   pid: number;
@@ -959,6 +963,27 @@ end tell
       const cpuOverride = cpuActive && activeCount >= 2 && neverHadHooks;
       const noiseWriteActive = ctx.fileAgeIsFromNoise && ctx.fileAgeMs < 120_000 && ptyDelta > 300;
       const recentInputOverride = recentInput && !stickyIdle;
+      const codexAwaitingCompletion =
+        existing.model === "codex" &&
+        ctx.status === "idle" &&
+        !ctx.highConfidence &&
+        !stickyIdle &&
+        (ctx.fileAgeMs < CODEX_TASK_COMPLETE_GRACE_MS || recentInput);
+      if (codexAwaitingCompletion) {
+        this.telemetry.setIdleConfirmed(id, false);
+        existing.status = "working";
+        existing.currentAction = ctx.latestAction || "Thinking...";
+        existing.lastAction = ctx.latestAction || existing.lastAction;
+        existing.lastActionAt = Date.now();
+        this.checkTransition(
+          id,
+          tty,
+          "working",
+          `Codex idle lock cleared; awaiting task_complete (${Math.round(ctx.fileAgeMs / 1000)}s since JSONL write)`,
+          tailCtx,
+        );
+        return;
+      }
       if (!recentInputOverride && !jsonlOverride && !cpuOverride && !noiseWriteActive) {
         if (ctx.latestAction) existing.lastAction = ctx.latestAction;
         existing.status = "idle";
@@ -1020,7 +1045,10 @@ end tell
       // tail, real hooks). Low-confidence signals (mid-stream heuristic, noise-
       // driven) must NOT set the cooldown timer  --  otherwise a 1s "ok" response
       // keeps the agent green for 25s because the mid-stream check touched it.
-      if (ctx.highConfidence) {
+      // Codex is the exception: it has no hooks, and task_complete is its
+      // reliable idle marker, so any working tail means the current turn should
+      // stay green until that marker arrives.
+      if (ctx.highConfidence || existing.model === "codex") {
         this.lastConfirmedWorking.set(id, Date.now());
       }
       existing.status = "working";
@@ -1050,6 +1078,41 @@ end tell
         this.telemetry.setIdleConfirmed(id, true);
         this.checkTransition(id, tty, "idle", `JSONL tail high-confidence idle (${existing.model || "claude"})`, tailCtx);
         return;
+      }
+
+      // Codex does not have Claude-style idle hooks. Its JSONL can stop changing
+      // while the hosted model is still thinking, which previously made the
+      // daemon flip green→red after only a few idle scans. Keep Codex green until
+      // task_complete (handled above) or until the session is genuinely stale.
+      if (existing.model === "codex" && existing.status === "working") {
+        const lastInput = this.telemetry.getLastInputSent(id);
+        const msSinceInput = lastInput > 0 ? Date.now() - lastInput : Number.POSITIVE_INFINITY;
+        const lastWorking = this.lastConfirmedWorking.get(id) || 0;
+        const msSinceWorking = lastWorking > 0 ? Date.now() - lastWorking : Number.POSITIVE_INFINITY;
+        const stillAwaitingTaskComplete =
+          ctx.fileAgeMs < CODEX_TASK_COMPLETE_GRACE_MS ||
+          msSinceInput < CODEX_TASK_COMPLETE_GRACE_MS ||
+          msSinceWorking < CODEX_TASK_COMPLETE_GRACE_MS;
+
+        if (stillAwaitingTaskComplete) {
+          const timingCtx = {
+            ...tailCtx,
+            msSinceInput: Number.isFinite(msSinceInput) ? Math.round(msSinceInput) : null,
+            msSinceWorking: Number.isFinite(msSinceWorking) ? Math.round(msSinceWorking) : null,
+          };
+          existing.status = "working";
+          existing.currentAction = ctx.latestAction || "Thinking...";
+          existing.lastAction = ctx.latestAction || existing.lastAction;
+          existing.lastActionAt = Date.now();
+          this.checkTransition(
+            id,
+            tty,
+            "working",
+            `Codex awaiting task_complete (${Math.round(ctx.fileAgeMs / 1000)}s since JSONL write)`,
+            timingCtx,
+          );
+          return;
+        }
       }
 
       // If already idle (e.g. hooks set it), don't override to working
