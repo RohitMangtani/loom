@@ -227,7 +227,8 @@ export function AgentCard({
   const [finishedPulse, setFinishedPulse] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const prevStatusRef = useRef(worker.status);
-  const color = dotColor(worker);
+  const completing = finishedPulse && worker.status === "idle";
+  const color = completing ? "green" : dotColor(worker);
   const stuck = color === "yellow";
   const buttons = stuck && !worker.promptType ? quickButtons(worker) : [];
   const idle = color === "red";
@@ -315,7 +316,7 @@ export function AgentCard({
           style={{ background: voiceActive ? "#f97316" : hasPrompt ? "#60a5fa" : flagged ? FLAG_COLOR : DOT_BG[color] }}
         />
         {color === "green" && !hasPrompt && (
-          <span className="shrink-0 opacity-60" title="Active chat">
+          <span className="shrink-0 opacity-60" title={completing ? "Done" : "Active chat"}>
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v7a1 1 0 01-1 1H6l-3 3V11H3a1 1 0 01-1-1V3z" fill="var(--dot-active)" fillOpacity="0.5" stroke="var(--dot-active)" strokeWidth="1" />
             </svg>
@@ -366,7 +367,7 @@ export function AgentCard({
           <p className={`text-[11px] leading-tight ${stuck ? "text-[#fbbf24] font-medium" : "text-[var(--text-muted)] truncate"}`}>
             {stuck && worker.stuckMessage
               ? <span className="line-clamp-2">{worker.stuckMessage.split("\n")[0].slice(0, 80)}</span>
-              : statusLabel(worker)}
+              : completing ? "Done" : statusLabel(worker)}
           </p>
 
           {!stuck && secondary && (
